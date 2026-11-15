@@ -39,7 +39,8 @@ function Label({ children, htmlFor, value }) {
 }
 
 // Large picture choices (a radiogroup). `cards` maps each option to its name, hint and icon.
-function ChoiceCards({ options, cards, value, onChange, ariaLabel }) {
+// `clearable`: clicking the picked card unpicks it (value '').
+function ChoiceCards({ options, cards, value, onChange, ariaLabel, clearable }) {
   const stop = tabStop(options.map((option) => option === value));
   return (
     <div className="sx-media-choices" role="radiogroup" aria-label={ariaLabel} onKeyDown={onRovingKeyDown}>
@@ -54,7 +55,7 @@ function ChoiceCards({ options, cards, value, onChange, ariaLabel }) {
             tabIndex={index === stop ? 0 : -1}
             className={`sx-media-choice ${option === value ? 'sx-selected' : ''}`}
             title={hint}
-            onClick={() => onChange(option)}
+            onClick={() => onChange(clearable && option === value ? '' : option)}
           >
             <Icon />
             <span className="sx-media-choice-name">{name}</span>
@@ -185,20 +186,24 @@ function Trim({ cfg, maxSourceDur }) {
   );
 }
 
-export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSourceDur }) {
+// `squareOnly`: every file is already square, so there is nothing to fill or stretch.
+export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSourceDur, squareOnly }) {
   const isVideo = cfg.kind === 'video';
-  const outpaint = !cfg.upscaleOnly;
+  const outpaint = !cfg.upscaleOnly && !squareOnly;
   const ltx = isVideo && outpaint && cfg.ltxPicked;
   const bytedance = isVideo && cfg.falPicked && cfg.falUpscale.includes('Bytedance');
   const seedvr = isVideo && cfg.falPicked && cfg.falUpscale.includes('SeedVR');
   return (
     <div className="sx-media-options">
-      <Step title="How">
-        <ChoiceCards options={MODES} cards={MODE_CARDS} value={cfg.mode} onChange={cfg.setMode} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />
-      </Step>
+      {squareOnly ? null : (
+        <Step title="How">
+          <ChoiceCards options={MODES} cards={MODE_CARDS} value={cfg.mode} onChange={cfg.setMode} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />
+        </Step>
+      )}
 
       <Step title="Quality">
-        <ChoiceCards options={cfg.engines} cards={ENGINE_CARDS} value={cfg.engine} onChange={cfg.setEngine} ariaLabel="Upscale Engine" />
+        <ChoiceCards options={cfg.engines} cards={ENGINE_CARDS} value={cfg.engine} onChange={cfg.setEngine} ariaLabel="Upscale Engine" clearable />
+        {cfg.noUpscale ? <p className="sx-studio-note">No upscale: the file keeps its own resolution. Pick a card to upscale to 2K.</p> : null}
         {isVideo && cfg.studioPicked && !studioOk ? (
           <AccentBlock
             title="STUDIO ENGINE UNAVAILABLE"
@@ -238,7 +243,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
           ) : null}
           {cfg.falPicked && !isVideo ? (
             <div className="sx-studio-field">
-              <Label>Sharpens to 4K</Label>
+              <Label>Sharpens to 2K</Label>
               <ModelCards
                 entries={cfg.upscaleOptions.map((label) => cfg.upscaleCatalog.find((entry) => entry.label === label) || { label, credit_enabled: label === 'Clarity Upscaler' })}
                 value={cfg.falModel}
@@ -249,7 +254,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
           ) : null}
           {cfg.falPicked && isVideo && cfg.upscaleCatalog.length ? (
             <div className="sx-studio-field">
-              <Label>Sharpens to 4K</Label>
+              <Label>Sharpens to 2K</Label>
               <ModelCards entries={cfg.upscaleCatalog} value={cfg.falUpscale} onChange={cfg.setFalUpscale} ariaLabel="FAL Upscale Model" />
             </div>
           ) : null}

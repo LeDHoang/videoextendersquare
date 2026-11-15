@@ -72,7 +72,7 @@ export default function MediaTile({ item, now, retention, progress, price, onOpe
         </button>
       ) : null}
       <div className="sx-media-marks">
-        <span className={`sx-media-badge ${stateTone}`}>
+        <span className={`sx-media-badge ${stateTone}`} title={stateLabel}>
           <Mark label={stateLabel}><StateIcon /></Mark>
           {price != null ? <span className="sx-media-price" title="Price to make this square">{price} cr</span> : null}
           {stateWord ? <span aria-hidden="true">{stateWord}</span> : null}
@@ -82,7 +82,7 @@ export default function MediaTile({ item, now, retention, progress, price, onOpe
         {unsaved ? <span className="sx-media-badge sx-danger"><Mark label="Not saved to the cloud. Download it now."><AlertIcon /></Mark></span> : null}
         {threeD ? <span className="sx-media-badge sx-accent"><Mark label="3D"><CubeIcon /></Mark></span> : null}
         <span className="sx-media-spacer" />
-        <span className="sx-media-chip">
+        <span className="sx-media-chip" title={`${item.kind === 'video' ? 'Video' : 'Image'} · ${saved ? 'Saved to the cloud' : 'On this device and server for a short time'}${left ? ' · ' + formatLeft(left.ms) : ''}`}>
           <Mark label={item.kind === 'video' ? 'Video' : 'Image'}><KindIcon className="sx-media-icon" /></Mark>
           <Mark label={saved ? 'Saved to the cloud' : 'On this device and server for a short time'}>{saved ? <CloudIcon /> : <DeviceIcon />}</Mark>
           {left ? <CountdownRing left={left} /> : null}

@@ -24,7 +24,7 @@ import { useAuth } from '../hooks/AuthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { FORMAT_FILTER_LABELS } from '../utils/mediaFormat.js';
 
-const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
+const CODEC_DEFAULT = 'HEVC 2K (Raw Master)';
 const CODEC_OPTS = [
   { label: FORMAT_FILTER_LABELS.hevc, value: CODEC_DEFAULT },
   { label: FORMAT_FILTER_LABELS.h264, value: 'H264 (Browser/VR)' },

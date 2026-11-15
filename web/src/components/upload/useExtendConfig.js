@@ -53,6 +53,8 @@ export function useImageExtendConfig(models) {
 
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
+  // No Quality card picked: made square at its own resolution, not upscaled to 2K.
+  const noUpscale = engine === '';
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falModel) || null;
   const upscaleModel = upscaleEntry?.model || FALLBACK_FAL_MODEL_IDS[falModel] || models.upscale_img;
   const outpaintModel = models.outpaint_img || STOCK_OUTPAINT_IMG;
@@ -74,11 +76,12 @@ export function useImageExtendConfig(models) {
     upscaleOnly,
     sharpening,
     falPicked,
+    noUpscale,
     upscaleModel,
     outpaintModel,
     customOutpaintArgs: outpaintCustom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, sharpening, falPicked, upscaleModel, outpaintModel, outpaintCustom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, sharpening, falPicked, noUpscale, upscaleModel, outpaintModel, outpaintCustom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
 
   const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? !outpaintCustom;
   const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? upscaleModel === 'fal-ai/clarity-upscaler';
@@ -94,6 +97,7 @@ export function useImageExtendConfig(models) {
     setOutArgs, setUpArgs,
     upscaleOnly,
     falPicked,
+    noUpscale,
     studioPicked: false,
     upscaleCatalog,
     upscaleOptions,
@@ -138,7 +142,7 @@ export function useVideoExtendConfig(models) {
   const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
   const [seedvrTarget, setSeedvrTarget] = useState('1080p');
-  const [btdRes, setBtdRes] = useState('4k');
+  const [btdRes, setBtdRes] = useState('2k');
   const [btdFps, setBtdFps] = useState('30fps');
   const [btdTier, setBtdTier] = useState('fast');
   const [btdPreset, setBtdPreset] = useState('general');
@@ -151,6 +155,8 @@ export function useVideoExtendConfig(models) {
 
   const upscaleOnly = mode === 'UPSCALE ONLY';
   const falPicked = engine === 'FAL AI';
+  // No Quality card picked: made square at its own resolution, not upscaled to 2K.
+  const noUpscale = engine === '';
   const studioPicked = engine === 'STUDIO';
   const outpaintEntry = outpaintCatalog.find((e) => e.label === outpaintOpt) || outpaintCatalog[0];
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
@@ -181,6 +187,7 @@ export function useVideoExtendConfig(models) {
     upscaleOnly,
     falPicked,
     studioPicked,
+    noUpscale,
     sharpening,
     outpaintModel,
     upscaleModel,
@@ -208,7 +215,7 @@ export function useVideoExtendConfig(models) {
     trimDuration: trimDur,
     customOutpaintArgs: outpaintEntry?.is_custom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, falPicked, studioPicked, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
 
   const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? CREDIT_VIDEO_OUTPAINT_MODELS.has(outpaintModel);
   const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? CREDIT_VIDEO_UPSCALE_MODELS.has(upscaleModel);
@@ -248,6 +255,7 @@ export function useVideoExtendConfig(models) {
     setOutArgs, setUpArgs,
     upscaleOnly,
     falPicked,
+    noUpscale,
     studioPicked,
     ltxPicked,
     loraPicked,

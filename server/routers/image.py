@@ -238,6 +238,10 @@ def start_image_process(
         rec = output.persist(worker_path, "image", job_id)
         rec["outpaint_url"] = outpaint_url
         rec["download_url"] = f"/api/image/jobs/{job_id}/download"
+        try:
+            rec["width"], rec["height"] = get_image_dimensions(rec["path"])
+        except Exception:
+            pass
         return rec
 
     upload_log.link_job(job_id, stage_id)

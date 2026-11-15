@@ -1,4 +1,4 @@
-# Running Square Extender 4K
+# Running Square Extender 2K
 
 Two stacks live side by side:
 

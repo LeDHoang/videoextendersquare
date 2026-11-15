@@ -7,6 +7,7 @@ becomes 3840x3840 pixels tagged 9:16, and players still show it portrait.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 
@@ -40,7 +41,26 @@ def test_portrait_source_comes_out_square_with_square_pixels(tmp_path, ext):
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=72x128",
                     "-frames:v", "1", str(src)], check=True)
     out = tmp_path / f"out.{ext}"
-    vf = video_worker.SQUARE_UPSCALE_VF.replace("3840:3840", "384:384")
+    vf = video_worker.SQUARE_UPSCALE_VF.replace("2048:2048", "384:384")
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vf", vf,
                     "-frames:v", "1", str(out)], check=True)
     assert _probe(out) == "384,384,1:1"
+
+
+def test_no_upscale_squares_to_the_longer_edge():
+    assert video_worker.native_square_side(720, 1280) == 1280
+    assert video_worker.native_square_side(720, 720) == 720
+    # Encoders need an even side.
+    assert video_worker.native_square_side(405, 721) == 722
+
+
+@needs_ffmpeg
+def test_no_upscale_image_keeps_its_own_resolution(tmp_path):
+    src = tmp_path / "in.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=72x128",
+                    "-frames:v", "1", str(src)], check=True)
+    _, out = image_worker.process_image(str(src), "", upscale_only=True, upscale_engine="none")
+    try:
+        assert _probe(out) == "128,128,1:1"
+    finally:
+        os.unlink(out)

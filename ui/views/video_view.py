@@ -58,7 +58,7 @@ def render(ctx: dict) -> None:
     blocked = H.blockers(probes, need_video=True)
     studio_ok = H.studio_available(probes)
 
-    C.hero("Square Extender 4K", "VIDEO · 1:1 · 3840×3840 · OUTPAINT + UPSCALE")
+    C.hero("Square Extender 2K", "VIDEO · 1:1 · 3840×3840 · OUTPAINT + UPSCALE")
 
     if blocked:
         C.blocking_banner(

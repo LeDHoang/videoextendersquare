@@ -23,10 +23,23 @@ from pipeline.utils import (
     attach_civitai_token,
 )
 
-# Final 4K square scale. setsar=1 makes the pixels square too: scale alone
+# Final 2K square scale. setsar=1 makes the pixels square too: scale alone
 # records a stretched source's old shape as the sample aspect ratio, so a
-# 720x1280 clip came out 3840x3840 tagged 9:16 and played portrait.
-SQUARE_UPSCALE_VF = "scale=3840:3840:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,setsar=1"
+# 720x1280 clip came out square but tagged 9:16 and played portrait.
+def square_scale_vf(side: int) -> str:
+    """The ffmpeg filter that makes a frame side x side with square pixels."""
+    return f"scale={side}:{side}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,setsar=1"
+
+
+# Side of the square master every upscale engine delivers (2K).
+MASTER_SIDE = 2048
+SQUARE_UPSCALE_VF = square_scale_vf(MASTER_SIDE)
+
+
+def native_square_side(width: int, height: int) -> int:
+    """Side of the square a frame becomes with no upscale: its longer edge, made even for the encoders."""
+    side = max(int(width), int(height))
+    return side + side % 2
 
 def extract_video_url(result):
     """
@@ -102,7 +115,7 @@ def poll_job_status(
     return result
 
 
-def _is_already_square(path: str, target: int = 3840) -> bool:
+def _is_already_square(path: str, target: int = MASTER_SIDE) -> bool:
     """True if *path* already probes as target x target (skip a no-op scale)."""
     try:
         w, h, _ = get_video_dimensions_and_duration(path)
@@ -130,8 +143,8 @@ def _within_bitrate_cap(path: str) -> bool:
     return bitrate is not None and bitrate <= STREAM_COPY_MAX_BITRATE
 
 
-def _master_can_stream_copy(path: str, sharpening: float, target: int = 3840) -> bool:
-    """True if *path* is already the deliverable 4K-square HEVC master, so the
+def _master_can_stream_copy(path: str, sharpening: float, target: int = MASTER_SIDE) -> bool:
+    """True if *path* is already the deliverable 2K-square HEVC master, so the
     final encode can be replaced by a lossless stream copy.
 
     All of these must hold or a re-encode is still needed: already target
@@ -160,7 +173,7 @@ def process_video(
 ):
     """
     Asynchronously processes a local video file: outpainting it to a 1:1 square aspect ratio
-    and then upscaling the result to 4K.
+    and then upscaling the result to 2K.
 
     Thin wrapper around _process_video_impl that guarantees any intermediate
     temp file created before a failure is cleaned up — the impl's own
@@ -504,7 +517,7 @@ def _process_video_impl(
         elif "bytedance" in upscale_lower:
             arguments = {
                 "video_url": video_url_to_upscale,
-                "target_resolution": kwargs.get("bytedance_target_res", "4k"),
+                "target_resolution": kwargs.get("bytedance_target_res", "2k"),
                 "target_fps": kwargs.get("bytedance_target_fps", "30fps"),
                 "enhancement_preset": kwargs.get("bytedance_preset", "general"),
                 "enhancement_tier": kwargs.get("bytedance_tier", "fast"),
@@ -512,7 +525,7 @@ def _process_video_impl(
             }
             _, upscale_cost = _models.estimate_upscale_cost(
                 upscale_model, duration=duration,
-                bytedance_res=kwargs.get("bytedance_target_res", "4k"),
+                bytedance_res=kwargs.get("bytedance_target_res", "2k"),
                 bytedance_fps=kwargs.get("bytedance_target_fps", "30fps"),
                 bytedance_tier=kwargs.get("bytedance_tier", "fast"),
             )
@@ -584,11 +597,11 @@ def _process_video_impl(
                 "-c:v", encoder
             ] + encoder_opts + [output_video_path]
 
-        # If the fal result is already the deliverable 4K-square HEVC master,
+        # If the fal result is already the deliverable 2K-square HEVC master,
         # a lossless stream copy replaces the redundant re-encode entirely.
         if _master_can_stream_copy(temp_fal_vid, sharpening):
             if status_callback:
-                status_callback("FAL result is already 4K-square HEVC — stream-copying master (no re-encode).")
+                status_callback("FAL result is already 2K-square HEVC — stream-copying master (no re-encode).")
             copy_cmd = ["ffmpeg", "-y", "-i", temp_fal_vid]
             if audio_src and audio_src != temp_fal_vid:
                 copy_cmd += ["-i", audio_src,
@@ -638,7 +651,7 @@ core = vs.core
 abs_video_path = r'{os.path.abspath(temp_outpaint_path)}'
 clip = core.ffms2.Source(abs_video_path)
 clip = core.znedi3.nnedi3(clip, field=1, dh=True, nsize=0, nns=3, qual=2, pscrn=2)
-clip = core.resize.Spline36(clip, width=3840, height=3840)
+clip = core.resize.Spline36(clip, width={MASTER_SIDE}, height={MASTER_SIDE})
 clip.set_output()
 ''')
 
@@ -705,10 +718,18 @@ clip.set_output()
                 os.unlink(stderr_log_path)
         upscale_time = time.time() - t_up_stage_start
     else:
+        # "none" keeps the frame's own resolution: square it, do not upscale to 2K.
+        target = MASTER_SIDE
+        if upscale_engine == "none":
+            src_w, src_h, _ = get_video_dimensions_and_duration(temp_outpaint_path)
+            target = native_square_side(src_w, src_h)
         if status_callback:
-            status_callback("Performing hardware-accelerated 4K upscale via FFmpeg...")
+            status_callback(
+                f"Encoding the {target}x{target} square master with no upscale..." if upscale_engine == "none"
+                else "Performing hardware-accelerated 2K upscale via FFmpeg..."
+            )
 
-        vf_parts = [] if _is_already_square(temp_outpaint_path) else [SQUARE_UPSCALE_VF]
+        vf_parts = [] if _is_already_square(temp_outpaint_path, target) else [square_scale_vf(target)]
         if sharpening > 0.0:
             vf_parts.append(f"cas={sharpening}")
         vf_filter = ",".join(vf_parts)
@@ -742,11 +763,11 @@ clip.set_output()
                 "-c:v", encoder
             ] + encoder_opts + [output_video_path]
 
-        # If the source is already the deliverable 4K-square HEVC master, a
+        # If the source is already the deliverable 2K-square HEVC master, a
         # lossless stream copy replaces the redundant re-encode.
-        if _master_can_stream_copy(temp_outpaint_path, sharpening):
+        if _master_can_stream_copy(temp_outpaint_path, sharpening, target):
             if status_callback:
-                status_callback("Source is already 4K-square HEVC — stream-copying master (no re-encode).")
+                status_callback("Source is already 2K-square HEVC — stream-copying master (no re-encode).")
             copy_cmd = ["ffmpeg", "-y", "-i", temp_outpaint_path]
             if audio_src and audio_src != temp_outpaint_path:
                 copy_cmd += ["-i", audio_src,

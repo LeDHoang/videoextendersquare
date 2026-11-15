@@ -1,4 +1,4 @@
-# Square Extender 4K — Full-Stack Migration
+# Square Extender 2K — Full-Stack Migration
 
 Migrate from Streamlit monolith to **FastAPI backend + Vite React frontend** while preserving the editorial design language, all pipeline functionality, and Streamlit as a fallback.
 

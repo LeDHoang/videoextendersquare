@@ -6,7 +6,7 @@ from PIL import Image
 from core import models as _models
 from core.pricing import image_work_dimensions
 from pipeline.utils import get_image_dimensions, calculate_square_padding, fetch_fal_result
-from pipeline.video_worker import SQUARE_UPSCALE_VF, poll_job_status
+from pipeline.video_worker import SQUARE_UPSCALE_VF, native_square_side, poll_job_status, square_scale_vf
 
 def extract_image_url(result):
     """
@@ -43,7 +43,8 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
         status_callback: Optional status updates callback.
         upscale_only: If True, skips outpainting and only scales the original image.
         sharpening: Contrast Adaptive Sharpening (CAS) strength (0.0 to 1.0).
-        upscale_engine: "fast" (FFmpeg Lanczos+CAS) or "fal" (fal.ai Cloud Upscaler).
+        upscale_engine: "fast" (FFmpeg Lanczos+CAS), "fal" (fal.ai Cloud Upscaler) or
+            "none" (made square at its own resolution, no upscale).
         upscale_model: Model ID to use for fal.ai upscaling.
 
     Returns:
@@ -147,7 +148,7 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
 
         # Determine output location
         uid = uuid.uuid4().hex[:8]
-        output_image_path = os.path.join(tempfile.gettempdir(), f"delivery_4k_square_{uid}.png")
+        output_image_path = os.path.join(tempfile.gettempdir(), f"delivery_2k_square_{uid}.png")
         if os.path.exists(output_image_path):
             os.unlink(output_image_path)
 
@@ -188,13 +189,15 @@ def process_image(image_source, prompt, fal_key=None, status_callback=None, upsc
 
         if status_callback:
             if upscale_engine == "fal":
-                status_callback("Finalizing 4K square output via FFmpeg...")
+                status_callback("Finalizing 2K square output via FFmpeg...")
             else:
                 status_callback("Performing local high-quality Lanczos4 upscale via FFmpeg...")
 
         import subprocess
         # Use FFmpeg to scale the image using Lanczos and optional CAS sharpening
         vf_filter = SQUARE_UPSCALE_VF
+        if upscale_engine == "none":
+            vf_filter = square_scale_vf(native_square_side(*get_image_dimensions(temp_outpaint_path)))
         if sharpening > 0.0:
             vf_filter += f",cas={sharpening}"
 

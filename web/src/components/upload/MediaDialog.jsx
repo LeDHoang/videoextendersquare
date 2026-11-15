@@ -5,13 +5,15 @@ import Progress from '../ui/Progress.jsx';
 import { CancelJobButton } from '../ui/JobRunner.jsx';
 import { Button, ToggleRow } from '../ui/controls.jsx';
 import { STEREO_LABELS, stereoEyeSize } from '../../utils/mediaFormat.js';
-import { CloseIcon, CubeIcon, DownloadIcon, RedoIcon, SendIcon, SquareIcon } from '../icons/index.jsx';
+import { CheckIcon, CloseIcon, CubeIcon, DownloadIcon, RedoIcon, SendIcon, SquareIcon, StackIcon } from '../icons/index.jsx';
 import StudioStage from './StudioStage.jsx';
 import PostForm from './PostForm.jsx';
-import { metaStereoCandidate, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
+import { isSquareMeta, metaStereoCandidate, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
+import { MASTER_SIDE } from './stageGeometry.js';
+import { onRovingKeyDown } from '../ui/roving.js';
 
 // A result made elsewhere has no upload here; its stage is the square master.
-const MASTER_META = { width: 3840, height: 3840, orientation: 'SQUARE' };
+const MASTER_META = { width: MASTER_SIDE, height: MASTER_SIDE, orientation: 'SQUARE' };
 
 // Detection result + 3D switch for an exact 2:1 / 1:2 upload.
 function StereoChoice({ item, onToggle }) {
@@ -104,6 +106,7 @@ export default function MediaDialog({
       name: item.name,
       kind: item.kind,
       meta: item.meta || MASTER_META,
+      sourceKnown: !!item.meta,
       url: group && made ? made.preview_url || made.download_url : item.url || item.thumb,
       result: group ? null : result,
     };
@@ -111,6 +114,15 @@ export default function MediaDialog({
   const posted = cover.posted;
   const stereoChoice = !group && !posted && cover.live && !render && metaStereoCandidate(cover.meta);
   const title = group ? `${items.length} images, one post` : cover.name;
+  // A square upload can be posted as it is or upscaled first.
+  const squareChoice = !group && !posted && !render && !stereo && isSquareMeta(cover.meta) && (onRedo || onRedoBack);
+  // The size the file will come out at with the current options.
+  const nativeSide = cover.meta ? Math.max(cover.meta.width, cover.meta.height) + (Math.max(cover.meta.width, cover.meta.height) % 2) : null;
+  const targetLabel = !(makeMode || working)
+    ? null
+    : !cfg.noUpscale
+      ? `${MASTER_SIDE}×${MASTER_SIDE}`
+      : nativeSide && (cfg.upscaleOnly || isSquareMeta(cover.meta)) ? `${nativeSide}×${nativeSide}` : null;
 
   return (
     <Dialog className="sx-modal-backdrop" aria-label={title} onClose={onClose} busy={publishing}>
@@ -136,6 +148,7 @@ export default function MediaDialog({
             extendPath={makeMode || !!render}
             stereo={stereo}
             upscaleOnly={cfg.upscaleOnly}
+            targetLabel={targetLabel}
             outpaintActive={!cfg.upscaleOnly}
             trim={cover.kind === 'video' ? { enabled: cfg.trimEnabled, start: cfg.trimStart, dur: cfg.trimDur } : null}
             onMoveGalleryItem={onMove}
@@ -144,6 +157,28 @@ export default function MediaDialog({
           />
           <div className="sx-media-side">
             {stereoChoice ? <StereoChoice item={cover} onToggle={onStereo} /> : null}
+            {squareChoice ? (
+              <div className="sx-media-choices" role="radiogroup" aria-label="Square file" onKeyDown={onRovingKeyDown}>
+                {[
+                  ['Keep as is', 'Post the file at its own resolution', CheckIcon, !makeMode, onRedoBack],
+                  ['Upscale', 'Upscale it to 2K before posting', StackIcon, makeMode, onRedo],
+                ].map(([name, hint, Icon, picked, pick]) => (
+                  <button
+                    type="button"
+                    key={name}
+                    role="radio"
+                    aria-checked={picked}
+                    tabIndex={picked ? 0 : -1}
+                    className={`sx-media-choice ${picked ? 'sx-selected' : ''}`}
+                    title={hint}
+                    onClick={picked ? undefined : pick}
+                  >
+                    <Icon />
+                    <span className="sx-media-choice-name">{name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
             {posted ? (
               <>
@@ -163,7 +198,7 @@ export default function MediaDialog({
               </>
             ) : makeMode ? (
               <>
-                {onRedoBack ? <Button onClick={onRedoBack}>‹ BACK TO POST</Button> : null}
+                {onRedoBack && !squareChoice ? <Button onClick={onRedoBack}>‹ BACK TO POST</Button> : null}
                 {options}
               </>
             ) : working ? (
@@ -176,11 +211,11 @@ export default function MediaDialog({
                 {!group ? (
                   <div className="sx-media-actions" role="group" aria-label="File actions">
                     {result ? (
-                      <IconButton as="a" href={result.download_url} download label={convert?.status === 'ready' ? 'Download the 3D file' : 'Download the 4K square'}>
+                      <IconButton as="a" href={result.download_url} download label={convert?.status === 'ready' ? 'Download the 3D file' : 'Download the 2K square'}>
                         <DownloadIcon />
                       </IconButton>
                     ) : null}
-                    {onRedo ? <IconButton label="Make square again" onClick={onRedo}><RedoIcon /></IconButton> : null}
+                    {onRedo && !squareChoice ? <IconButton label="Make square again" onClick={onRedo}><RedoIcon /></IconButton> : null}
                     {canConvert && !convert ? (
                       <IconButton label="Make 3D" title="Make 3D: a side-by-side pair for VR. No credits. Videos up to 60 s." onClick={onConvert} disabled={convertBusy}>
                         <CubeIcon />

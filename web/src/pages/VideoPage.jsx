@@ -70,7 +70,7 @@ export default function VideoPage() {
   const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
   const [seedvrTarget, setSeedvrTarget] = useState('1080p');
-  const [btdRes, setBtdRes] = useState('4k');
+  const [btdRes, setBtdRes] = useState('2k');
   const [btdFps, setBtdFps] = useState('30fps');
   const [btdTier, setBtdTier] = useState('fast');
   const [btdPreset, setBtdPreset] = useState('general');
@@ -263,7 +263,7 @@ export default function VideoPage() {
 
   return (
     <div>
-      <Hero title="VIDEO EXTENDER" kicker="ECHO · 1:1 SQUARE · 3840×3840 · OUTPAINT + UPSCALE · HEVC MASTER" />
+      <Hero title="VIDEO EXTENDER" kicker="ECHO · 1:1 SQUARE · 2048×2048 · OUTPAINT + UPSCALE · HEVC MASTER" />
 
       {blocked.length ? (
         <BlockingBanner
@@ -285,7 +285,7 @@ export default function VideoPage() {
               cells={[
                 ['SOURCE', `${items[0].width}×${items[0].height}`, `${items[0].orientation} · ${fmtBytes(items[0].size_bytes)}`],
                 ['DURATION', `${items[0].duration}s`, 'ORIGINAL CLIP'],
-                ['TARGET', '3840×3840', '1:1 SQUARE MASTER'],
+                ['TARGET', '2048×2048', '1:1 SQUARE MASTER'],
                 ['OUTPAINT PAD', `L: ${items[0].padding.left}px  R: ${items[0].padding.right}px`, `T: ${items[0].padding.top}px  B: ${items[0].padding.bottom}px`],
               ]}
             />
@@ -306,7 +306,7 @@ export default function VideoPage() {
               cells={[
                 ['BATCH SIZE', `${items.length} VIDEOS`, fmtBytes(items.reduce((a, b) => a + b.size_bytes, 0))],
                 ['TOTAL DURATION', `${totalDur.toFixed(1)}s`, `Avg ${(totalDur / items.length).toFixed(1)}s per clip`],
-                ['TARGET RESOLUTION', '3840×3840 EACH', '1:1 SQUARE HEVC'],
+                ['TARGET RESOLUTION', '2048×2048 EACH', '1:1 SQUARE HEVC'],
                 ['PARALLEL QUEUE', 'CPU MANAGED', 'AUTO-SCALED'],
               ]}
             />
@@ -637,7 +637,7 @@ export default function VideoPage() {
                 loading={busy}
                 onClick={render}
               >
-                {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}VIDEO(S) 4K SQUARE`}
+                {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}VIDEO(S) 2K SQUARE`}
               </Button>
             </div>
 
@@ -656,7 +656,7 @@ export default function VideoPage() {
           {jobs.map((j) => (
             <JobRunner key={j.jobId} jobId={j.jobId} name={j.name} kind="video" onSettled={() => refreshWallet({ silent: true })} />
           ))}
-          <ResultHeader title="RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · HEVC 4K MASTER`} />
+          <ResultHeader title="RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 2048×2048 · HEVC 2K MASTER`} />
         </Section>
       ) : null}
     </div>

@@ -28,7 +28,7 @@ def test_every_hevc_candidate_is_capped_at_26_mbps():
 
 @pytest.fixture
 def square_hevc(monkeypatch):
-    monkeypatch.setattr(video_worker, "_is_already_square", lambda path, target=3840: True)
+    monkeypatch.setattr(video_worker, "_is_already_square", lambda path, target=2048: True)
     monkeypatch.setattr(video_worker, "get_video_codec", lambda path: "hevc")
     state = {"bitrate": 20_000_000}
     monkeypatch.setattr(video_worker, "get_video_bitrate", lambda path: state["bitrate"])

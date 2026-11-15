@@ -66,7 +66,7 @@ def video_parameters(raw: Mapping[str, Any]) -> dict[str, Any]:
         "luma_resolution": _text(raw.get("luma_resolution"), "720p"),
         "seedvr_factor": _float(raw.get("seedvr_factor"), 2.0),
         "seedvr_target": _text(raw.get("seedvr_target"), "1080p"),
-        "bytedance_target_res": _text(raw.get("bytedance_target_res"), "4k"),
+        "bytedance_target_res": _text(raw.get("bytedance_target_res"), "2k"),
         "bytedance_target_fps": _text(raw.get("bytedance_target_fps"), "30fps"),
         "bytedance_tier": _text(raw.get("bytedance_tier"), "fast"),
         "bytedance_preset": _text(raw.get("bytedance_preset"), "general"),

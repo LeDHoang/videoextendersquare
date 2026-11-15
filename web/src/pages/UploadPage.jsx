@@ -21,7 +21,7 @@ import MediaTile from '../components/upload/MediaTile.jsx';
 import MediaDialog from '../components/upload/MediaDialog.jsx';
 import OptionsPanel from '../components/upload/OptionsPanel.jsx';
 import {
-  ACCEPT, groupProblem, kindOf, postSource, publishBody, shelfOf, sortItems, spatialOf, spatialSource, stagedItem, stereoOf,
+  ACCEPT, groupProblem, isSquareMeta, kindOf, postSource, publishBody, shelfOf, sortItems, spatialOf, spatialSource, stagedItem, stereoOf,
 } from '../components/upload/mediaItems.js';
 
 // Upload: the person's media, grouped by what each file needs next. Files that
@@ -105,6 +105,9 @@ export default function UploadPage() {
   const studioBlocked = targetKinds.includes('video') && cfgs.video.studioPicked && !studioOk;
   const fundingBlocked = targetKinds.some((kind) => fundings[kind].fundingBlocked);
   const quoteStale = targetKinds.some((kind) => fundings[kind].quoteStale);
+  // Already-square files have nothing to fill or stretch; with no upscale (and no trim) nothing would change.
+  const squareOnly = targets.length > 0 && targets.every((item) => isSquareMeta(item.meta));
+  const nothingToDo = squareOnly && targets.every((item) => cfgs[item.kind].noUpscale && !(item.kind === 'video' && cfgs.video.trimEnabled));
 
   // ── Adding files ──
   const onFiles = async (files) => {
@@ -311,17 +314,18 @@ export default function UploadPage() {
   };
 
   // ── Options and the Make button ──
-  const makeLabel = `${quoteStale ? 'Retry quote & make' : 'Make'} ${targets.length > 1 ? `${targets.length} ` : ''}square${totalCredits ? ` · ${totalCredits} credits` : ''}`;
+  const makeLabel = `${quoteStale ? 'Retry quote & ' : ''}${squareOnly ? (quoteStale ? 'upscale' : 'Upscale') : `${quoteStale ? 'make' : 'Make'} ${targets.length > 1 ? `${targets.length} ` : ''}square`}${totalCredits ? ` · ${totalCredits} credits` : ''}`;
   const makeButton = (
     <Button
       variant="primary"
       className="sx-studio-render"
-      disabled={blocked.length > 0 || fundingBlocked || studioBlocked || makeBusy || !targets.length}
+      disabled={blocked.length > 0 || fundingBlocked || studioBlocked || makeBusy || !targets.length || nothingToDo}
       disabledReasons={[
         blocked.length && blocked[0].label + ' UNAVAILABLE — CHECK SYSTEM PROBES',
         !blocked.length && studioBlocked && 'STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI',
         !blocked.length && !studioBlocked && fundingBlocked && 'CHOOSE HOW TO PAY IN OPTIONS',
         !targets.length && 'TICK THE FILES TO MAKE SQUARE',
+        nothingToDo && 'PICK A QUALITY TO UPSCALE, OR KEEP THE FILE AS IT IS',
       ]}
       loading={makeBusy}
       onClick={makeSquare}
@@ -342,6 +346,7 @@ export default function UploadPage() {
         funding={{ ...fundings[kind], setPaymentSource }}
         probes={probes}
         studioOk={studioOk}
+        squareOnly={squareOnly}
         maxSourceDur={Math.max(0, ...targets.filter((item) => item.kind === 'video').map((item) => item.meta?.duration || 0)) || 60}
       />
       {makeButton}

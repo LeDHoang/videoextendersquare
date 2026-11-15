@@ -151,7 +151,7 @@ async function pick(names) {
 }
 
 const radio = (group, name) => within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name });
-const renderButton = () => screen.getByRole('button', { name: /^(Make|Retry quote & make) .*square/ });
+const renderButton = () => screen.getByRole('button', { name: /^(Make|Retry quote & make) .*square|^(Upscale|Retry quote & upscale)/ });
 const postButton = () => screen.getByRole('button', { name: 'POST' });
 const button = (name) => screen.getByRole('button', { name });
 const MINE = { items: [], stages: [], retention: { stage_seconds: 6 * 3600, result_seconds: 30 * 86400 } };
@@ -189,7 +189,7 @@ describe('UploadPage — video extender parity', () => {
   it('maps a portrait clip onto the square stage with its outpaint bands', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    expect(await screen.findByText('1080×1920 ➔ 3840×3840')).toBeInTheDocument();
+    expect(await screen.findByText('1080×1920 ➔ 2048×2048')).toBeInTheDocument();
     expect(screen.queryByText('PAD: 420px [L/R]')).toBeNull();
     expect(screen.getAllByText('+420px OUTPAINT')).toHaveLength(2);
     // The stage stays uncluttered: no zone names, telemetry box or spec grid.
@@ -213,7 +213,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v1' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
+    await screen.findByText('1080×1920 ➔ 2048×2048');
 
     fireEvent.click(radio('Outpaint Model', /LTX 2\.3 Quality \+ LoRA/));
     const addLora = () => fireEvent.click(screen.getByRole('button', { name: '+ ADD LoRA' }));
@@ -268,7 +268,7 @@ describe('UploadPage — video extender parity', () => {
       wanResolution: '720p',
       seedvrFactor: 3,
       seedvrTarget: '2160p',
-      bytedanceTargetRes: '4k',
+      bytedanceTargetRes: '2k',
       bytedanceTargetFps: '30fps',
       bytedanceTier: 'fast',
       bytedancePreset: 'general',
@@ -286,7 +286,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v2' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
+    await screen.findByText('1080×1920 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     const group = screen.getByRole('group', { name: 'Bytedance upscaler settings' });
     fireEvent.change(within(group).getByLabelText('TARGET RESOLUTION'), { target: { value: '2k' } });
@@ -330,7 +330,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, vapoursynth: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
+    await screen.findByText('1080×1920 ➔ 2048×2048');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeInTheDocument();
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
@@ -346,7 +346,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, ffms2: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
+    await screen.findByText('1080×1920 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
@@ -356,7 +356,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, cas: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
+    await screen.findByText('1080×1920 ➔ 2048×2048');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeDisabled();
     expect(screen.getByText('CAS FILTER UNAVAILABLE — SHARPENING WILL BE SKIPPED')).toBeInTheDocument();
   });
@@ -372,7 +372,7 @@ describe('UploadPage — video extender parity', () => {
     };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
+    await screen.findByText('1080×1920 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     expect(radio('FAL Upscale Model', /CUSTOM \(my-upscaler\)/)).toHaveAttribute('aria-checked', 'true');
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
@@ -385,7 +385,7 @@ describe('UploadPage — image extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i1' });
     renderPage();
     await pick(['wide.png']);
-    expect(await screen.findByText('1600×900 ➔ 3840×3840')).toBeInTheDocument();
+    expect(await screen.findByText('1600×900 ➔ 2048×2048')).toBeInTheDocument();
     expect(screen.queryByText('PAD: 350px [T/B]')).toBeNull();
     const engines = within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio').map((node) => node.textContent.trim());
     expect(engines).toEqual(['Fast', 'Cloud AI']);
@@ -419,7 +419,7 @@ describe('UploadPage — image extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i2' });
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('1600×900 ➔ 3840×3840');
+    await screen.findByText('1600×900 ➔ 2048×2048');
     fireEvent.click(radio('Pipeline Mode', 'Stretch to fit'));
     expect(screen.getByText('UPSCALE ONLY · STRETCHED TO 1:1')).toBeInTheDocument();
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
@@ -442,7 +442,7 @@ describe('UploadPage — image extender parity', () => {
     mocks.models = { ...MODELS, outpaint_img: 'me/my-outpaint' };
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('1600×900 ➔ 3840×3840');
+    await screen.findByText('1600×900 ➔ 2048×2048');
     expect(screen.getAllByText(/CUSTOM OUTPAINT \(my-outpaint\)|CUSTOM \(my-outpaint\)/).length).toBeGreaterThan(0);
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
   });
@@ -470,15 +470,15 @@ describe('UploadPage — image extender parity', () => {
   it('keeps each kind\'s settings when another file is staged', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
+    await screen.findByText('1080×1920 ➔ 2048×2048');
     fireEvent.change(screen.getByLabelText('OUTPAINT EXTENSION PROMPT'), { target: { value: 'video prompt' } });
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     await pick(['wide.png']);
-    await screen.findByText('1600×900 ➔ 3840×3840');
+    await screen.findByText('1600×900 ➔ 2048×2048');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue(IMG_PROMPT_DEFAULT);
     expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'true');
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
+    await screen.findByText('1080×1920 ➔ 2048×2048');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue('video prompt');
     expect(radio('Upscale Engine', 'Studio')).toHaveAttribute('aria-checked', 'true');
   });
@@ -511,13 +511,47 @@ describe('UploadPage — posting', () => {
     expect(postButton()).toHaveAccessibleDescription('A TITLE IS NEEDED TO POST');
   });
 
+  it('offers a square video to be kept as it is or upscaled, with the real output size', async () => {
+    renderPage();
+    await pick(['square.mp4']);
+    await screen.findByText('ALREADY 1:1');
+    expect(radio('Square file', 'Keep as is')).toHaveAttribute('aria-checked', 'true');
+    // Kept as it is: no target size is promised.
+    expect(screen.getByText('480×480')).toBeInTheDocument();
+    fireEvent.click(radio('Square file', 'Upscale'));
+    expect(screen.getByText('480×480 ➔ 2048×2048')).toBeInTheDocument();
+    // Nothing to fill or stretch on a square file.
+    expect(screen.queryByRole('radiogroup', { name: 'Video Pipeline Mode' })).toBeNull();
+    // Unpicking the quality leaves nothing to do.
+    fireEvent.click(radio('Upscale Engine', 'Fast'));
+    expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'false');
+    expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
+    expect(renderButton()).toHaveAccessibleDescription('PICK A QUALITY TO UPSCALE, OR KEEP THE FILE AS IT IS');
+    fireEvent.click(radio('Square file', 'Keep as is'));
+    expect(screen.getByLabelText('TITLE')).toHaveValue('square');
+  });
+
+  it('makes a clip square with no upscale when the quality is unpicked', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-none' });
+    renderPage();
+    await pick(['portrait.mp4']);
+    await screen.findByText('1080×1920 ➔ 2048×2048');
+    fireEvent.click(radio('Upscale Engine', 'Fast'));
+    expect(screen.getByText('1080×1920')).toBeInTheDocument();
+    fireEvent.click(radio('Video Pipeline Mode', 'Stretch to fit'));
+    expect(screen.getByText('1080×1920 ➔ 1920×1920')).toBeInTheDocument();
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ upscale_engine: 'none', upscale_only: 'true' });
+  });
+
   it('makes a square image square again, shows the result on the stage, then posts the result', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-sq' });
     mocks.post.mockResolvedValue({ meta: { title: 'square' }, rel_path: 'uploads/x.png', media_url: '/m' });
     renderPage();
     await pick(['square.png']);
     await screen.findByText('ALREADY 1:1');
-    fireEvent.click(button('Make square again'));
+    fireEvent.click(radio('Square file', 'Upscale'));
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
@@ -528,7 +562,7 @@ describe('UploadPage — posting', () => {
     expect(radio('Stage view', 'EXTENDED')).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(radio('Stage view', 'ORIGINAL'));
     expect(screen.getByAltText('square.png')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Download the 4K square' })).toHaveAttribute('href', '/api/jobs/job-sq/download');
+    expect(screen.getByRole('link', { name: 'Download the 2K square' })).toHaveAttribute('href', '/api/jobs/job-sq/download');
     fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', job_id: 'job-sq' });

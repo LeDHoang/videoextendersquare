@@ -50,7 +50,7 @@ export function CancelJobButton({ jobId, kind }) {
 // onSettled(job) fires once on any terminal state (complete, failed, cancelled).
 // showMedia={false} keeps the status + downloads but leaves the rendered
 // media to the caller (the Upload Studio shows it on its stage).
-// doneLabel / downloadLabel name a job that is not a 4K square render.
+// doneLabel / downloadLabel name a job that is not a 2K square render.
 export default function JobRunner({
   jobId,
   name,
@@ -58,8 +58,8 @@ export default function JobRunner({
   onDone,
   onSettled,
   showMedia = true,
-  doneLabel = '✓ 4K SQUARE COMPLETE',
-  downloadLabel = '↓ DOWNLOAD 4K MASTER',
+  doneLabel = '✓ 2K SQUARE COMPLETE',
+  downloadLabel = '↓ DOWNLOAD 2K MASTER',
 }) {
   const { job, error } = useSSE(`/api/${kind}/jobs/${jobId}/stream`);
   const doneRef = useRef(false);
@@ -129,7 +129,7 @@ export default function JobRunner({
             />
             {!job.result.preview_url ? (
               <div className="sx-gated-reason" style={{ marginTop: 8 }}>
-                ℹ HEVC MASTER (4K 1:1) — Browser preview requires an H.264 proxy; download to view in native VR/media player.
+                ℹ HEVC MASTER (2K 1:1) — Browser preview requires an H.264 proxy; download to view in native VR/media player.
               </div>
             ) : null}
           </div>

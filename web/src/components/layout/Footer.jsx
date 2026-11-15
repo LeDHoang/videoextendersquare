@@ -5,7 +5,7 @@ export default function Footer() {
   return (
     <footer className="sx-footer">
       <div className="sx-footer-inner">
-        <NavLink to="/reels" className="sx-footer-brand" title="ECHO 4K Engine">
+        <NavLink to="/reels" className="sx-footer-brand" title="ECHO 2K Engine">
           <AnimatedEchoLogo className="sx-footer-logo" />
           <span className="sx-wordmark" data-echo="ECHO">ECHO</span>
         </NavLink>

@@ -43,7 +43,7 @@ STAGE_TTL_S = 6 * 3600
 # Fields the worker branches on by exact string match (server/pipeline/video_worker.py) —
 # an unrecognized value doesn't error there, it silently falls through to a
 # default branch, so reject anything outside the known set up front instead.
-_UPSCALE_ENGINES = {"fast", "fal", "studio"}
+_UPSCALE_ENGINES = {"fast", "fal", "studio", "none"}
 _LTX_RESOLUTIONS = {"480p", "720p", "1080p"}
 _LTX_TRANSFORMERS = {"high", "low", "both"}
 _SEEDVR_TARGETS = {"720p", "1080p", "2160p"}
@@ -211,7 +211,7 @@ def start_video_process(
     luma_resolution: str = Form("720p"),
     seedvr_factor: float = Form(2.0),
     seedvr_target: str = Form("1080p"),
-    bytedance_target_res: str = Form("4k"),
+    bytedance_target_res: str = Form("2k"),
     bytedance_target_fps: str = Form("30fps"),
     bytedance_tier: str = Form("fast"),
     bytedance_preset: str = Form("general"),
@@ -414,6 +414,10 @@ def start_video_process(
             pass
 
         rec["download_url"] = f"/api/video/jobs/{job_id}/download"
+        try:
+            rec["width"], rec["height"], _ = get_video_dimensions_and_duration(rec["path"])
+        except Exception:
+            pass
         return rec
 
     upload_log.link_job(job_id, stage_id)
