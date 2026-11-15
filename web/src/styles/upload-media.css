@@ -12,38 +12,47 @@
   display: flex;
   align-items: center;
   gap: var(--sx-2);
+  /* Sit close under the page title's rule: the column gap alone leaves dead space above the tabs. */
+  margin-top: calc(-1 * var(--sx-3));
   border-bottom: 1px solid var(--sx-ink);
 }
 
+/* Same pills as the Explore content-type tabs (.sx-xh-tab in editorial.css). */
 .sx-media-tabs {
   display: flex;
-  gap: var(--sx-5);
-  align-self: flex-end;
-  margin: 0 auto -1px 0;
+  gap: 4px;
+  margin: 0 auto 0 0;
+  padding: var(--sx-2) 0;
 }
 
 .sx-media-tabs button {
-  min-height: 44px;
-  padding: 0;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  background: none;
-  color: var(--sx-ink-3);
-  font: 600 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
-  letter-spacing: 0.08em;
+  min-height: 38px;
+  padding: 7px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--sx-radius);
+  background: transparent;
+  color: var(--sx-ink-2);
+  font: 600 0.9rem/1 var(--sx-font-sans);
   text-transform: uppercase;
   white-space: nowrap;
   cursor: pointer;
-  transition: color var(--sx-duration-fast) var(--sx-ease-out);
+  transition: background-color var(--sx-duration-fast) var(--sx-ease-out);
 }
 
-.sx-media-tabs button:hover,
-.sx-media-tabs button.sx-active {
+.sx-media-tabs button:hover:not(.sx-active) {
+  border-color: var(--sx-ink);
   color: var(--sx-ink);
 }
 
 .sx-media-tabs button.sx-active {
-  border-bottom-color: var(--sx-accent);
+  border-color: var(--sx-ink);
+  background: var(--sx-ink);
+  color: var(--sx-surface);
+}
+
+.sx-media-tabs button:focus-visible {
+  outline: var(--sx-focus-ring);
+  outline-offset: var(--sx-focus-offset);
 }
 
 .sx-media-sort {
@@ -93,12 +102,15 @@
   position: relative;
   flex: none;
   width: auto;
-  margin-bottom: var(--sx-2);
+  /* Same height as the To do / Gallery pills beside it. */
+  height: 38px;
+  min-height: 38px;
   cursor: pointer;
 }
 
-.sx-media-sort {
-  margin-bottom: var(--sx-2);
+.sx-media-sort .sx-icon-button {
+  width: 38px;
+  height: 38px;
 }
 
 .sx-media-add input {
