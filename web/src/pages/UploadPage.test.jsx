@@ -31,9 +31,10 @@ vi.mock('../hooks/AuthContext.jsx', () => ({ useAuth: () => ({ user: { id: 'u1',
 vi.mock('../hooks/WalletContext.jsx', () => ({ useWallet: () => mocks.wallet }));
 vi.mock('../hooks/HealthContext.jsx', () => ({ useHealthContext: () => ({ probes: mocks.probes }) }));
 vi.mock('../hooks/ConfigContext.jsx', () => ({ useConfigContext: () => ({ config: { models: mocks.models, features: mocks.features } }) }));
-// The SSE job tracker is replaced by a button that completes the job. MAKE 3D
+// The job watcher is replaced by a button that completes the job. MAKE 3D
 // jobs (job-3d…) finish with a side-by-side result, as the server's do.
-vi.mock('../components/ui/JobRunner.jsx', () => ({
+vi.mock('../components/ui/JobRunner.jsx', () => ({ default: () => null, CancelJobButton: () => null }));
+vi.mock('../components/upload/JobWatcher.jsx', () => ({
   default: ({ jobId, onDone, onSettled }) => (
     <button
       type="button"
@@ -54,6 +55,17 @@ vi.mock('../components/ui/JobRunner.jsx', () => ({
     </button>
   ),
 }));
+
+// Node's own `localStorage` shadows jsdom's and is unusable without a flag, so give tests a real one.
+function memoryStorage() {
+  const data = new Map();
+  return {
+    getItem: (key) => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => { data.set(key, String(value)); },
+    removeItem: (key) => { data.delete(key); },
+    clear: () => { data.clear(); },
+  };
+}
 
 const OK = { ok: true };
 const ALL_PROBES = { ffmpeg: OK, ffprobe: OK, encoder: OK, cas: OK, vapoursynth: OK, ffms2: OK, znedi3: OK };
@@ -112,6 +124,7 @@ const META = {
   'a.png': meta('a.png', 400, 400),
   'b.png': meta('b.png', 400, 400),
   'c.png': meta('c.png', 400, 400),
+  'tall.png': meta('tall.png', 900, 1600),
 };
 
 const fileOf = (name) => new File(['x'], name, { type: name.endsWith('.mp4') ? 'video/mp4' : 'image/png' });
@@ -133,12 +146,15 @@ function renderPage() {
 }
 
 async function pick(names) {
-  const input = view.container.querySelector('.sx-studio-drop input[type=file]') || view.container.querySelector('.sx-studio-reset input');
+  const input = view.container.querySelector('.sx-media-add input');
   fireEvent.change(input, { target: { files: names.map(fileOf) } });
 }
 
 const radio = (group, name) => within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name });
-const renderButton = () => screen.getByRole('button', { name: /RENDER .*4K SQUARE|RETRY QUOTE & RENDER/ });
+const renderButton = () => screen.getByRole('button', { name: /^(Make|Retry quote & make) .*square/ });
+const postButton = () => screen.getByRole('button', { name: 'POST' });
+const button = (name) => screen.getByRole('button', { name });
+const MINE = { items: [], stages: [], retention: { stage_seconds: 6 * 3600, result_seconds: 30 * 86400 } };
 
 beforeEach(() => {
   mocks.probes = { ...ALL_PROBES };
@@ -156,7 +172,9 @@ beforeEach(() => {
   mocks.upload.mockImplementation(async (_path, file) => ({ ...META[file.name] }));
   mocks.quote.mockImplementation(async (_kind, stageId) => ({ stage_id: stageId, quote_id: `q-${stageId}`, credits: 3, provider_cost_usd: 0.03 }));
   mocks.estimate.mockImplementation(async (_kind, stageId) => ({ stage_id: stageId, quote_id: null, estimate: true, credits: 7, provider_cost_usd: 0.05 }));
-  mocks.get.mockResolvedValue({ inputs: [] });
+  mocks.mine = MINE;
+  mocks.get.mockImplementation(async (path) => (path === '/api/uploads/mine' ? mocks.mine : { inputs: [] }));
+  vi.stubGlobal('localStorage', memoryStorage());
   mocks.refresh.mockResolvedValue(undefined);
   globalThis.URL.createObjectURL = vi.fn((file) => `blob:${file.name}`);
   globalThis.URL.revokeObjectURL = vi.fn();
@@ -167,7 +185,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('UploadPage studio — video extender parity', () => {
+describe('UploadPage — video extender parity', () => {
   it('maps a portrait clip onto the square stage with its outpaint bands', async () => {
     renderPage();
     await pick(['portrait.mp4']);
@@ -179,9 +197,8 @@ describe('UploadPage studio — video extender parity', () => {
     expect(screen.queryByText(/BOUNDARIES/)).toBeNull();
     expect(screen.queryByRole('region', { name: 'Media Specifications' })).toBeNull();
     expect(screen.getByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeInTheDocument();
-    expect(screen.getByText('1:1 REQUIRED — EXTEND TO CONTINUE')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Stage playback' })).toBeInTheDocument();
-    expect(view.container.querySelectorAll('.sx-studio-zone')).toHaveLength(2);
+    expect(document.querySelectorAll('.sx-studio-zone')).toHaveLength(2);
   });
 
   it('sends every video setting exactly as the Video page would', async () => {
@@ -208,7 +225,7 @@ describe('UploadPage studio — video extender parity', () => {
     fireEvent.click(screen.getByLabelText('Preserve Audio Track'));
     fireEvent.click(screen.getByLabelText('Enable Prompt Expansion (LLM Enrich)'));
 
-    fireEvent.click(radio('Upscale Engine', 'FAL AI'));
+    fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     fireEvent.click(radio('FAL Upscale Model', /SeedVR2 Video/));
     fireEvent.change(screen.getByLabelText('UPSCALE FACTOR'), { target: { value: '3' } });
     fireEvent.change(screen.getByLabelText('TARGET RESOLUTION TIER'), { target: { value: '2160p' } });
@@ -262,7 +279,7 @@ describe('UploadPage studio — video extender parity', () => {
     renderPage();
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1920 ➔ 3840×3840');
-    fireEvent.click(radio('Upscale Engine', 'FAL AI'));
+    fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     const group = screen.getByRole('group', { name: 'Bytedance upscaler settings' });
     fireEvent.change(within(group).getByLabelText('TARGET RESOLUTION'), { target: { value: '2k' } });
     fireEvent.change(within(group).getByLabelText('TARGET FPS'), { target: { value: '60fps' } });
@@ -307,7 +324,7 @@ describe('UploadPage studio — video extender parity', () => {
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1920 ➔ 3840×3840');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeInTheDocument();
-    fireEvent.click(radio('Upscale Engine', 'STUDIO'));
+    fireEvent.click(radio('Upscale Engine', 'Studio'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(screen.getByText('STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI')).toBeInTheDocument();
     expect(screen.queryByLabelText('CAS Sharpening level')).toBeNull();
@@ -322,7 +339,7 @@ describe('UploadPage studio — video extender parity', () => {
     renderPage();
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1920 ➔ 3840×3840');
-    fireEvent.click(radio('Upscale Engine', 'STUDIO'));
+    fireEvent.click(radio('Upscale Engine', 'Studio'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
   });
@@ -348,23 +365,28 @@ describe('UploadPage studio — video extender parity', () => {
     renderPage();
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1920 ➔ 3840×3840');
-    fireEvent.click(radio('Upscale Engine', 'FAL AI'));
+    fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     expect(radio('FAL Upscale Model', /CUSTOM \(my-upscaler\)/)).toHaveAttribute('aria-checked', 'true');
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
     expect(screen.getByText('THE SELECTED CUSTOM / NON-DETERMINISTIC MODEL REQUIRES MY FAL KEY')).toBeInTheDocument();
   });
 });
 
-describe('UploadPage studio — image extender parity', () => {
+describe('UploadPage — image extender parity', () => {
   it('offers only the image engines and switches to MY FAL KEY for non-credit models, then back', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i1' });
     renderPage();
     await pick(['wide.png']);
     expect(await screen.findByText('1600×900 ➔ 3840×3840')).toBeInTheDocument();
     expect(screen.queryByText('PAD: 350px [T/B]')).toBeNull();
-    const engines = within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio').map((node) => node.textContent);
-    expect(engines).toEqual(['FAST', 'FAL AI']);
-    fireEvent.click(radio('Upscale Engine', 'FAL AI'));
+    const engines = within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio').map((node) => node.textContent.trim());
+    expect(engines).toEqual(['Fast', 'Cloud AI']);
+    fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
+    fireEvent.click(radio('FAL Model', /CCSR/));
+    await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
+    // A credit-supported model switches the payment back.
+    fireEvent.click(radio('FAL Model', /Clarity Upscaler/));
+    await waitFor(() => expect(radio('Cloud payment source', 'ECHO CREDITS')).toHaveAttribute('aria-checked', 'true'));
     fireEvent.click(radio('FAL Model', /CCSR/));
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
 
@@ -383,8 +405,6 @@ describe('UploadPage studio — image extender parity', () => {
       customUpscaleArgs: {},
     }), { payment_source: 'byok' }));
 
-    fireEvent.click(radio('FAL Model', /Clarity Upscaler/));
-    await waitFor(() => expect(radio('Cloud payment source', 'ECHO CREDITS')).toHaveAttribute('aria-checked', 'true'));
   });
 
   it('keeps UPSCALE ONLY + FAST local and flags the stretch to 1:1', async () => {
@@ -392,7 +412,7 @@ describe('UploadPage studio — image extender parity', () => {
     renderPage();
     await pick(['wide.png']);
     await screen.findByText('1600×900 ➔ 3840×3840');
-    fireEvent.click(radio('Pipeline Mode', 'UPSCALE ONLY'));
+    fireEvent.click(radio('Pipeline Mode', 'Stretch to fit'));
     expect(screen.getByText('UPSCALE ONLY · STRETCHED TO 1:1')).toBeInTheDocument();
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
     expect(screen.queryByLabelText('OUTPAINT EXTENSION PROMPT')).toBeNull();
@@ -444,44 +464,52 @@ describe('UploadPage studio — image extender parity', () => {
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1920 ➔ 3840×3840');
     fireEvent.change(screen.getByLabelText('OUTPAINT EXTENSION PROMPT'), { target: { value: 'video prompt' } });
-    fireEvent.click(radio('Upscale Engine', 'STUDIO'));
+    fireEvent.click(radio('Upscale Engine', 'Studio'));
     await pick(['wide.png']);
     await screen.findByText('1600×900 ➔ 3840×3840');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue(IMG_PROMPT_DEFAULT);
-    expect(radio('Upscale Engine', 'FAST')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'true');
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1920 ➔ 3840×3840');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue('video prompt');
-    expect(radio('Upscale Engine', 'STUDIO')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Upscale Engine', 'Studio')).toHaveAttribute('aria-checked', 'true');
   });
 });
 
-describe('UploadPage studio — post flows', () => {
-  it('shares an already-square image directly', async () => {
+describe('UploadPage — posting', () => {
+  it('posts an already-square image as it is', async () => {
     mocks.post.mockResolvedValue({ meta: { title: 'square' }, rel_path: 'uploads/square.png', media_url: '/media/uploads/square.png' });
     renderPage();
     await pick(['square.png']);
     expect(await screen.findByText('ALREADY 1:1')).toBeInTheDocument();
-    expect(radio('Publish path', 'SHARE DIRECTLY')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.queryByText('CORE ENGINE & PROMPT')).toBeNull();
-    expect(screen.getByLabelText(/^TITLE/)).toHaveValue('square');
-    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    // Nothing to make square: the dialog goes straight to the post form.
+    expect(screen.queryByRole('radiogroup', { name: 'Upscale Engine' })).toBeNull();
+    expect(screen.getByLabelText('TITLE')).toHaveValue('square');
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     const [path, body] = mocks.post.mock.calls[0];
     expect(path).toBe('/api/uploads/publish');
     expect(body).toMatchObject({ kind: 'image', title: 'square', stage_id: 'st-square.png' });
     expect(body.job_id).toBeUndefined();
-    expect(await screen.findByText('✓ SHARED — LIVE IN EXPLORE + REELS')).toBeInTheDocument();
+    expect(await screen.findByText('✓ POSTED')).toBeInTheDocument();
+    expect(button('▶ PLAY IN REELS')).toBeInTheDocument();
   });
 
-  it('extends a square image anyway, shows the result on the stage, then shares the render', async () => {
+  it('needs a title to post', async () => {
+    renderPage();
+    await pick(['square.png']);
+    fireEvent.change(await screen.findByLabelText('TITLE'), { target: { value: ' ' } });
+    expect(postButton()).toHaveAttribute('aria-disabled', 'true');
+    expect(postButton()).toHaveAccessibleDescription('A TITLE IS NEEDED TO POST');
+  });
+
+  it('makes a square image square again, shows the result on the stage, then posts the result', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-sq' });
     mocks.post.mockResolvedValue({ meta: { title: 'square' }, rel_path: 'uploads/x.png', media_url: '/m' });
     renderPage();
     await pick(['square.png']);
     await screen.findByText('ALREADY 1:1');
-    fireEvent.click(radio('Publish path', 'EXTEND ANYWAY'));
-    expect(screen.getByText('RENDER THE 1:1 EXTEND FIRST')).toBeInTheDocument();
+    fireEvent.click(button('Make square again'));
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
@@ -492,108 +520,232 @@ describe('UploadPage studio — post flows', () => {
     expect(radio('Stage view', 'EXTENDED')).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(radio('Stage view', 'ORIGINAL'));
     expect(screen.getByAltText('square.png')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    expect(screen.getByRole('link', { name: 'Download the 4K square' })).toHaveAttribute('href', '/api/jobs/job-sq/download');
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', job_id: 'job-sq' });
     expect(mocks.post.mock.calls[0][1].stage_id).toBeUndefined();
   });
 
-  it('builds a slideshow post: reorder, remove, publish the remaining order', async () => {
+  it('posts several images as one: reorder, remove, publish the remaining order', async () => {
     mocks.post.mockResolvedValue({ meta: { title: 'a' }, rel_path: 'uploads/c.png', media_url: '/m' });
     renderPage();
     await pick(['a.png', 'b.png', 'c.png']);
+    // Several files stay on the shelf, checked.
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 3 as one' }));
     const strip = await screen.findByRole('list', { name: 'Images in post order' });
     expect(within(strip).getAllByRole('listitem')).toHaveLength(3);
-    expect(screen.getByText('MULTI-IMAGE POST — PUBLISHED AS-IS')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Move b.png later' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove a.png' }));
+    fireEvent.click(button('Move b.png later'));
+    fireEvent.click(button('Remove a.png'));
     expect(within(strip).getAllByRole('img').map((node) => node.getAttribute('alt'))).toEqual(['c.png', 'b.png']);
-    fireEvent.click(screen.getByRole('button', { name: 'View b.png' }));
-    expect(screen.getByRole('button', { name: 'View b.png' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    fireEvent.click(button('View b.png'));
+    expect(button('View b.png')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', stage_id: 'st-c.png', extra_stage_ids: ['st-b.png'] });
   });
 
-  it('refuses mixed or oversized picks and keeps the staged source', async () => {
+  it('posts a made-square image together with a square upload', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-wide' });
+    mocks.post.mockResolvedValue({ meta: { title: 'a' }, rel_path: 'uploads/a.png', media_url: '/m' });
     renderPage();
-    await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 3840×3840');
-    await pick(['a.png', 'portrait.mp4']);
-    expect(await screen.findByText(/Use BATCH to render several videos/)).toBeInTheDocument();
-    await pick(Array.from({ length: 11 }, (_, i) => `img-${i}.png`));
-    expect(await screen.findByText('An image post holds at most 10 images (you picked 11).')).toBeInTheDocument();
+    await pick(['a.png', 'wide.png']);
+    fireEvent.click(await screen.findByRole('button', { name: /^Make square/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-wide' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select wide.png' }));
+    fireEvent.click(button('Post 2 as one'));
+    fireEvent.click(postButton());
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    const body = mocks.post.mock.calls[0][1];
+    expect(body).toMatchObject({ kind: 'image', stage_id: 'st-a.png', extra_items: [{ job_id: 'job-wide' }] });
+    expect(body.extra_stage_ids).toBeUndefined();
+  });
+
+  it('refuses unsupported files, and says why a selection cannot be one post', async () => {
+    renderPage();
     await pick(['notes.txt']);
     expect(await screen.findByText(/Unsupported file type: notes\.txt/)).toBeInTheDocument();
-    expect(screen.getByText('1080×1920 ➔ 3840×3840')).toBeInTheDocument();
+    expect(mocks.upload).not.toHaveBeenCalled();
+    await pick(['a.png', 'square.mp4']);
+    const mixed = await screen.findByRole('button', { name: 'Post 2 as one' });
+    expect(mixed).toHaveAttribute('aria-disabled', 'true');
+    expect(mixed).toHaveAccessibleDescription('A post holds one video. Only images can be posted together.');
+    await pick(Array.from({ length: 11 }, (_, i) => `img-${i}.png`).map((name) => {
+      META[name] = meta(name, 400, 400);
+      return name;
+    }));
+    expect(await screen.findByRole('button', { name: 'Post 11 as one' })).toHaveAccessibleDescription('A post holds at most 10 images (you picked 11).');
+  });
+
+  it('discards a file from the shelf without opening it', async () => {
+    renderPage();
+    await pick(['a.png', 'wide.png']);
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard wide.png' }));
+    expect(screen.queryByRole('button', { name: 'Open wide.png' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /Needs square/ })).toBeNull();
+    expect(button('Open a.png')).toBeInTheDocument();
   });
 });
 
-describe('UploadPage studio — batch extend', () => {
-  it('renders every file with one configuration, continues past a failed submit, and never publishes', async () => {
+describe('UploadPage — several files at once', () => {
+  it('makes every checked file square with its own settings, continues past a failed start, and the results can be posted', async () => {
     mocks.form
-      .mockRejectedValueOnce(Object.assign(new Error('Stage expired for portrait'), { status: 400 }))
+      .mockRejectedValueOnce(Object.assign(new Error('Stage expired for wide'), { status: 400 }))
       .mockResolvedValueOnce({ job_id: 'job-b2' });
+    mocks.post.mockResolvedValue({ meta: { title: 'portrait' }, rel_path: 'uploads/p.mp4', media_url: '/m' });
     renderPage();
-    fireEvent.click(radio('Studio mode', 'BATCH'));
-    await pick(['square.png', 'portrait.mp4']);
-    expect(await screen.findByText(/A batch is all videos or all images/)).toBeInTheDocument();
-    await pick(['portrait.mp4', 'square.mp4']);
-    const queue = await screen.findByRole('list', { name: 'Batch queue' });
-    expect(within(queue).getAllByRole('listitem')).toHaveLength(2);
-    expect(screen.queryByText('POST DETAILS')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'SHARE REEL TO UPLOADS' })).toBeNull();
-
-    fireEvent.click(renderButton());
+    await pick(['wide.png', 'portrait.mp4', 'square.mp4']);
+    const make = await screen.findByRole('button', { name: /^Make 2 square/ });
+    // The square clip is already postable; it is not made square.
+    expect(button('Open square.mp4').closest('li')).toHaveClass('sx-ready');
+    await waitFor(() => expect(renderButton()).toHaveTextContent('Make 2 square · 6 credits'));
+    fireEvent.click(make);
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(2));
-    const first = formObject(mocks.form.mock.calls[0][1]);
-    const second = formObject(mocks.form.mock.calls[1][1]);
-    expect(mocks.form.mock.calls.map(([path]) => path)).toEqual(['/api/video/process', '/api/video/process']);
-    expect(first).toMatchObject({ stage_id: 'st-portrait.mp4', payment_source: 'credits', quote_id: 'q-st-portrait.mp4' });
-    // The square clip needs no cloud outpaint with the FAST engine.
-    expect(second.stage_id).toBe('st-square.mp4');
-    expect(second.payment_source).toBeUndefined();
-    expect(await screen.findByText('Stage expired for portrait')).toBeInTheDocument();
-    expect(within(queue).getByText('FAILED')).toBeInTheDocument();
-    expect(within(queue).getByText('RENDERING')).toBeInTheDocument();
-    expect(screen.getByText('/api/video/jobs/job-b2/result')).toBeInTheDocument();
+    expect(mocks.form.mock.calls.map(([path]) => path)).toEqual(['/api/image/process', '/api/video/process']);
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-wide.png', payment_source: 'credits', quote_id: 'q-st-wide.png' });
+    expect(formObject(mocks.form.mock.calls[1][1])).toMatchObject({ stage_id: 'st-portrait.mp4', payment_source: 'credits', quote_id: 'q-st-portrait.mp4' });
+    expect(await screen.findByText('Stage expired for wide')).toBeInTheDocument();
+    expect(button('Open wide.png').closest('li')).toHaveClass('sx-needs');
+    expect(within(button('Open wide.png').closest('li')).getByRole('img', { name: 'Could not be made square. Try again.' })).toBeInTheDocument();
+    expect(button('Open portrait.mp4').closest('li')).toHaveClass('sx-working');
 
-    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-b2' }));
-    expect(await within(queue).findByText('✓ DONE')).toBeInTheDocument();
-    expect(within(queue).getByRole('link', { name: 'Download 4K master of square.mp4' })).toHaveAttribute('href', '/api/jobs/job-b2/download');
-    expect(mocks.post).not.toHaveBeenCalled();
+    fireEvent.click(button('FINISH job-b2'));
+    await waitFor(() => expect(button('Open portrait.mp4').closest('li')).toHaveClass('sx-ready'));
+    fireEvent.click(button('Open portrait.mp4'));
+    fireEvent.click(await screen.findByRole('button', { name: 'POST' }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'video', job_id: 'job-b2' });
   });
 
-  it('locks the other mode while a batch is rendering', async () => {
-    mocks.form.mockResolvedValueOnce({ job_id: 'job-b3' }).mockResolvedValueOnce({ job_id: 'job-b4' });
+  it('waits when the server is busy and starts the rest by itself when a job ends', async () => {
+    mocks.form
+      .mockResolvedValueOnce({ job_id: 'job-q1' })
+      .mockRejectedValueOnce(Object.assign(new Error('You already have 2 jobs running.'), { status: 429, code: 'QUEUE_FULL', retryAfter: 60 }))
+      .mockResolvedValueOnce({ job_id: 'job-q2' })
+      .mockResolvedValueOnce({ job_id: 'job-q3' });
     renderPage();
-    fireEvent.click(radio('Studio mode', 'BATCH'));
-    await pick(['a.png', 'b.png']);
-    await screen.findByRole('list', { name: 'Batch queue' });
-    expect(renderButton()).toHaveTextContent('RENDER 2 IMAGE(S) 4K SQUARE');
+    await pick(['wide.png', 'tall.png', 'portrait.mp4']);
+    fireEvent.click(await screen.findByRole('button', { name: /^Make 3 square/ }));
+    expect(await screen.findByText(/Waiting for a free slot/)).toBeInTheDocument();
+    // The refused file and the one after it were not marked as failed, and stay checked.
+    expect(mocks.form).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('img', { name: 'Could not be made square. Try again.' })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Select tall.png' })).toBeChecked();
+    fireEvent.click(button('FINISH job-q1'));
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(4));
+    expect(mocks.form.mock.calls.slice(2).map(([path, fd]) => [path, formObject(fd).stage_id])).toEqual([
+      ['/api/image/process', 'st-tall.png'], ['/api/video/process', 'st-portrait.mp4'],
+    ]);
+    await waitFor(() => expect(screen.queryByText(/Waiting for a free slot/)).toBeNull());
+  });
+
+  it('acts on the checked files only, and offers both kinds in the options', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-one' });
+    renderPage();
+    await pick(['wide.png', 'tall.png', 'portrait.mp4']);
+    await screen.findByRole('button', { name: /^Make 3 square/ });
+    fireEvent.click(button('Options'));
+    expect(radio('Options for', 'IMAGES')).toHaveAttribute('aria-checked', 'true');
+    expect(within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio')).toHaveLength(2);
+    fireEvent.click(radio('Options for', 'VIDEOS'));
+    expect(within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio')).toHaveLength(3);
+    fireEvent.click(button('Close'));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select tall.png' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select portrait.mp4' }));
+    await waitFor(() => expect(renderButton()).toHaveTextContent('Make square · 3 credits'));
     fireEvent.click(renderButton());
-    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(2));
-    expect(radio('Studio mode', 'POST')).toBeDisabled();
-    expect(screen.queryByText('REPLACE BATCH')).toBeNull();
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1]).stage_id).toBe('st-wide.png');
+    expect(button('Open tall.png').closest('li')).toHaveClass('sx-needs');
   });
 });
 
-describe('UploadPage studio — 3D stereo posts', () => {
-  it('auto-detects a side-by-side video and shares it as-is as 3D', async () => {
+describe('UploadPage — gallery and saved results', () => {
+  const row = (jobId, extra = {}) => ({
+    job_id: jobId, kind: 'image', role: 'square', source_stage_id: null, source_job_id: null, filename: 'beach.png',
+    status: 'ready', kept: true, post_id: null, created_at: '2026-11-10T10:00:00+00:00', updated_at: '2026-11-10T10:05:00+00:00',
+    expires_at: new Date(Date.now() + 27 * 86400 * 1000 + 3600 * 1000).toISOString(),
+    download_url: `/api/image/jobs/${jobId}/download`, media_url: `https://media.test/${jobId}.png`, thumb_url: `https://media.test/${jobId}-poster.jpg`, ...extra,
+  });
+
+  it('lists a result made on another device as ready, saved to the cloud, with its time left, and posts it', async () => {
+    mocks.mine = { ...MINE, items: [row('job-far')] };
+    mocks.post.mockResolvedValue({ meta: { title: 'beach' }, rel_path: 'uploads/b.png', media_url: '/m' });
+    renderPage();
+    const open = await screen.findByRole('button', { name: 'Open beach.png' });
+    const tile = open.closest('li');
+    expect(tile).toHaveClass('sx-ready');
+    expect(within(tile).getByRole('img', { name: 'Saved to the cloud' })).toBeInTheDocument();
+    expect(within(tile).getByRole('img', { name: '27 days left' })).toBeInTheDocument();
+    expect(tile.querySelector('img')).toHaveAttribute('src', 'https://media.test/job-far-poster.jpg');
+    fireEvent.click(open);
+    expect(await screen.findByAltText('Rendered square result for beach.png')).toHaveAttribute('src', 'https://media.test/job-far.png');
+    // No upload on this server to redo from.
+    expect(screen.queryByRole('button', { name: 'Make square again' })).toBeNull();
+    fireEvent.click(postButton());
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', title: 'beach', job_id: 'job-far' });
+  });
+
+  it('counts an upload down from 6 hours and marks a result that missed the cloud', async () => {
+    mocks.mine = { ...MINE, items: [row('job-local', { kept: false, thumb_url: null, expires_at: new Date(Date.now() + 2 * 3600 * 1000 + 30000).toISOString() })] };
+    renderPage();
+    const unsaved = (await screen.findByRole('button', { name: 'Open beach.png' })).closest('li');
+    expect(within(unsaved).getByRole('img', { name: 'Not saved to the cloud. Download it now.' })).toBeInTheDocument();
+    expect(within(unsaved).getByRole('img', { name: '2 h 0 min left' })).toBeInTheDocument();
+    await pick(['a.png', 'b.png']);
+    const fresh = (await screen.findByRole('button', { name: 'Open a.png' })).closest('li');
+    expect(within(fresh).getByRole('img', { name: /^5 h 59 min left|^6 h 0 min left/ })).toBeInTheDocument();
+  });
+
+  it('sorts the gallery by time added or by last action, and shows posted files without a countdown', async () => {
+    mocks.mine = {
+      ...MINE,
+      items: [
+        row('job-old', { filename: 'old.png', created_at: '2026-11-01T10:00:00+00:00', updated_at: '2026-11-12T10:00:00+00:00', post_id: 'post-1', kept: false }),
+        row('job-new', { filename: 'new.png', created_at: '2026-11-05T10:00:00+00:00', updated_at: '2026-11-05T10:05:00+00:00' }),
+      ],
+    };
+    renderPage();
+    await screen.findByRole('button', { name: 'Open new.png' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Gallery' }));
+    const names = () => within(screen.getByRole('list', { name: 'All media' })).getAllByRole('button', { name: /^Open / }).map((node) => node.getAttribute('aria-label'));
+    expect(button('Sort by time added')).toHaveAttribute('aria-pressed', 'true');
+    expect(names()).toEqual(['Open new.png', 'Open old.png']);
+    fireEvent.click(button('Sort by last action'));
+    expect(names()).toEqual(['Open old.png', 'Open new.png']);
+    const posted = button('Open old.png').closest('li');
+    expect(posted).toHaveClass('sx-posted');
+    expect(within(posted).queryByRole('img', { name: /left$/ })).toBeNull();
+    expect(within(posted).queryByRole('img', { name: /Not saved to the cloud/ })).toBeNull();
+  });
+
+  it('remembers an upload across a reload while the server still holds it, and drops it after', async () => {
+    renderPage();
+    await pick(['wide.png', 'tall.png']);
+    await screen.findByRole('button', { name: 'Open wide.png' });
+    cleanup();
+    mocks.mine = { ...MINE, stages: [{ stage_id: 'st-wide.png', kind: 'image', filename: 'wide.png', staged_at: new Date().toISOString() }] };
+    renderPage();
+    expect(await screen.findByRole('button', { name: 'Open wide.png' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Open tall.png' })).toBeNull());
+  });
+});
+
+describe('UploadPage — 3D stereo posts', () => {
+  it('auto-detects a side-by-side video and posts it as it is, in 3D', async () => {
     mocks.post.mockResolvedValue({ meta: { title: 'sbs' }, rel_path: 'uploads/sbs.mp4', media_url: '/m' });
     renderPage();
     await pick(['sbs.mp4']);
     expect(await screen.findByText('3D SIDE-BY-SIDE DETECTED')).toBeInTheDocument();
-    const toggle = screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/);
-    expect(toggle).toBeChecked();
-    // Left eye on the stage, no outpaint bands, no extender settings, no quote.
+    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).toBeChecked();
+    // Left eye on the stage, no outpaint bands, no options, no quote.
     expect(screen.getByText('LEFT EYE · 2D VIEW (1920×1920)')).toBeInTheDocument();
     expect(screen.getByText('EYE: 1920×1920 ×2')).toBeInTheDocument();
-    expect(view.container.querySelectorAll('.sx-studio-zone')).toHaveLength(0);
-    expect(screen.queryByText('1:1 REQUIRED — EXTEND TO CONTINUE')).toBeNull();
-    expect(screen.queryByText('CORE ENGINE & PROMPT')).toBeNull();
-    expect(screen.getByText('3D SIDE-BY-SIDE · AS-IS · NO EXTEND')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    expect(document.querySelectorAll('.sx-studio-zone')).toHaveLength(0);
+    expect(screen.queryByRole('radiogroup', { name: 'Upscale Engine' })).toBeNull();
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'video', stage_id: 'st-sbs.mp4', stereo_layout: 'sbs' });
     expect(mocks.post.mock.calls[0][1].job_id).toBeUndefined();
@@ -609,129 +761,91 @@ describe('UploadPage studio — 3D stereo posts', () => {
     expect(screen.getByText("Detected from the file's stereo metadata.")).toBeInTheDocument();
     expect(screen.getByLabelText(/STEREOSCOPIC 3D · TOP-BOTTOM/)).toBeChecked();
     expect(screen.getByAltText('tb.png (left eye)')).toHaveClass('sx-stereo-tb');
-    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', stereo_layout: 'tb' });
   });
 
-  it('keeps an undetected 2:1 frame on the extend path until 3D is switched on', async () => {
+  it('keeps an undetected 2:1 frame waiting to be made square until 3D is switched on', async () => {
     mocks.post.mockResolvedValue({ meta: { title: 'screen21' }, rel_path: 'uploads/s.mp4', media_url: '/m' });
     renderPage();
     await pick(['screen21.mp4']);
     expect(await screen.findByText('2:1 FRAME — IS THIS 3D SIDE-BY-SIDE?')).toBeInTheDocument();
-    const toggle = screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/);
-    expect(toggle).not.toBeChecked();
-    expect(screen.getByText('1:1 REQUIRED — EXTEND TO CONTINUE')).toBeInTheDocument();
-    expect(screen.getByText('CORE ENGINE & PROMPT')).toBeInTheDocument();
+    const toggle = () => screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/);
+    expect(toggle()).not.toBeChecked();
+    expect(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).toBeInTheDocument();
+    expect(button('Open screen21.mp4').closest('li')).toHaveClass('sx-needs');
 
-    fireEvent.click(toggle);
-    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).toBeChecked();
-    expect(screen.queryByText('CORE ENGINE & PROMPT')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    fireEvent.click(toggle());
+    expect(toggle()).toBeChecked();
+    expect(screen.queryByRole('radiogroup', { name: 'Upscale Engine' })).toBeNull();
+    expect(button('Open screen21.mp4').closest('li')).toHaveClass('sx-ready');
+    // Switching it back off returns to the options.
+    fireEvent.click(toggle());
+    expect(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).toBeInTheDocument();
+    fireEvent.click(toggle());
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ stage_id: 'st-screen21.mp4', stereo_layout: 'sbs' });
-
-    // Switching it back off returns to the extender.
-    fireEvent.click(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
-    expect(screen.getByText('CORE ENGINE & PROMPT')).toBeInTheDocument();
   });
 
   it('offers no 3D choice for ordinary aspect ratios', async () => {
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('1:1 REQUIRED — EXTEND TO CONTINUE');
+    await screen.findByRole('radiogroup', { name: 'Upscale Engine' });
     expect(screen.queryByLabelText(/STEREOSCOPIC 3D/)).toBeNull();
   });
 
-  it('publishes a 3D slideshow only when every image shares the layout', async () => {
+  it('posts 3D images together only when every image shares the layout', async () => {
     mocks.post.mockResolvedValue({ meta: { title: 'eyes1' }, rel_path: 'uploads/e.png', media_url: '/m' });
     renderPage();
     await pick(['eyes1.png', 'eyes2.png']);
-    expect(await screen.findByText('3D SIDE-BY-SIDE DETECTED')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 2 as one' }));
     // Strip thumbnails show the left eye, not the seam between both eyes.
-    expect(screen.getByAltText('eyes2.png')).toHaveClass('sx-stereo-crop-sbs');
-    fireEvent.click(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
-    expect(screen.getByAltText('eyes2.png')).not.toHaveClass('sx-stereo-crop-sbs');
-    fireEvent.click(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
-    fireEvent.click(screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' }));
+    expect(await screen.findByAltText('eyes2.png')).toHaveClass('sx-stereo-crop-sbs');
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({
       stage_id: 'st-eyes1.png', extra_stage_ids: ['st-eyes2.png'], stereo_layout: 'sbs',
     });
     cleanup();
-    vi.clearAllMocks();
-    mocks.upload.mockImplementation(async (_path, file) => ({ ...META[file.name] }));
+    vi.stubGlobal('localStorage', memoryStorage());
     renderPage();
     await pick(['eyes1.png', 'a.png']);
-    await screen.findByText('MULTI-IMAGE POST — PUBLISHED AS-IS');
-    expect(screen.queryByLabelText(/STEREOSCOPIC 3D/)).toBeNull();
-  });
-
-  it('does not carry a 3D choice across slideshow edits', async () => {
-    renderPage();
-    // Mixed set: no 3D switch. Removing the mono image leaves one detected
-    // SBS file, which starts from its own detection.
-    await pick(['eyes1.png', 'a.png']);
-    await screen.findByText('MULTI-IMAGE POST — PUBLISHED AS-IS');
-    fireEvent.click(screen.getByRole('button', { name: 'Remove a.png' }));
-    expect(await screen.findByText('3D SIDE-BY-SIDE DETECTED')).toBeInTheDocument();
-    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).toBeChecked();
-    cleanup();
-    vi.clearAllMocks();
-    mocks.upload.mockImplementation(async (_path, file) => ({ ...META[file.name] }));
-    // The user turned 3D off for the set: it stays off after a removal.
-    renderPage();
-    await pick(['eyes1.png', 'eyes2.png']);
-    fireEvent.click(await screen.findByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/));
-    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).not.toBeChecked();
-    fireEvent.click(screen.getByRole('button', { name: 'Remove eyes2.png' }));
-    await waitFor(() => expect(screen.queryByAltText('eyes2.png')).toBeNull());
-    expect(screen.getByLabelText(/STEREOSCOPIC 3D · SIDE-BY-SIDE/)).not.toBeChecked();
+    expect(await screen.findByRole('button', { name: 'Post 2 as one' })).toHaveAccessibleDescription('3D and flat images cannot share a post.');
   });
 });
 
-describe('UploadPage studio — MAKE 3D', () => {
+describe('UploadPage — MAKE 3D', () => {
   // POST /api/stereo/convert answers a job; publish answers a post.
   const answer = (convertJobId) => mocks.post.mockImplementation(async (path) => (
     path === '/api/stereo/convert'
       ? { job_id: convertJobId, status: 'queued', kind: 'image', payment_source: 'local' }
       : { meta: { title: 'square' }, rel_path: 'uploads/x.jpg', media_url: '/m' }
   ));
-  const make3d = () => screen.getByRole('button', { name: '▶ MAKE 3D' });
-  const share = () => screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' });
+  const make3d = () => screen.getByRole('button', { name: 'Make 3D' });
 
-  it('turns a square image into side-by-side 3D and shares that render', async () => {
+  it('turns a square image into side-by-side 3D and posts that render', async () => {
     mocks.features = { stereo_convert: true };
     answer('job-3d-img');
     renderPage();
     await pick(['square.png']);
     await screen.findByText('ALREADY 1:1');
-    expect(screen.queryByRole('button', { name: '▶ MAKE 3D' })).toBeNull();
-    fireEvent.click(radio('Publish path', 'MAKE 3D'));
-    expect(screen.getByText('MAKE 3D FIRST')).toBeInTheDocument();
-    expect(screen.getByText('3D SIDE-BY-SIDE · MAKE 3D')).toBeInTheDocument();
-    expect(screen.queryByText('CORE ENGINE & PROMPT')).toBeNull();
-    expect(share()).toHaveAttribute('aria-disabled', 'true');
-    expect(share()).toHaveAccessibleDescription('MAKE 3D FIRST');
-    fireEvent.click(share());
-    expect(mocks.post).not.toHaveBeenCalled();
-
     fireEvent.click(make3d());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', stage_id: 'st-square.png' }));
-    // Running: the path is locked and nothing can be shared yet.
-    expect(radio('Publish path', 'SHARE DIRECTLY')).toBeDisabled();
-    expect(share()).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.queryByRole('button', { name: '▶ MAKE 3D' })).toBeNull();
+    // Running: nothing can be posted yet, and it cannot be started twice.
+    await waitFor(() => expect(postButton()).toBeDisabled());
+    expect(screen.queryByRole('button', { name: 'Make 3D' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-3d-img' }));
+    fireEvent.click(button('FINISH job-3d-img'));
     const left = await screen.findByAltText('3D result for square.png (left eye)');
     expect(left).toHaveAttribute('src', '/api/jobs/job-3d-img/download');
     expect(left).toHaveClass('sx-stereo-sbs');
     expect(radio('Stage view', '3D')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByText('3D SIDE-BY-SIDE · LEFT EYE')).toBeInTheDocument();
-    expect(screen.queryByText('MAKE 3D FIRST')).toBeNull();
+    expect(within(button('Open square.png').closest('li')).getByRole('img', { name: '3D' })).toBeInTheDocument();
 
-    fireEvent.click(share());
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(2));
     const [path, body] = mocks.post.mock.calls[1];
     expect(path).toBe('/api/uploads/publish');
@@ -745,7 +859,6 @@ describe('UploadPage studio — MAKE 3D', () => {
     renderPage();
     await pick(['square.mp4']);
     await screen.findByText('ALREADY 1:1');
-    fireEvent.click(radio('Publish path', 'MAKE 3D'));
     fireEvent.click(make3d());
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-3d-vid' }));
     expect(await screen.findByText('3D SIDE-BY-SIDE · LEFT EYE')).toBeInTheDocument();
@@ -753,54 +866,49 @@ describe('UploadPage studio — MAKE 3D', () => {
     expect(screen.queryByText(/HEVC MASTER/)).toBeNull();
   });
 
-  it('makes a finished extend render 3D and shares the 3D render', async () => {
+  it('makes a finished square result 3D and posts the 3D render', async () => {
     mocks.features = { stereo_convert: true };
     mocks.form.mockResolvedValue({ job_id: 'job-ext' });
     answer('job-3d-ext');
     renderPage();
-    await pick(['square.png']);
-    await screen.findByText('ALREADY 1:1');
-    fireEvent.click(radio('Publish path', 'EXTEND ANYWAY'));
-    fireEvent.click(renderButton());
+    await pick(['wide.png']);
+    fireEvent.click(await screen.findByRole('button', { name: /^Make square/ }));
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole('button', { name: '▶ MAKE 3D' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Make 3D' })).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-ext' }));
-    expect(await screen.findByAltText('Rendered square result for square.png')).toBeInTheDocument();
+    expect(await screen.findByAltText('Rendered square result for wide.png')).toBeInTheDocument();
 
     fireEvent.click(make3d());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', job_id: 'job-ext' }));
-    // The 3D job is running and lists no reason, so the button is plainly disabled.
-    expect(share()).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-3d-ext' }));
-    expect(await screen.findByAltText('3D result for square.png (left eye)')).toHaveAttribute('src', '/api/jobs/job-3d-ext/download');
+    await waitFor(() => expect(postButton()).toBeDisabled());
+    fireEvent.click(button('FINISH job-3d-ext'));
+    expect(await screen.findByAltText('3D result for wide.png (left eye)')).toHaveAttribute('src', '/api/jobs/job-3d-ext/download');
 
-    fireEvent.click(share());
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(2));
     expect(mocks.post.mock.calls[1][1]).toMatchObject({ kind: 'image', job_id: 'job-3d-ext', stereo_layout: 'sbs' });
   });
 
-  it('shows why a start failed, and drops the 3D render when the path changes', async () => {
+  it('shows why a start failed, and posts the flat file again once the 3D render is removed', async () => {
     mocks.features = { stereo_convert: true };
     answer('job-3d-img');
     mocks.post.mockRejectedValueOnce(Object.assign(new Error('3D conversion is not installed on this server.'), { status: 503, code: 'STEREO_CONVERT_UNAVAILABLE' }));
     renderPage();
     await pick(['square.png']);
     await screen.findByText('ALREADY 1:1');
-    fireEvent.click(radio('Publish path', 'MAKE 3D'));
     fireEvent.click(make3d());
     expect(await screen.findByText('MAKE 3D is not available on this server right now.')).toBeInTheDocument();
     expect(make3d()).toBeEnabled();
-    expect(share()).toHaveAttribute('aria-disabled', 'true');
 
     fireEvent.click(make3d());
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-3d-img' }));
     await screen.findByAltText('3D result for square.png (left eye)');
     expect(screen.queryByText('MAKE 3D is not available on this server right now.')).toBeNull();
 
-    fireEvent.click(radio('Publish path', 'SHARE DIRECTLY'));
+    fireEvent.click(button('Remove 3D'));
     expect(screen.getByAltText('square.png')).toBeInTheDocument();
     expect(radio('Stage view', 'EXTENDED')).toBeDisabled();
-    fireEvent.click(share());
+    fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(3));
     const body = mocks.post.mock.calls[2][1];
     expect(body).toMatchObject({ kind: 'image', stage_id: 'st-square.png' });
@@ -812,21 +920,20 @@ describe('UploadPage studio — MAKE 3D', () => {
     renderPage();
     await pick(['square.png']);
     await screen.findByText('ALREADY 1:1');
-    expect(within(screen.getByRole('radiogroup', { name: 'Publish path' })).queryByRole('radio', { name: 'MAKE 3D' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Make 3D' })).toBeNull();
   });
 });
 
-describe('UploadPage studio — SPATIAL 3D', () => {
-  // Each spatial job is named after its source; a source named in failOn fails.
+describe('UploadPage — depth version for VR', () => {
+  // Each depth job is named after its source; a source named in failOn fails.
   let failOn;
   const answer = () => mocks.post.mockImplementation(async (path, body) => (
     path === '/api/stereo/convert'
       ? { job_id: `job-sp-${body.stage_id || body.job_id}${failOn === (body.stage_id || body.job_id) ? '-fail' : ''}`, status: 'queued' }
       : { meta: { title: 'x' }, rel_path: 'uploads/x.jpg', media_url: '/m' }
   ));
-  const share = () => screen.getByRole('button', { name: 'SHARE REEL TO UPLOADS' });
   const convertCalls = () => mocks.post.mock.calls.filter(([path]) => path === '/api/stereo/convert');
-  const publishBody = () => mocks.post.mock.calls.find(([path]) => path === '/api/uploads/publish')[1];
+  const publishBody = () => mocks.post.mock.calls.find(([path]) => path === '/api/uploads/publish')?.[1];
 
   beforeEach(() => {
     failOn = null;
@@ -834,72 +941,81 @@ describe('UploadPage studio — SPATIAL 3D', () => {
     answer();
   });
 
-  it('makes the spatial version on its own and publishes it beside the 2D file', async () => {
+  it('makes the depth version on its own and publishes it beside the 2D file', async () => {
     renderPage();
     await pick(['square.png']);
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', depth_pack: true, stage_id: 'st-square.png' }));
-    expect(screen.getByRole('checkbox', { name: 'SPATIAL 3D' })).toBeChecked();
-    expect(share()).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-sp-st-square.png' }));
-    await waitFor(() => expect(share()).toBeEnabled());
-    fireEvent.click(share());
+    expect(screen.getByRole('checkbox', { name: 'Add depth for VR' })).toBeChecked();
+    expect(postButton()).toBeDisabled();
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-square.png' }));
+    await waitFor(() => expect(postButton()).toBeEnabled());
+    fireEvent.click(postButton());
     await waitFor(() => expect(publishBody()).toMatchObject({ stage_id: 'st-square.png', spatial_job_ids: ['job-sp-st-square.png'] }));
   });
 
-  it('publishes 2D only when switched off or when the spatial job fails', async () => {
+  it('publishes 2D only when the depth job fails', async () => {
     failOn = 'st-square.mp4';
     renderPage();
     await pick(['square.mp4']);
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-square.mp4-fail' }));
-    expect(await screen.findByText('SPATIAL VERSION FAILED — SHARE PUBLISHES 2D ONLY')).toBeInTheDocument();
-    fireEvent.click(share());
+    expect(await screen.findByText('DEPTH VERSION FAILED — THE POST IS 2D ONLY')).toBeInTheDocument();
+    fireEvent.click(postButton());
     await waitFor(() => expect(publishBody()).toBeDefined());
     expect(publishBody().spatial_job_ids).toBeUndefined();
   });
 
-  it('starts nothing when switched off', async () => {
+  it('publishes 2D only when switched off', async () => {
     renderPage();
     await pick(['square.png']);
-    fireEvent.click(await screen.findByRole('checkbox', { name: 'SPATIAL 3D' }));
-    expect(share()).toBeEnabled();
-    fireEvent.click(share());
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Add depth for VR' }));
+    expect(postButton()).toBeEnabled();
+    fireEvent.click(postButton());
     await waitFor(() => expect(publishBody()).toBeDefined());
     expect(publishBody().spatial_job_ids).toBeUndefined();
+  });
+
+  it('starts nothing for files that are only on the shelf', async () => {
+    renderPage();
+    await pick(['a.png', 'b.png']);
+    await screen.findByRole('button', { name: 'Open a.png' });
+    expect(convertCalls()).toHaveLength(0);
   });
 
   it('runs one slide at a time and keeps finished slides through a removal', async () => {
     renderPage();
     await pick(['a.png', 'b.png', 'c.png']);
+    fireEvent.click(await screen.findByRole('button', { name: 'Post 3 as one' }));
     await waitFor(() => expect(convertCalls()).toHaveLength(1));
     expect(convertCalls()[0][1]).toEqual({ kind: 'image', depth_pack: true, stage_id: 'st-a.png' });
-    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-sp-st-a.png' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-a.png' }));
     await waitFor(() => expect(convertCalls()).toHaveLength(2));
-    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-sp-st-b.png' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-b.png' }));
     await waitFor(() => expect(convertCalls()).toHaveLength(3));
-    fireEvent.click(screen.getByRole('button', { name: 'FINISH job-sp-st-c.png' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove b.png' }));
-    await waitFor(() => expect(share()).toBeEnabled());
-    fireEvent.click(share());
+    fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-c.png' }));
+    fireEvent.click(button('Remove b.png'));
+    await waitFor(() => expect(postButton()).toBeEnabled());
+    fireEvent.click(postButton());
     await waitFor(() => expect(publishBody()).toBeDefined());
     expect(publishBody()).toMatchObject({ extra_stage_ids: ['st-c.png'], spatial_job_ids: ['job-sp-st-a.png', 'job-sp-st-c.png'] });
     expect(convertCalls()).toHaveLength(3);
   });
 
-  it('waits for the extend render and converts that render', async () => {
+  it('waits for the square result and converts that result', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-ext' });
     renderPage();
     await pick(['wide.png']);
-    fireEvent.click(await screen.findByRole('button', { name: /RENDER .*4K SQUARE/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Make square/ }));
+    expect(convertCalls()).toHaveLength(0);
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-ext' }));
     await waitFor(() => expect(convertCalls()).toHaveLength(1));
     expect(convertCalls()[0][1]).toEqual({ kind: 'image', depth_pack: true, job_id: 'job-ext' });
   });
 
-  it('is not made for MAKE 3D or as-is stereo posts', async () => {
+  it('is not made for as-is stereo posts', async () => {
     renderPage();
     await pick(['eyes1.png']);
     await screen.findByLabelText(/STEREOSCOPIC 3D/);
-    expect(screen.queryByRole('checkbox', { name: 'SPATIAL 3D' })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Add depth for VR' })).toBeNull();
     expect(convertCalls()).toHaveLength(0);
   });
 });

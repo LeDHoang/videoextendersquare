@@ -10,7 +10,7 @@ import Emoji from './Emoji.jsx';
 // answers 202 (the server stops before the next stage; the SSE stream then
 // reports "cancelled"), 409 when the job already finished, and 404/405 on a
 // server without cancel support — the button then hides itself.
-function CancelJobButton({ jobId, kind }) {
+export function CancelJobButton({ jobId, kind }) {
   const [state, setState] = useState('idle'); // idle | pending | requested | unsupported
   const [message, setMessage] = useState('');
   if (state === 'unsupported') return null;

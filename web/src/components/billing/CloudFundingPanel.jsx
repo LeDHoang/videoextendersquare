@@ -7,7 +7,7 @@ import { useWallet } from '../../hooks/WalletContext.jsx';
 const OPTIONS = ['ECHO CREDITS', 'MY FAL KEY'];
 
 // Third-party processing disclosure. Shown with every cloud-mode panel, which each page renders
-// directly above its render/submit button (ImagePage, VideoPage, ExtendDeck's ExecuteSection).
+// directly above its render/submit button (ImagePage, VideoPage, the Upload page's OptionsPanel).
 export function FalDisclosure() {
   return (
     <p className="sx-cost-disclosure" data-testid="fal-disclosure">
