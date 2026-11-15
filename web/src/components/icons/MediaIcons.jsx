@@ -1,6 +1,6 @@
-// Icons of the Upload page: one stroke weight, drawn in currentColor so they follow the theme.
+// Icons of the Upload page, in the house style: chamfered outlines in currentColor and one
+// accent stroke. On a coloured surface set --sx-icon-accent so the accent stays visible.
 import { RawIcon } from './RawIcon.jsx';
-import addRaw from './svg/media-add.svg?raw';
 import slidersRaw from './svg/media-sliders.svg?raw';
 import checkRaw from './svg/media-check.svg?raw';
 import cloudRaw from './svg/media-cloud.svg?raw';
@@ -22,7 +22,6 @@ const icon = (src) => function MediaIcon({ className = 'sx-media-icon', ...props
   return <RawIcon src={src} className={className} {...props} />;
 };
 
-export const AddIcon = icon(addRaw);
 export const SlidersIcon = icon(slidersRaw);
 export const CheckIcon = icon(checkRaw);
 export const CloudIcon = icon(cloudRaw);

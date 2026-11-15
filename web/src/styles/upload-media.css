@@ -7,32 +7,34 @@
   gap: var(--sx-4);
 }
 
+/* The tabs stand on one hairline rule; the active tab's bar lies over it. */
 .sx-media-bar {
   display: flex;
   align-items: center;
-  gap: var(--sx-3);
+  gap: var(--sx-2);
+  border-bottom: 1px solid var(--sx-ink);
 }
 
 .sx-media-tabs {
   display: flex;
-  margin-right: auto;
+  gap: var(--sx-5);
+  align-self: flex-end;
+  margin: 0 auto -1px 0;
 }
 
 .sx-media-tabs button {
   min-height: 44px;
-  padding: 0 var(--sx-4);
+  padding: 0;
   border: 0;
   border-bottom: 3px solid transparent;
   background: none;
   color: var(--sx-ink-3);
-  font: 600 0.95rem/1 var(--sx-font-sans);
+  font: 600 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   white-space: nowrap;
   cursor: pointer;
   transition: color var(--sx-duration-fast) var(--sx-ease-out);
-}
-
-.sx-media-tabs button:first-child {
-  padding-left: 0;
 }
 
 .sx-media-tabs button:hover,
@@ -72,6 +74,13 @@
   gap: var(--sx-2);
 }
 
+/* On a coloured surface an icon's accent stroke takes the text colour. */
+.sx-upload-media .sx-btn.sx-primary,
+.sx-media-dialog .sx-btn.sx-primary,
+.sx-media-badge {
+  --sx-icon-accent: currentColor;
+}
+
 /* Button wraps its content in one span: lay the icon and the words out there too. */
 .sx-upload-media .sx-btn > span,
 .sx-media-dialog .sx-btn > span {
@@ -84,7 +93,12 @@
   position: relative;
   flex: none;
   width: auto;
+  margin-bottom: var(--sx-2);
   cursor: pointer;
+}
+
+.sx-media-sort {
+  margin-bottom: var(--sx-2);
 }
 
 .sx-media-add input {
@@ -137,9 +151,9 @@
   display: flex;
   align-items: center;
   gap: var(--sx-3);
-  /* Room for the 52px make button plus padding and rule, so the shelf does not
+  /* Room for the 44px make button plus padding and rule, so the shelf does not
      jump when the button moves into the open dialog. */
-  min-height: calc(52px + var(--sx-2) + 1px);
+  min-height: calc(44px + var(--sx-2) + 1px);
   padding-bottom: var(--sx-2);
   border-bottom: 1px solid var(--sx-ink);
 }
@@ -165,6 +179,20 @@
 .sx-upload-media .sx-media-shelf-head .sx-btn {
   flex: none;
   width: auto;
+  min-height: 44px;
+  padding: 0 var(--sx-4);
+  box-shadow: none;
+}
+
+/* Why the make button is off: a quiet note on the same line, not a block above it. */
+.sx-media-shelf-head .sx-gated-reason {
+  margin: 0;
+  color: var(--sx-ink-3);
+  font-size: var(--sx-t-eyebrow);
+}
+
+.sx-media-shelf-head .sx-gated-reason > span:first-child {
+  color: var(--sx-warn);
 }
 
 .sx-media-posted > summary {

@@ -1,3 +1,5 @@
-<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter">
-  <path d="M7 18h10a4 4 0 0 0 .6-7.95A5.5 5.5 0 0 0 7 9.5 4.25 4.25 0 0 0 7 18z"/>
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel">
+  <!-- Chamfered cloud, accent datum line -->
+  <path d="M6 19L3 16V13L6 10H7V8L10 5H14L17 8V10H18L21 13V16L18 19H6Z"/>
+  <path d="M9 14.5H15" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8"/>
 </svg>

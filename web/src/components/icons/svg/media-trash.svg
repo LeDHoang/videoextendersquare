@@ -1,3 +1,6 @@
-<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter">
-  <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13"/>
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel">
+  <!-- Chamfered bin, accent slot -->
+  <path d="M4 7H20M9 7V5L10 4H14L15 5V7"/>
+  <path d="M6 7L7 19L8 20H16L17 19L18 7"/>
+  <path d="M12 10.5V16.5" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8"/>
 </svg>

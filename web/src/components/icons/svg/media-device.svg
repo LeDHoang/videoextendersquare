@@ -1,3 +1,5 @@
-<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter">
-  <rect x="4" y="5" width="16" height="11"/><path d="M2 19h20"/>
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel">
+  <!-- Chamfered laptop screen, accent base -->
+  <path d="M4 15V6L6 4H18L20 6V15H4Z"/>
+  <path d="M2 19H22" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8"/>
 </svg>

@@ -12,7 +12,7 @@ import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
 import { assertUploadSize } from '../utils/uploadLimits.js';
-import { ActivityIcon, AddIcon, ClockIcon, CloseIcon, SlidersIcon, SquareIcon, StackIcon } from '../components/icons/index.jsx';
+import { ActivityIcon, ClockIcon, CloseIcon, SlidersIcon, IndustrialUploadIcon, SquareIcon, StackIcon } from '../components/icons/index.jsx';
 import { useImageExtendConfig, useVideoExtendConfig } from '../components/upload/useExtendConfig.js';
 import { useRenderFunding } from '../components/upload/useRenderFunding.js';
 import { useMediaLibrary } from '../components/upload/useMediaLibrary.js';
@@ -399,7 +399,7 @@ export default function UploadPage() {
           </div>
         ) : null}
         <label className="sx-media-add sx-btn sx-primary" title="Add photos or videos">
-          <AddIcon /> Add
+          <IndustrialUploadIcon className="sx-media-icon" /> Add
           <input
             type="file"
             accept={ACCEPT}

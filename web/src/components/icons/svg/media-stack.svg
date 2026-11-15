@@ -1,3 +1,6 @@
-<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter">
-  <rect x="7" y="3" width="13" height="13"/><path d="M4 7v14h13"/>
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel">
+  <!-- Three layers, the lowest in accent -->
+  <path d="M12 3L21 8L12 13L3 8L12 3Z"/>
+  <path d="M3 12.5L12 17.5L21 12.5"/>
+  <path d="M3 16.5L12 21.5L21 16.5" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))"/>
 </svg>
