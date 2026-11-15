@@ -486,7 +486,7 @@
 /* ── File dialog ── */
 .sx-media-dialog {
   /* No wider than the square plus a comfortable settings column. */
-  width: min(100%, 1240px, calc(max(420px, 100dvh - 330px) + 640px));
+  width: min(100%, 1240px, calc(max(420px, 100dvh - 280px) + 640px));
   max-height: calc(100dvh - 2 * var(--sx-4));
   display: flex;
   flex-direction: column;
@@ -504,8 +504,14 @@
   display: flex;
   align-items: center;
   gap: var(--sx-2);
-  padding: var(--sx-2) var(--sx-4);
+  padding: var(--sx-1) var(--sx-4);
   border-bottom: 1px solid var(--sx-rule);
+}
+
+/* Slim title bar: the height goes to the square. The hit area stays 44px. */
+.sx-media-dialog-head .sx-icon-button {
+  width: 32px;
+  height: 32px;
 }
 
 .sx-media-dialog-title {
@@ -527,12 +533,12 @@
   min-height: 0;
   overflow: hidden;
   /* As tall as the dialog allows beside its toolbar and player, never too small to read. */
-  --sx-media-stage: max(420px, calc(100dvh - 330px));
+  --sx-media-stage: max(420px, calc(100dvh - 280px));
 }
 
 .sx-media-dialog-body .sx-studio-stage-col {
   position: static;
-  max-height: calc(100dvh - 140px);
+  max-height: calc(100dvh - 116px);
   overflow-x: hidden;
   overflow-y: auto;
 }
