@@ -4,6 +4,7 @@ import { api } from '../api/client.js';
 import { AuthCheckbox, AuthField, AuthLayout, AuthNotice, PasswordField, PasswordRules, SubmitButton } from '../components/auth/AuthKit.jsx';
 import CheckEmailView from '../components/auth/CheckEmailView.jsx';
 import Turnstile from '../components/auth/Turnstile.jsx';
+import useBotCheck from '../components/auth/useBotCheck.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import {
   DISPLAY_NAME_MAX,
@@ -73,10 +74,9 @@ export default function AuthPage({ mode = 'login' }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent] = useState(null);
-  const [siteKey, setSiteKey] = useState('');
-  const [botToken, setBotToken] = useState('');
-  const [botReset, setBotReset] = useState(0);
-  const [botUnavailable, setBotUnavailable] = useState(false);
+  // Sign-in shows the bot check only once the server asks for one (after repeated failures).
+  const [botWanted, setBotWanted] = useState(false);
+  const bot = useBotCheck(isRegister ? 'signup' : 'login', isRegister || botWanted);
   const [unverifiedHint, setUnverifiedHint] = useState(false);
   const [suspendedHint, setSuspendedHint] = useState(false);
   const fields = useRef({});
@@ -90,21 +90,6 @@ export default function AuthPage({ mode = 'login' }) {
   useEffect(() => {
     if (!loading && user) navigate(next, { replace: true });
   }, [loading, user, navigate, next]);
-
-  // The Turnstile site key ships with /api/config; an empty key means the server skips the check.
-  useEffect(() => {
-    if (!isRegister) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const config = await api.get('/api/config');
-        if (!cancelled) setSiteKey(config?.turnstile_site_key || '');
-      } catch {
-        // Without config the form still works; the server decides whether a bot check is required.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isRegister]);
 
   // Switching between sign in and create account keeps this component mounted; start clean.
   useEffect(() => {
@@ -144,10 +129,11 @@ export default function AuthPage({ mode = 'login' }) {
       focusField(firstInvalid);
       return;
     }
-    if (isRegister && siteKey && !botToken && !botUnavailable) {
-      setError('Complete the bot check before creating your account.');
+    if (bot.needsToken) {
+      setError(isRegister ? 'Complete the bot check before creating your account.' : 'Complete the bot check before signing in.');
       return;
     }
+    const turnstileToken = bot.consume();
     setBusy(true);
     setError('');
     setUnverifiedHint(false);
@@ -162,13 +148,15 @@ export default function AuthPage({ mode = 'login' }) {
           accept_terms: form.accept_terms,
           website: form.website,
         };
-        if (botToken) payload.turnstile_token = botToken;
+        if (turnstileToken) payload.turnstile_token = turnstileToken;
         const result = await register(payload);
         // No session yet: the account is created when the emailed link is opened.
         setSent({ email: payload.email, debugToken: result?.debug_token || '' });
         return;
       } else {
-        await login({ identifier: form.identifier.trim(), password: form.password });
+        const credentials = { identifier: form.identifier.trim(), password: form.password };
+        if (turnstileToken) credentials.turnstile_token = turnstileToken;
+        await login(credentials);
       }
       try {
         await replayPendingAction();
@@ -182,12 +170,11 @@ export default function AuthPage({ mode = 'login' }) {
       if (isRegister && ['email', 'username', 'password', 'accept_terms'].includes(field)) {
         setServerErrors((current) => ({ ...current, [field]: message }));
         focusField(field);
+      } else if (!isRegister && requestError?.code === 'BOT_CHECK_FAILED' && !botWanted) {
+        setBotWanted(true);
+        setError('Too many failed sign-ins. Complete the bot check, then sign in.');
       } else {
         setError(message);
-        if (isRegister && requestError?.code === 'BOT_CHECK_FAILED') {
-          setBotToken('');
-          setBotReset((value) => value + 1);
-        }
         if (requestError?.code === 'ACCOUNT_SUSPENDED') setSuspendedHint(true);
         if (requestError?.code === 'INVALID_CREDENTIALS') {
           setUnverifiedHint(true);
@@ -202,7 +189,9 @@ export default function AuthPage({ mode = 'login' }) {
     }
   };
 
-  const resendVerification = async (email) => api.post('/api/auth/resend-verification', { email });
+  const resendVerification = async (email, turnstileToken) => (
+    api.post('/api/auth/resend-verification', turnstileToken ? { email, turnstile_token: turnstileToken } : { email })
+  );
 
   const resendFromLogin = async () => {
     const identifier = form.identifier.trim();
@@ -211,11 +200,21 @@ export default function AuthPage({ mode = 'login' }) {
       focusField('identifier');
       return;
     }
+    if (bot.needsToken) {
+      setError('Complete the bot check before resending the link.');
+      return;
+    }
+    const turnstileToken = bot.consume();
     setBusy(true);
     try {
-      const result = await resendVerification(identifier);
+      const result = await resendVerification(identifier, turnstileToken);
       setSent({ email: identifier, debugToken: result?.debug_token || '' });
     } catch (requestError) {
+      if (requestError?.code === 'BOT_CHECK_FAILED' && !botWanted) {
+        setBotWanted(true);
+        setError('Complete the bot check before resending the link.');
+        return;
+      }
       setError(requestError?.message || 'Could not resend the email.');
     } finally {
       setBusy(false);
@@ -241,7 +240,7 @@ export default function AuthPage({ mode = 'login' }) {
         <CheckEmailView
           email={sent.email}
           debugToken={sent.debugToken}
-          onResend={() => resendVerification(sent.email)}
+          onResend={(turnstileToken) => resendVerification(sent.email, turnstileToken)}
           onChangeEmail={() => { setSent(null); setError(''); }}
         />
       ) : (
@@ -316,12 +315,6 @@ export default function AuthPage({ mode = 'login' }) {
               {' '}and{' '}
               <Link className="sx-au-link" to="/privacy" target="_blank" rel="noopener">Privacy Policy</Link>.
             </AuthCheckbox>
-            <Turnstile
-              siteKey={siteKey}
-              resetKey={botReset}
-              onToken={(token) => { setBotToken(token); if (token && error) setError(''); }}
-              onUnavailable={() => setBotUnavailable(true)}
-            />
           </>
         ) : (
           <>
@@ -341,6 +334,11 @@ export default function AuthPage({ mode = 'login' }) {
             />
           </>
         )}
+        <Turnstile
+          {...bot.widget}
+          // Only a bot-check prompt goes away with a new token; the widget re-issues one after every attempt.
+          onToken={(token) => { bot.widget.onToken(token); if (token && /bot check|verify you are human/i.test(error)) setError(''); }}
+        />
         {error ? <AuthNotice tone="err">{error}</AuthNotice> : null}
         {!isRegister && unverifiedHint ? (
           <p className="sx-au-hint">

@@ -401,6 +401,7 @@
   .comment-time-btn:focus-visible,
   .comment-like-btn:focus-visible,
   .comment-delete-btn:focus-visible,
+  .comment-reply-cancel:focus-visible,
   .follow-pill:focus-visible,
   .meta-creator:focus-visible,
   .twitch-comment-pill:focus-visible,
@@ -1213,6 +1214,8 @@
     margin-bottom: 8px;
   }
   .comment-item-head-left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+  /* Replies sit indented under the comment they answer. */
+  .comment-item.comment-reply { margin-left: 28px; }
   .comment-avatar {
     width: 32px; height: 32px;
     display: flex; align-items: center; justify-content: center;
@@ -1361,6 +1364,16 @@
     letter-spacing: 0.06em;
   }
   .comment-delete-btn:hover { color: var(--sx-accent); }
+  .comment-reply-cancel {
+    border: 0;
+    padding: 0 14px;
+    height: 100%;
+    background: transparent;
+    color: var(--sx-accent);
+    cursor: pointer;
+    font: 700 16px/1 'JetBrains Mono', monospace;
+  }
+  .comment-reply-cancel[hidden] { display: none; }
   .sync-time-toggle {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--sx-surface-3);
@@ -1517,6 +1530,8 @@
   }
   .reward-toast.show { opacity: 1; transform: translate(-50%, 0); }
   .reward-toast.award { border-color: var(--sx-success-hi); color: var(--sx-success-hi); box-shadow: 0 0 22px color-mix(in srgb, var(--sx-success-hi) 24%, transparent); }
+  .reward-toast.jackpot { border-color: var(--sx-warn); color: var(--sx-warn); box-shadow: 0 0 26px color-mix(in srgb, var(--sx-warn) 40%, transparent); }
+  .reward-toast.jackpot.mega { border-color: var(--sx-danger); color: var(--sx-danger); box-shadow: 0 0 26px color-mix(in srgb, var(--sx-danger) 45%, transparent); }
 
   .video-error-overlay {
     position: absolute;
@@ -2510,6 +2525,7 @@
       <form class="comment-form" id="commentForm">
         <div class="comment-input-wrap">
           <input type="text" class="comment-input" id="commentInput" aria-label="Add a comment" maxlength="500" placeholder="Add a comment at 0:00..." autocomplete="off" />
+          <button type="button" class="comment-reply-cancel" id="commentReplyCancel" aria-label="Cancel reply" title="Cancel reply" hidden>×</button>
         </div>
         <button type="submit" class="comment-submit-btn" id="commentSubmitBtn">SEND</button>
       </form>
@@ -2604,6 +2620,8 @@
     let isMuted = true;
     let activeTab = 'all';
     let isSyncTimeActive = true;
+    // Comment the composer is replying to ({ id, author_name, prefill }), or null.
+    let replyTarget = null;
     // Docked details column (desktop SPA embed): true while the comments drawer
     // and PREV/NEXT group live in the side column instead of the player frame.
     let isDocked = false;
@@ -2750,6 +2768,7 @@
     const commentForm = document.getElementById('commentForm');
     const commentInput = document.getElementById('commentInput');
     const commentSubmitBtn = document.getElementById('commentSubmitBtn');
+    const commentReplyCancel = document.getElementById('commentReplyCancel');
 
     // <auto-captions>
     // Captions made at publish (a WebVTT file, when the server could run the speech model). A hidden <track>
@@ -2888,6 +2907,22 @@
       if (!entry.vr2k_url || vrLinkMbps() >= VR_MASTER_MIN_MBPS) return false;
       try { return typeof WebXRVR !== 'undefined' && !!(WebXRVR.isPresenting && WebXRVR.isPresenting()); } catch (e) { return false; }
     }
+    // 2D viewers play the 2k rendition too: a 654 px player gains nothing
+    // from a 3840 px master or the 2160p H.264 proxy the feed hands out by
+    // default. Mono posts only (a stereo post's 2k file holds both eyes), and
+    // since it is HEVC only where this browser decodes HEVC. One that fails
+    // to load falls back to `url` (handleVr2kFailure).
+    let hevcPlayable = null;
+    function canPlayHevc() {
+      if (hevcPlayable === null) {
+        try { hevcPlayable = !!(video.canPlayType && video.canPlayType('video/mp4; codecs="hvc1.1.6.L150.90"')); }
+        catch (e) { hevcPlayable = false; }
+      }
+      return hevcPlayable;
+    }
+    function wantsVr2kIn2d(entry, item) {
+      return !!entry.vr2k_url && !(item && item.vr2kFailed) && canPlayHevc();
+    }
 
     // What to load for a post or slide right now: {url, layout, crop}.
     // `layout` is the stereo layout of that file; `crop` names the layout to
@@ -2904,12 +2939,27 @@
         return { url: wantsVr2k(entry) ? entry.vr2k_url : entry.stereo_url, layout: layout, crop: '' };
       }
       if (layout === 'mono' && wantsVr2k(entry)) return { url: entry.vr2k_url, layout: 'mono', crop: '' };
+      if (layout === 'mono' && !wantsStereoSource() && wantsVr2kIn2d(entry, item)) {
+        return { url: entry.vr2k_url, layout: 'mono', crop: '' };
+      }
+      // Image entries carry WebP renditions: the VR one (up to 2048 px) for
+      // the headset texture, the 2D one (1080p) elsewhere. Both fall back to
+      // the original server-side, and older payloads have neither.
+      if (layout === 'mono' && entry.vr_url && wantsStereoSource()) return { url: entry.vr_url, layout: 'mono', crop: '' };
       const crop = layout !== 'mono' && entry.stereo_crop ? layout : '';
-      return { url: entry.url, layout: crop ? layout : 'mono', crop: crop };
+      return { url: (!crop && entry.display_url) || entry.url, layout: crop ? layout : 'mono', crop: crop };
     }
 
     function playbackUrlFor(entry, item) {
       return resolveItemUrl({ url: playbackFor(entry, item).url, tunnel_url: item && item.tunnel_url });
+    }
+
+    // An item's first file to load: an image post shows its cover image,
+    // whose renditions the post itself does not carry.
+    function itemPlaybackUrl(item) {
+      if (!isImageItem(item)) return playbackUrlFor(item, item);
+      const cover = imageSlidesFor(item)[0];
+      return cover ? playbackUrlFor(cover, item) : '';
     }
 
     function blobFor(index, url) {
@@ -3209,6 +3259,26 @@
       return (item && item.comments) ? item.comments : [];
     }
 
+    // Replies follow the top-level comment they answer; a reply whose parent is
+    // gone (deleted, hidden) shows top-level. With generalOnly, time-synced
+    // top-level comments drop out, and their replies with them.
+    function threadComments(list, generalOnly) {
+      const ids = new Set(list.map((comment) => comment.id));
+      const replies = new Map();
+      const roots = [];
+      list.forEach((comment) => {
+        if (comment.parent_id && ids.has(comment.parent_id)) {
+          if (!replies.has(comment.parent_id)) replies.set(comment.parent_id, []);
+          replies.get(comment.parent_id).push(comment);
+        } else {
+          roots.push(comment);
+        }
+      });
+      return roots
+        .filter((comment) => !generalOnly || comment.timestamp === null || comment.timestamp === undefined)
+        .flatMap((comment) => [comment].concat(replies.get(comment.id) || []));
+    }
+
     // Until a paged row's comments arrive, its count comes from comments_count.
     function currentCommentCount() {
       const item = videoData[idx];
@@ -3285,6 +3355,7 @@
         );
         err.status = response.status;
         err.code = detail && typeof detail === 'object' ? detail.code : null;
+        err.reason = detail && typeof detail === 'object' ? detail.reason || null : null;
         throw err;
       }
       return body;
@@ -3485,6 +3556,17 @@
       } else {
         showFlash('3D UNAVAILABLE — SHOWING 2D');
       }
+      return true;
+    }
+
+    // A 2k rendition that fails in 2D (no HEVC decoder after all, or a lost
+    // file) falls back to the post's url for the rest of the visit.
+    // Returns true when handled.
+    function handleVr2kFailure(failedItem) {
+      if (!failedItem || failedItem.vr2kFailed || wantsStereoSource()) return false;
+      if (!failedItem.vr2k_url || playbackFor(failedItem, failedItem).url !== failedItem.vr2k_url) return false;
+      failedItem.vr2kFailed = true;
+      syncStereoSource(video.currentTime || 0);
       return true;
     }
 
@@ -4429,6 +4511,8 @@
         ? window.ReelsRewards.progressMessage(result)
         : (result.credit_awarded ? '+1 ECHO CREDIT' : String(result.progress || 0) + '/10 TO NEXT CREDIT');
       showRewardToast(message, result.credit_awarded);
+      if (rewardToast) rewardToast.classList.toggle('jackpot', !!(result.credit_awarded && result.jackpot));
+      if (rewardToast) rewardToast.classList.toggle('mega', !!(result.credit_awarded && result.jackpot === 'mega'));
       try {
         if (typeof WebXRVR !== 'undefined' && WebXRVR.shell && WebXRVR.shell.noteReward) WebXRVR.shell.noteReward(result);
       } catch (e) {}
@@ -4438,9 +4522,6 @@
       try {
         if (window.parent && window.parent !== window) window.parent.postMessage(detail, location.origin);
       } catch (e) {}
-      if (typeof WebXRVR !== 'undefined' && WebXRVR.showNotification) {
-        WebXRVR.showNotification(message);
-      }
     }
 
     // <reels-reward-claim>
@@ -4448,6 +4529,10 @@
     // SX_REEL_REWARDS_ENABLED=0): no more reward_eligible events or claims this page session.
     let rewardClaimsDisabled = false;
     const REWARD_TRANSIENT_RETRY_LIMIT = 3;
+    // 422 reasons that can still pass on a later attempt; any other reason is terminal.
+    const REWARD_TIMING_REASONS = ['no_telemetry', 'below_threshold', 'too_early'];
+    // Terminal reasons that hold for every reel this page session, not just this one.
+    const REWARD_PAGE_TERMINAL_REASONS = ['account_too_new', 'ip_cap'];
 
     async function maybeClaimReelReward(state) {
       if (rewardClaimsDisabled || !state || state.finished || state.rewardClaimSent || !currentUser) return;
@@ -4489,6 +4574,8 @@
           }),
         });
         showRewardProgress(result);
+        // Capped for today: later reels would only re-post events and claims that earn nothing.
+        if (result && result.daily_cap_reached) rewardClaimsDisabled = true;
       } catch (error) {
         if (error.code === 'REWARDS_DISABLED') {
           // Rewards are off server-side: terminal and silent. Leaving rewardClaimSent set
@@ -4512,6 +4599,11 @@
           } else {
             showRewardToast('REWARDS UNAVAILABLE RIGHT NOW', false);
           }
+        } else if (error.reason && REWARD_PAGE_TERMINAL_REASONS.includes(error.reason)) {
+          rewardClaimsDisabled = true;
+          showRewardToast('REWARD NOT ELIGIBLE', false);
+        } else if (error.reason && !REWARD_TIMING_REASONS.includes(error.reason)) {
+          // Terminal for this reel (self-view, stale impression...): rewardClaimSent stays set.
         } else {
           // Other 4xx (validation / telemetry timing): the server event may
           // land just after the claim — allow up to 2 retries with backoff,
@@ -4519,7 +4611,11 @@
           state.rewardClaimAttempts = (state.rewardClaimAttempts || 0) + 1;
           if (state.rewardClaimAttempts <= 2) {
             setTimeout(() => {
-              if (viewTracker === state && !state.finished) state.rewardClaimSent = false;
+              // A fresh id: the server dedupes client_event_id, so a reused one never re-measures.
+              if (viewTracker === state && !state.finished) {
+                state.rewardEventId = eventId();
+                state.rewardClaimSent = false;
+              }
             }, 4000);
           } else {
             showRewardToast('REWARD NOT ELIGIBLE YET', false);
@@ -4791,7 +4887,7 @@
       else if (pending.kind === 'collect') await openCollectOverlay();
       else if (pending.kind === 'follow') await followCurrentCreator();
       else if (pending.kind === 'comment' && pending.text) {
-        const posted = await postComment(pending.text, pending.timestamp);
+        const posted = await postComment(pending.text, pending.timestamp, pending.parent_id);
         if (posted && commentInput) commentInput.value = '';
       } else if (pending.kind === 'comment-like' && pending.comment_id) {
         await likeComment(pending.comment_id);
@@ -5349,10 +5445,12 @@
       }
     }
 
-    async function postComment(text, timestamp) {
+    async function postComment(text, timestamp, parentId) {
       const item = videoData[idx];
       if (!item || !item.post_id) return null;
-      const normalizedTimestamp = timestamp !== null && timestamp !== undefined
+      const parent = parentId || null;
+      // Replies are general: they never pop up on the timeline.
+      const normalizedTimestamp = timestamp !== null && timestamp !== undefined && !parent
         ? Math.round(Number(timestamp) * 10) / 10
         : null;
       if (!currentUser) {
@@ -5361,6 +5459,7 @@
           post_id: item.post_id,
           text: text,
           timestamp: normalizedTimestamp,
+          parent_id: parent,
         });
         return null;
       }
@@ -5368,14 +5467,19 @@
         const newComment = await requestJson('/api/posts/' + encodeURIComponent(item.post_id) + '/comments', {
           method: 'POST',
           headers: recommendationHeaders(item, { 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ text: text, timestamp: normalizedTimestamp }),
+          body: JSON.stringify({ text: text, timestamp: normalizedTimestamp, parent_id: parent }),
         });
         if (!item.comments) item.comments = [];
         item.comments.push(newComment);
         item.comments_count = Number(item.comments_count || 0) + 1;
         renderDrawerComments();
         renderCommentMarkers();
-        showFlash('COMMENT POSTED');
+        if (newComment.parent_id) {
+          // A reply lands mid-list under its thread, so bring it into view.
+          const row = document.getElementById('comment-' + newComment.id);
+          if (row) row.scrollIntoView({ block: 'nearest' });
+        }
+        showFlash(newComment.parent_id ? 'REPLY POSTED' : 'COMMENT POSTED');
         return newComment;
       } catch (error) {
         if (error.status === 401 || error.status === 403) {
@@ -5386,6 +5490,7 @@
             post_id: item.post_id,
             text: text,
             timestamp: normalizedTimestamp,
+            parent_id: parent,
           });
         } else {
           showFlash('COMMENT FAILED');
@@ -5590,10 +5695,8 @@
       if (commentBtn) commentBtn.setAttribute('aria-label', 'Comments, ' + total);
       if (sideComms) sideComms.textContent = fmtCount(total);
 
-      let filtered = comments;
-      if (activeTab === 'general') {
-        filtered = comments.filter((comment) => comment.timestamp === null || comment.timestamp === undefined);
-      }
+      const filtered = threadComments(comments, activeTab === 'general');
+      const shownIds = new Set(filtered.map((comment) => comment.id));
 
       commentsList.replaceChildren();
       if (!filtered.length) {
@@ -5612,7 +5715,8 @@
       filtered.forEach((comment) => {
         const border = safeColor(comment.avatar_color, '#ff553a');
         const item = document.createElement('div');
-        item.className = 'comment-item';
+        const isReply = !!(comment.parent_id && shownIds.has(comment.parent_id));
+        item.className = 'comment-item' + (isReply ? ' comment-reply' : '');
         item.id = 'comment-' + comment.id;
         item.style.setProperty('--avatar-border', border);
 
@@ -5671,6 +5775,14 @@
         like.append(likeIcon, likeCountNode);
         like.addEventListener('click', () => likeComment(comment.id));
         actions.appendChild(like);
+
+        const reply = document.createElement('button');
+        reply.type = 'button';
+        reply.className = 'comment-delete-btn';
+        reply.textContent = 'REPLY';
+        reply.title = 'Reply to ' + (comment.author_name ? '@' + comment.author_name : 'this comment');
+        reply.addEventListener('click', () => startReply(comment, isReply));
+        actions.appendChild(reply);
 
         if (comment.can_delete) {
           const remove = document.createElement('button');
@@ -5818,11 +5930,45 @@
     // time-sync toggle and drop the "at 0:00" hint while an image post shows.
     function syncCommentComposer(item) {
       const still = isImageItem(item);
-      if (syncTimeToggle) syncTimeToggle.style.display = still ? 'none' : '';
+      // Replies are never time-synced, so the toggle hides while replying.
+      if (syncTimeToggle) syncTimeToggle.style.display = still || replyTarget ? 'none' : '';
+      if (commentReplyCancel) commentReplyCancel.hidden = !replyTarget;
       if (!commentInput) return;
+      if (replyTarget) {
+        commentInput.placeholder = replyTarget.author_name ? `Reply to @${replyTarget.author_name}...` : 'Reply...';
+        commentInput.setAttribute('aria-label', commentInput.placeholder);
+        return;
+      }
+      commentInput.setAttribute('aria-label', 'Add a comment');
       if (still) commentInput.placeholder = 'Add a comment...';
       else if (isSyncTimeActive) commentInput.placeholder = `Add a comment at ${formatTime(video.currentTime || 0)}...`;
       else commentInput.placeholder = 'Add a general comment...';
+    }
+
+    // Replying to a reply joins the same thread; the "@name" prefill says who it answers.
+    function startReply(comment, isReply) {
+      const name = comment.author_name || '';
+      const prefill = isReply && name ? '@' + name : '';
+      replyTarget = { id: comment.id, author_name: name, prefill: prefill };
+      if (commentInput) {
+        if (prefill && !commentInput.value.trim()) commentInput.value = prefill + ' ';
+        commentInput.focus();
+      }
+      syncCommentComposer(videoData[idx]);
+    }
+
+    function cancelReply() {
+      if (!replyTarget) return;
+      if (commentInput && replyTarget.prefill && commentInput.value.trim() === replyTarget.prefill) commentInput.value = '';
+      replyTarget = null;
+      syncCommentComposer(videoData[idx]);
+    }
+
+    if (commentReplyCancel) {
+      commentReplyCancel.addEventListener('click', () => {
+        cancelReply();
+        if (commentInput) commentInput.focus();
+      });
     }
 
     if (syncTimeToggle) {
@@ -5844,11 +5990,14 @@
       commentForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const txt = (commentInput ? commentInput.value : '').trim();
-        if (!txt) return;
+        const parentId = replyTarget ? replyTarget.id : null;
+        // A reply that is still only its "@name" prefill has nothing to say.
+        if (!txt || (replyTarget && txt === replyTarget.prefill)) return;
         // Stills have no playback clock — always post general comments.
         const ts = (isSyncTimeActive && !isImageItem(videoData[idx])) ? video.currentTime : null;
-        const posted = await postComment(txt, ts);
+        const posted = await postComment(txt, ts, parentId);
         if (posted && commentInput) commentInput.value = '';
+        if (posted && parentId) cancelReply();
       });
     }
 
@@ -5900,13 +6049,11 @@
         // decode image files.
         try {
           const warmer = new Image();
-          const nextUrl = playbackUrlFor(nextItem, nextItem);
+          // The cover URL resolveSlideUrl gives showImageSlide(0).
+          const nextUrl = itemPlaybackUrl(nextItem);
           warmer.src = blobFor(nextIdx, nextUrl) || nextUrl;
           if (typeof WebXRVR !== 'undefined' && WebXRVR.isPresenting && WebXRVR.isPresenting()) {
-            // Key by the cover URL resolveSlideUrl gives showImageSlide(0).
-            const cover = imageSlidesFor(nextItem)[0];
-            const coverUrl = cover ? playbackUrlFor(cover, nextItem) : '';
-            vrImagePrefetch(blobFor(nextIdx, coverUrl) || coverUrl);
+            vrImagePrefetch(blobFor(nextIdx, nextUrl) || nextUrl);
           }
         } catch (e) {}
         return;
@@ -6040,6 +6187,8 @@
 
       // Update comments display for this reel
       renderDrawerComments();
+      // A reply target belongs to the reel it was picked on.
+      replyTarget = null;
       syncCommentComposer(item);
 
       if (isImageItem(item)) {
@@ -6185,6 +6334,10 @@
         console.warn('[ReelsPlayer] Stereo source failed, falling back to 2D:', stereoSrc);
         return;
       }
+      if (handleVr2kFailure(videoData[idx])) {
+        console.warn('[ReelsPlayer] 2k rendition failed, falling back to the post url:', stereoSrc);
+        return;
+      }
       
       const isProxy = video.src.includes('-preview.mp4');
       if (window.location.protocol === 'https:' && video.src.startsWith('http:')) {
@@ -6318,7 +6471,8 @@
 
       for (let off = 1; off <= total; off++) {
         const i = idx + off;
-        const url = playbackUrlFor(videoData[i], videoData[i]);
+        const url = itemPlaybackUrl(videoData[i]);
+        if (!url) continue;
         if (blobFor(i, url)) {
           preloadedCount++;
           updatePreloadStatus();
@@ -6520,6 +6674,59 @@
       loadVideo(idx, { autoplay: true });
       showFlash(String(activeLocationFeed.name).toUpperCase());
       return true;
+    }
+
+    // VR Explore/Search tile tap: play through the recommender. The server plays
+    // the grid order (scope_ids, starting at the tapped reel) first, then related
+    // reels. Falls back to the plain grid swap when it cannot.
+    async function playVrShellFeed(feed) {
+      const items = feed && Array.isArray(feed.videoData) ? feed.videoData.filter(Boolean) : [];
+      const start = Math.max(0, Math.min(items.length - 1, Number(feed && feed.startIndex) || 0));
+      const tapped = items[start];
+      if (!tapped || !tapped.post_id) return replaceFeedForVr(feed);
+      const ids = items.slice(start).concat(items.slice(0, start))
+        .map((item) => item && item.post_id)
+        .filter(Boolean)
+        .slice(0, 200);
+      const params = {
+        codec: feedParams.codec,
+        folder: feedParams.folder,
+        post: tapped.post_id,
+        scope_ids: ids.join(','),
+      };
+      captureOriginalFeed();
+      abortFeedWork();
+      const generation = feedGeneration;
+      feedTransitionController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      try {
+        const page = await requestJson(feedRequestUrl(null, params), {
+          signal: feedTransitionController ? feedTransitionController.signal : undefined,
+        });
+        if (!FeedState.isCurrent(generation, feedGeneration)) return false;
+        const nextState = FeedState.fromPage(page, params, { slug: '', name: feed.label || 'EXPLORE' });
+        if (!nextState.videoData.length) return replaceFeedForVr(feed);
+        finishViewTracking('vr_shell_feed');
+        clearImageTimer();
+        clearBlobCache();
+        try { video.pause(); } catch (e) {}
+        videoData = nextState.videoData;
+        feedParams = nextState.feedParams;
+        feedCursor = nextState.feedCursor;
+        feedHasMore = nextState.feedHasMore;
+        activeLocationFeed = { slug: '', name: String(feed.label || 'EXPLORE') };
+        idx = nextState.idx;
+        preloadedCount = 0;
+        loadVideo(0, { autoplay: true });
+        showFlash(activeLocationFeed.name.toUpperCase());
+        return true;
+      } catch (error) {
+        if (error && error.name === 'AbortError') return false;
+        if (!FeedState.isCurrent(generation, feedGeneration)) return false;
+        console.error('[ReelsPlayer] VR feed failed, playing the grid as is:', error);
+        return replaceFeedForVr(feed);
+      } finally {
+        if (FeedState.isCurrent(generation, feedGeneration)) feedTransitionController = null;
+      }
     }
 
     async function restoreAllLocations() {
@@ -6878,12 +7085,33 @@
     };
 
     // Video Ended -> Auto-advance or Loop
+    const replaySent = new Set();
     video.addEventListener('ended', () => {
       finishViewTracking('complete');
       if (isAutoNext) {
         nextVideo('autoplay');
       } else {
         video.currentTime = 0;
+        const replayItem = videoData[idx];
+        if (replayItem && replayItem.post_id) {
+          const replayKey = recommendationImpressionId(replayItem) || replayItem.post_id;
+          if (!replaySent.has(replayKey)) {
+            replaySent.add(replayKey);
+            requestJson('/api/events', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                event_type: 'replay',
+                post_id: replayItem.post_id,
+                pack_id: isPackMode && packState.pack ? packState.pack.id : null,
+                source: analyticsSource,
+                client_event_id: eventId(),
+                recommendation_impression_id: recommendationImpressionId(replayItem),
+                client_occurred_at: new Date().toISOString(),
+              }),
+            }).catch(() => {});
+          }
+        }
         startViewTracking(videoData[idx]);
         video.play().catch(() => {});
       }
@@ -6899,7 +7127,7 @@
         progressBar.setAttribute('aria-valuenow', String(Math.round(pct)));
         progressBar.setAttribute('aria-valuetext', formatTime(video.currentTime) + ' of ' + formatTime(video.duration));
         if (syncTimeDisplay) syncTimeDisplay.textContent = formatTime(video.currentTime);
-        if (isSyncTimeActive && commentInput && !commentInput.value) {
+        if (isSyncTimeActive && commentInput && !commentInput.value && !replyTarget) {
           commentInput.placeholder = `Add a comment at ${formatTime(video.currentTime)}...`;
         }
       }
@@ -7427,7 +7655,7 @@
         onToggleSpatial: toggleSpatial,
         getSpatialState: spatialState,
         onShellHandoff: function(path) { dispatchNavigation(path); },
-        onShellPlayFeed: replaceFeedForVr,
+        onShellPlayFeed: playVrShellFeed,
         shellRequest: function(path) {
           // Grid reels play in this player, so ask for the codec it is using.
           const sep = path.indexOf('?') >= 0 ? '&' : '?';
@@ -7517,7 +7745,7 @@
           }
         },
         onLikeComment: function(id) { return likeComment(id); },
-        onPostComment: function(text, timestamp) { return postComment(text, timestamp); },
+        onPostComment: function(text, timestamp, parentId) { return postComment(text, timestamp, parentId); },
         onVRError: function(reason, detail) {
           const messages = {
             'webxr-unavailable': 'WEBXR NOT AVAILABLE — REQUIRES HTTPS OR LOCALHOST',

@@ -96,11 +96,11 @@ def test_registration_allowlist_parsing(monkeypatch):
 
 
 def test_reel_reward_ip_cap_honors_low_values(monkeypatch):
-    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", "2")
+    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CREDITS", "2")
     assert reel_reward_ip_cap() == 2
-    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", "0")
+    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CREDITS", "0")
     assert reel_reward_ip_cap() == 1
-    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", "not-a-number")
-    assert reel_reward_ip_cap() == 50
-    monkeypatch.delenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", raising=False)
-    assert reel_reward_ip_cap() == 50
+    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CREDITS", "not-a-number")
+    assert reel_reward_ip_cap() == 25
+    monkeypatch.delenv("SX_REEL_REWARD_IP_DAILY_CREDITS", raising=False)
+    assert reel_reward_ip_cap() == 25

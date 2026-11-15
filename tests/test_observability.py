@@ -198,3 +198,20 @@ def test_app_echoes_request_id_and_sentry_tags_it():
         observability._request_id.reset(token)
     assert event["tags"] == {"area": "jobs", "request_id": "trace-0004"}
     assert "tags" not in app_module._sentry_before_send({}, None)
+
+
+def _sentry_init_environment(monkeypatch, sentry_environment):
+    monkeypatch.setenv("SENTRY_DSN", "https://k@o0.ingest.sentry.io/0")
+    monkeypatch.setenv("SX_ENV", "production")
+    monkeypatch.setenv("SENTRY_ENVIRONMENT", sentry_environment)
+    with patch("sentry_sdk.init") as init:
+        app_module._init_sentry()
+    return init.call_args.kwargs["environment"]
+
+
+def test_sentry_environment_override_wins(monkeypatch):
+    assert _sentry_init_environment(monkeypatch, "sit") == "sit"
+
+
+def test_sentry_environment_blank_falls_back_to_sx_env(monkeypatch):
+    assert _sentry_init_environment(monkeypatch, "  ") == "production"

@@ -1,4 +1,4 @@
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { act, render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   health: { probes: {}, fal_key: { ok: true } },
   messaging: { unread: { total: 3 } },
   wallet: { available_credits: 42 },
+  lastAward: null,
 }));
 
 vi.mock('../../hooks/AuthContext.jsx', () => ({
@@ -24,12 +25,13 @@ vi.mock('../../hooks/MessagingContext.jsx', () => ({
 }));
 
 vi.mock('../../hooks/WalletContext.jsx', () => ({
-  useWallet: () => ({ wallet: mocks.wallet }),
+  useWallet: () => ({ wallet: mocks.wallet, lastAward: mocks.lastAward }),
 }));
 
 describe('HeaderBar responsive behavior', () => {
   beforeEach(() => {
     mocks.user = null;
+    mocks.lastAward = null;
   });
 
   afterEach(() => {
@@ -60,6 +62,56 @@ describe('HeaderBar responsive behavior', () => {
     await user.click(screen.getByRole('button', { name: 'SIGN IN' }));
 
     expect(screen.getByTestId('where').textContent).toBe('/login?next=%2Fexplore%3Fsearch%3Dcats');
+  });
+
+  it('flashes a +N bubble on the credits pill after a reel reward', () => {
+    mocks.user = { id: 'usr-1', username: 'testcreator', display_name: 'Creator' };
+    mocks.lastAward = { amount: 1, jackpot: null, at: 1 };
+    render(
+      <MemoryRouter>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    const pill = screen.getByRole('link', { name: '42 credits' });
+    expect(screen.getByTestId('credits-award-bubble').textContent).toBe('+1');
+    expect(pill).toHaveClass('is-awarded');
+    expect(pill).not.toHaveClass('is-jackpot');
+  });
+
+  it('marks a jackpot on the credits pill and clears it after a few seconds', () => {
+    vi.useFakeTimers();
+    try {
+      mocks.user = { id: 'usr-1', username: 'testcreator', display_name: 'Creator' };
+      mocks.lastAward = { amount: 20, jackpot: 'big', at: 2 };
+      render(
+        <MemoryRouter>
+          <HeaderBar onToggleSidebar={vi.fn()} />
+        </MemoryRouter>
+      );
+
+      expect(screen.getByTestId('credits-award-bubble').textContent).toBe('JACKPOT +20');
+      expect(screen.getByRole('link', { name: '42 credits' })).toHaveClass('is-jackpot');
+      expect(screen.getByRole('link', { name: '42 credits' })).not.toHaveClass('is-mega');
+      act(() => { vi.advanceTimersByTime(4600); });
+      expect(screen.queryByTestId('credits-award-bubble')).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: '42 credits' })).not.toHaveClass('is-jackpot');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('marks a +50 mega jackpot apart from a +20 one', () => {
+    mocks.user = { id: 'usr-1', username: 'testcreator', display_name: 'Creator' };
+    mocks.lastAward = { amount: 50, jackpot: 'mega', at: 3 };
+    render(
+      <MemoryRouter>
+        <HeaderBar onToggleSidebar={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId('credits-award-bubble').textContent).toBe('JACKPOT +50');
+    expect(screen.getByRole('link', { name: '42 credits' })).toHaveClass('is-jackpot', 'is-mega');
   });
 
   it('marks the ECHO wordmark to pulse like the logo on hover', () => {

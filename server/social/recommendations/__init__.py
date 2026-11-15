@@ -7,6 +7,7 @@ from .service import (
     dismiss_recommendation,
     get_creator_page,
     get_reel_page,
+    rank_grid,
 )
 from .events import RecommendationAttributionError
 
@@ -18,4 +19,5 @@ __all__ = [
     "dismiss_recommendation",
     "get_creator_page",
     "get_reel_page",
+    "rank_grid",
 ]

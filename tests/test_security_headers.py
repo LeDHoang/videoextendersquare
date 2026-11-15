@@ -332,3 +332,12 @@ def test_csp_report_rate_limited_per_ip(client):
     codes = [client.post("/api/csp-report", content=body, headers=headers).status_code for _ in range(security_headers.CSP_REPORT_RATE + 1)]
     assert codes[:-1] == [204] * security_headers.CSP_REPORT_RATE
     assert codes[-1] == 429
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/docs/x"])
+def test_production_gives_docs_paths_no_csp_exemption(client, monkeypatch, path):
+    # Production serves no API docs, so these paths fall through to the SPA shell
+    # and must carry the same policy as every other page.
+    monkeypatch.setenv("SX_ENV", "production")
+    monkeypatch.setenv("SX_CSP_MODE", "enforce")
+    assert "content-security-policy" in client.get(path).headers

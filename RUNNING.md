@@ -187,7 +187,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_STRIPE_PRICE_2750` | Stripe Price ID for the $25 / 2,750-credit pack | — |
 | `SX_PUBLIC_BASE_URL` | Browser origin used for Stripe Checkout return URLs (required for Checkout; no `Host` fallback) | — |
 | `SX_BILLING_RESERVED_TTL_MIN` | Age after which never-submitted credit reservations are reaped (minimum 5) | `30` |
-| `SX_REEL_REWARD_IP_DAILY_CLAIMS` | Eligible reel claims allowed per keyed IP per UTC day | `50` (minimum `1`) |
+| `SX_REEL_REWARD_IP_DAILY_CREDITS` | Reel-reward credits allowed per keyed IP per UTC day | `25` (minimum `1`) |
 | `SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS` | Account age before reel rewards can be claimed (422 `REWARD_INELIGIBLE`, reason `account_too_new`) | `72` |
 | `SX_DAILY_CREDIT_CAP` | Credits one account can hold or spend on cloud jobs per UTC day (429 `DAILY_SPEND_CAP`; refunded jobs do not count; My Fal Key jobs are exempt). This is the `standard` tier value; `SX_NEW_DAILY_CREDIT_CAP`, `SX_RESTRICTED_DAILY_CREDIT_CAP` and `SX_TRUSTED_DAILY_CREDIT_CAP` default to 100 / 50 / 3000 | `1000` |
 | `SX_STARTER_CREDITS` | Credits granted once when an email is verified (only while `SX_CREDITS_ENABLED` is on; ledger key `starter:<user id>`) | `0` |
@@ -201,7 +201,7 @@ refuses to boot until every check in `server/settings.py` passes.
 | `SX_EVENT_RPM` | View and event writes per actor per minute; the per-IP limit is 5x | `120` |
 | `SX_EVENT_DAILY_CAP` | Contributions one actor can add to one post per UTC day when the event has no impression | `5` |
 | `SX_EMAIL_VERIFY_TTL_MIN` | Lifetime of the sign-up verification link in minutes; the account exists only after it is used | `1440` |
-| `SX_TURNSTILE_SITE_KEY` / `SX_TURNSTILE_SECRET` | Cloudflare Turnstile for sign-up. The site key goes to the SPA, the secret stays on the server. With the secret unset the check is skipped and a warning is logged at boot | empty |
+| `SX_TURNSTILE_SITE_KEY` / `SX_TURNSTILE_SECRET` | Cloudflare Turnstile for sign-up, sign-in (only after 5 failed sign-ins on one account or from one IP within 15 minutes), password reset, resend-verification and signed-out support requests. The site key goes to the SPA, the secret stays on the server. With the secret unset the check is skipped and a warning is logged at boot. A token must carry its form's action and the hostname of `SX_PUBLIC_URL`; Cloudflare's test keys skip those two checks | empty |
 | `SX_LOGIN_RATE_LIMIT` | `0` lifts the sign-in limits (20 per IP, 10 per account, per 15 min) for scripted runs. Production refuses to boot with `0` unless `SX_PUBLIC_URL` is a localhost URL | `1` |
 | `SX_MOD_SPIKE_MIN` | Smallest count the moderation Overview flags as a spike (at least 3x the previous window) | `10` |
 | `SX_STEREO_CONVERT_ENABLED` | MAKE 3D (`POST /api/stereo/convert`, `docs/stereo-3d-reels.md`). It also needs `pip install -r requirements-3d.txt`; without those packages `/api/config` reports it off and the route answers 503 | `0` |

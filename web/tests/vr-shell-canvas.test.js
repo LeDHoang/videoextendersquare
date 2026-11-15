@@ -482,3 +482,36 @@ test('vr_shell_canvas.js paints no carbon literal or chamfer', () => {
   assert.ok(!/chamferPath/.test(source), 'shell mentions chamferPath');
   assert.ok(!/chamferPath/.test(uiSource), 'ui mentions chamferPath');
 });
+
+test('the CREDITS tile shows the balance beside its icon, abbreviated past four digits', () => {
+  const sc = loadCanvas();
+  const plain = recordingCtx();
+  sc.renderNavBar(plain.ctx, { open: false }, '');
+  assert.ok(!plain.texts.some((t) => /^\d/.test(t)), 'no balance until it is known');
+  const rec = recordingCtx();
+  sc.renderNavBar(rec.ctx, { open: false, credits: 1234 }, '');
+  assert.ok(rec.texts.includes('1,234'));
+  assert.equal(sc.formatCredits(0), '0');
+  assert.equal(sc.formatCredits(9999), '9,999');
+  assert.equal(sc.formatCredits(123456), '123K');
+  assert.equal(sc.formatCredits(2345678), '2.3M');
+});
+
+test('reward popup: +1 outlined in success, jackpots filled yellow (+20) and rose (+50) in both modes', () => {
+  const { sc, ui } = loadThemed();
+  for (const mode of ['light', 'dark']) {
+    ui.setTheme(mode);
+    const T = ui.TOKEN_SETS[mode].hex;
+    const one = paintCtx();
+    sc.renderRewardPopup(one.ctx, { amount: 1, jackpot: null });
+    assert.deepEqual(one.texts.map((t) => [t.text, t.style]), [['+1 ECHO CREDIT', T.success]]);
+    const big = paintCtx();
+    sc.renderRewardPopup(big.ctx, { amount: 20, jackpot: 'big' });
+    assert.equal(big.fills[0], T.spot);
+    assert.deepEqual(big.texts.map((t) => [t.text, t.style]), [['JACKPOT! +20 ECHO CREDITS', T.onSpot]]);
+    const mega = paintCtx();
+    sc.renderRewardPopup(mega.ctx, { amount: 50, jackpot: 'mega' });
+    assert.equal(mega.fills[0], T.danger);
+    assert.deepEqual(mega.texts.map((t) => [t.text, t.style]), [['JACKPOT! +50 ECHO CREDITS', T.onAccent]]);
+  }
+});

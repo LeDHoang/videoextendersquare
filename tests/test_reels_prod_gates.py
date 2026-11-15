@@ -136,3 +136,54 @@ def test_diag_still_works_in_dev(app, monkeypatch):
     with TestClient(app) as client:
         assert client.post("/api/reels/diag", json={"fps": 72}).json() == {"ok": True}
         assert client.get("/api/reels/diag").json()["fps"] == 72
+
+
+REFRESH_URLS = [
+    "/api/reels?refresh=true",
+    "/api/reels/feed?refresh=true",
+    "/api/reels/tags/any?refresh=true",
+    "/api/reels/locations/any?refresh=true",
+]
+
+
+@pytest.mark.parametrize("url", REFRESH_URLS)
+def test_refresh_rescans_for_admins_only(app, monkeypatch, url):
+    monkeypatch.setenv("SX_ADMIN_USERS", "scan_admin")
+    monkeypatch.setitem(reels._scan_cache, "at", 0.0)
+    monkeypatch.setitem(reels._scan_cache, "data", [])
+    scans = []
+    real = reels.post_media_items
+    monkeypatch.setattr(reels, "post_media_items", lambda db: scans.append(1) or real(db))
+    # Loose files in a local output/ would fill the cache on their own; CI has none.
+    monkeypatch.setattr(reels.SM, "scan_output_media", lambda root: [])
+    with TestClient(app) as anonymous, TestClient(app) as member, TestClient(app) as admin:
+        user = register(member, "scan_member")
+        register(admin, "scan_admin")
+        add_post(app, user["id"], "uploads/scan.mp4", media_files={"uploads/scan.mp4": {"bytes": 1}})
+        anonymous.get("/api/reels")          # warms the cache
+        assert len(scans) == 1
+        anonymous.get(url)
+        member.get(url)
+        assert len(scans) == 1               # ignored for both
+        admin.get(url)
+        assert len(scans) == 2
+
+
+@pytest.mark.parametrize("player", ["/api/reels/player", "/api/reels/player-inline"])
+def test_player_routes_share_the_feed_limit(app, player):
+    with TestClient(app) as client:
+        for _ in range(60):
+            assert client.get(player).status_code == 200
+        for url in (player, "/api/reels/feed"):
+            refused = client.get(url)
+            assert refused.status_code == 429
+            assert refused.json()["detail"]["code"] == "RATE_LIMITED"
+
+
+def test_pack_player_is_outside_the_feed_limit(app):
+    with TestClient(app) as client:
+        for _ in range(60):
+            client.get("/api/reels/feed")
+        assert client.get("/api/reels/feed").status_code == 429
+        # An unknown pack answers as it did before; it is never a 429.
+        assert client.get("/api/reels/player?pack_id=missing").status_code != 429

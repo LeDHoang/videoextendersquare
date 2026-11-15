@@ -7,14 +7,17 @@ import hashlib
 import hmac
 import json
 import math
+import threading
 import time
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from server.social.geo import location_coords, location_key
 from server.social.auth import SECURITY_SECRET, public_user
 from server.social.models import (
     ActorCreatorAffinity,
@@ -24,6 +27,7 @@ from server.social.models import (
     Follow,
     ItemSimilarity,
     Post,
+    PostRecommendationDailyStats,
     PostRecommendationStats,
     PostTag,
     RecommendationDismissal,
@@ -37,23 +41,39 @@ from server.social.safety import blocked_user_ids
 from server.social.services import reel_records_version
 
 from .config import (
+    CATALOG_NEWEST_SHARE,
     CREATOR_ALGORITHM_VERSION,
     CURSOR_VERSION,
     DEFAULT_PAGE_SIZE,
+    EVENT_WEIGHTS,
+    LONG_TAIL_MAX,
+    GRID_BLOCK,
+    GRID_CACHE_ANON_MAX,
+    GRID_CACHE_MAX,
+    GRID_CACHE_TTL_S,
+    GRID_CREATOR_FREE,
+    GRID_CREATOR_STEP,
     MAX_CATALOG_SIZE,
     MAX_PAGE_SIZE,
     REELS_ALGORITHM_VERSION,
     SESSION_IDLE_MINUTES,
     SESSION_MAX_HOURS,
+    TRENDING_HALF_LIFE_DAYS,
+    TRENDING_WINDOW_DAYS,
+    WATCHED_DAYS,
+    WATCHED_MS,
 )
-from .events import get_or_create
-from .ranking import rank_candidates, rerank_page
+from .events import _NAVIGATION_SKIPS, _event_value, decayed_affinity, get_or_create
+from .relatedness import age_factor, block_diverse, build_idf, location_scores, text_scores, tokenize
+from .ranking import rank_candidates, rerank_page, stats_quality
 from .sources import gather_source_hits
 from .types import (
     ActorIdentity,
+    Candidate,
     CatalogItem,
     MaterializedResult,
     PipelineContext,
+    PostLocation,
     RecommendationPage,
 )
 
@@ -248,6 +268,15 @@ def _active_dismissals(db: Session, actor_key: str) -> tuple[set[str], set[str]]
 _catalog_base_cache: dict = {"entry": (None, ())}
 
 
+def _post_location(raw) -> PostLocation | None:
+    loc = raw if isinstance(raw, dict) else {}
+    city, country = str(loc.get("city") or ""), str(loc.get("country") or "")
+    slug = location_key(city, country)
+    if not slug:
+        return None
+    return PostLocation(slug, city, country, location_coords(city, country, loc.get("lat"), loc.get("lon")))
+
+
 def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
     store = reel_records_version(False)
     cached_store, items = _catalog_base_cache["entry"]
@@ -256,7 +285,10 @@ def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
     # Plain columns, not Post entities: the catalog spans every published post
     # and needs only these.
     posts = (
-        db.query(Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count)
+        db.query(
+            Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count,
+            Post.title, Post.caption, Post.location,
+        )
         .join(User, User.id == Post.owner_id)
         .filter(Post.status == "published", Post.deleted_at.is_(None), User.status == "active")
         .order_by(Post.created_at.desc(), Post.id.desc())
@@ -276,11 +308,130 @@ def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
             created_at=aware(post.created_at),
             like_count=int(post.like_count or 0),
             view_count=int(post.view_count or 0),
+            text_tokens=tokenize(f"{post.title} {post.caption}"),
+            location=_post_location(post.location),
         )
         for post in posts
     )
     _catalog_base_cache["entry"] = (store, items)
     return items
+
+
+# The per-request pool order, kept against the base tuple and the cap it was
+# built for: the newest share first, then everything else by quality x age factor.
+# Quality reads recommendation stats as of the last rebuild (when the catalog changes).
+_catalog_pool_cache: dict = {"entry": (None, 0, ())}
+
+
+def _catalog_pool_order(db: Session) -> tuple[CatalogItem, ...]:
+    base = _catalog_base(db)
+    cached_base, cached_cap, order = _catalog_pool_cache["entry"]
+    if cached_base is base and cached_cap == MAX_CATALOG_SIZE:
+        return order
+    newest = int(MAX_CATALOG_SIZE * CATALOG_NEWEST_SHARE)
+    now = datetime.now(timezone.utc)
+    stats = {row.post_id: row for row in db.query(PostRecommendationStats).all()}
+    # `base` is newest first, so the stable sort keeps ties newest first.
+    rest = sorted(
+        base[newest:],
+        key=lambda item: -stats_quality(stats.get(item.post_id), item.like_count, item.view_count)
+        * age_factor(max(0.0, (now - item.created_at).total_seconds() / 86400.0)),
+    )
+    order = (*base[:newest], *rest)
+    _catalog_pool_cache["entry"] = (base, MAX_CATALOG_SIZE, order)
+    return order
+
+
+def _long_tail_ids(
+    db: Session,
+    *,
+    actor: ActorIdentity,
+    outside: Sequence[CatalogItem],
+    seed_ids: list[str],
+) -> frozenset[str]:
+    """Posts past the pool that this viewer likely wants, up to LONG_TAIL_MAX."""
+    if not outside:
+        return frozenset()
+    picked: dict[str, None] = {}
+
+    def take(ids: Iterable[str], limit: int) -> None:
+        taken = 0
+        for post_id in ids:
+            if taken >= limit or len(picked) >= LONG_TAIL_MAX:
+                return
+            if post_id not in picked:
+                picked[post_id] = None
+                taken += 1
+
+    newest_first = sorted(outside, key=lambda item: (item.created_at, item.post_id), reverse=True)
+    top_creators = [
+        row[0]
+        for row in db.query(ActorCreatorAffinity.creator_id)
+        .filter(ActorCreatorAffinity.actor_key == actor.actor_key, ActorCreatorAffinity.score > 0)
+        .order_by(ActorCreatorAffinity.score.desc())
+        .limit(20)
+        .all()
+    ]
+    by_creator: dict[str, list[str]] = defaultdict(list)
+    for item in newest_first:
+        by_creator[item.owner_id].append(item.post_id)
+    for creator_id in top_creators:
+        take(by_creator.get(creator_id, ())[:5], 5)
+
+    top_tags = {
+        row[0]
+        for row in db.query(ActorTagAffinity.tag_id)
+        .filter(ActorTagAffinity.actor_key == actor.actor_key, ActorTagAffinity.score > 0)
+        .order_by(ActorTagAffinity.score.desc())
+        .limit(20)
+        .all()
+    }
+    if top_tags:
+        take((item.post_id for item in newest_first if top_tags.intersection(item.tag_ids)), 50)
+
+    if seed_ids:
+        outside_ids = {item.post_id for item in outside}
+        similar = (
+            db.query(ItemSimilarity.target_post_id)
+            .filter(ItemSimilarity.source_post_id.in_(set(seed_ids)))
+            .order_by(ItemSimilarity.score.desc())
+            .all()
+        )
+        take((row[0] for row in similar if row[0] in outside_ids), LONG_TAIL_MAX)
+
+        seed = _catalog_index(db).get(seed_ids[0])
+        if seed is not None and seed.location is not None:
+            slug = seed.location.slug
+            take((item.post_id for item in newest_first if item.location and item.location.slug == slug), 20)
+    return frozenset(picked)
+
+
+# The catalog by post id, its IDF table and a memo of caption TF-IDF vectors,
+# derived from `_catalog_base` and kept against the same items tuple, so they
+# are rebuilt whenever it is.
+_catalog_index_cache: dict = {"entry": (None, {})}
+_catalog_idf_cache: dict = {"entry": (None, {}, {})}
+
+
+def _catalog_index(db: Session) -> dict[str, CatalogItem]:
+    base = _catalog_base(db)
+    cached_base, index = _catalog_index_cache["entry"]
+    if cached_base is base:
+        return index
+    index = {item.post_id: item for item in base}
+    _catalog_index_cache["entry"] = (base, index)
+    return index
+
+
+def _catalog_idf(db: Session) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
+    """The IDF table and the vector memo that goes with it."""
+    base = _catalog_base(db)
+    cached_base, idf, vectors = _catalog_idf_cache["entry"]
+    if cached_base is base:
+        return idf, vectors
+    idf, vectors = build_idf(base), {}
+    _catalog_idf_cache["entry"] = (base, idf, vectors)
+    return idf, vectors
 
 
 def _catalog(
@@ -290,6 +441,8 @@ def _catalog(
     allowed_post_ids: set[str] | None,
     excluded_post_ids: set[str],
     surface: str,
+    extra_post_ids: frozenset[str] = frozenset(),
+    capped: bool = True,
 ) -> dict[str, CatalogItem]:
     hidden_users = blocked_user_ids(db, actor.user_id)
     dismissed_posts, dismissed_creators = _active_dismissals(db, actor.actor_key)
@@ -306,16 +459,17 @@ def _catalog(
     excluded_creators = hidden_users | dismissed_creators
     excluded = excluded_post_ids | dismissed_posts
     catalog: dict[str, CatalogItem] = {}
-    for item in _catalog_base(db):
+    for item in _catalog_pool_order(db):
         if item.owner_id in excluded_creators or item.post_id in excluded:
             continue
         if allowed_post_ids is not None and item.post_id not in allowed_post_ids:
             continue
         if followed is not None and item.owner_id not in followed:
             continue
+        # Past the cap only the extras get in; the rest of the base is still scanned for them.
+        if capped and len(catalog) >= MAX_CATALOG_SIZE and item.post_id not in extra_post_ids:
+            continue
         catalog[item.post_id] = item
-        if len(catalog) == MAX_CATALOG_SIZE:
-            break
     return catalog
 
 
@@ -323,35 +477,77 @@ def _pipeline_context(
     db: Session,
     *,
     actor: ActorIdentity,
-    session: RecommendationSession,
+    session: RecommendationSession | None,
     surface: str,
     seed_post_id: str | None,
     allowed_post_ids: set[str] | None,
     manual_order: list[str] | None,
     scope_order: list[str] | None = None,
+    pool_only: bool = False,
+    capped: bool = True,
+    extra_post_ids: frozenset[str] = frozenset(),
 ) -> PipelineContext:
-    delivered = {
-        row[0]
-        for row in db.query(RecommendationImpression.post_id)
-        .filter(
-            RecommendationImpression.session_id == session.id,
-            RecommendationImpression.post_id.is_not(None),
-        )
+    delivered = set()
+    if session is not None:
+        delivered = {
+            row[0]
+            for row in db.query(RecommendationImpression.post_id)
+            .filter(
+                RecommendationImpression.session_id == session.id,
+                RecommendationImpression.post_id.is_not(None),
+            )
+            .all()
+        }
+    item_rows = (
+        db.query(ActorItemAffinity)
+        .filter(ActorItemAffinity.actor_key == actor.actor_key)
+        .order_by(ActorItemAffinity.score.desc(), ActorItemAffinity.last_event_at.desc())
+        .limit(24)
         .all()
-    }
+    )
+    now = utcnow()
+
+    def _score(row) -> float:
+        return decayed_affinity(float(row.score or 0.0), row.last_event_at, now)
+
+    item_affinity = {row.post_id: _score(row) for row in item_rows}
+    # Seeds by decayed score; the stable sort keeps the newest first among ties.
+    seed_ids = [
+        post_id
+        for post_id, score in sorted(item_affinity.items(), key=lambda pair: -pair[1])
+        if score > 0
+    ][:8]
+    if seed_post_id:
+        seed_ids.insert(0, seed_post_id)
+
+    if surface != "following" and not pool_only and capped:
+        extra_post_ids = extra_post_ids | _long_tail_ids(
+            db, actor=actor, outside=_catalog_pool_order(db)[MAX_CATALOG_SIZE:], seed_ids=seed_ids
+        )
     items = _catalog(
         db,
         actor=actor,
         allowed_post_ids=allowed_post_ids,
         excluded_post_ids=delivered,
         surface=surface,
+        extra_post_ids=extra_post_ids,
+        capped=capped,
     )
     post_ids = set(items)
+    # Disliked reels among the candidates; the top-24 rows above hold only the strongest.
+    item_affinity.update(
+        (row.post_id, _score(row))
+        for row in db.query(ActorItemAffinity).filter(
+            ActorItemAffinity.actor_key == actor.actor_key,
+            ActorItemAffinity.score < 0,
+            ActorItemAffinity.post_id.in_(post_ids) if post_ids else False,
+        )
+    )
     owner_ids = {item.owner_id for item in items.values()}
     tag_ids = {tag_id for item in items.values() for tag_id in item.tag_ids}
 
     creator_affinity = {
-        row.creator_id: float(row.score or 0.0)
+        row.creator_id: _score(row)
         for row in db.query(ActorCreatorAffinity)
         .filter(
             ActorCreatorAffinity.actor_key == actor.actor_key,
@@ -360,7 +556,7 @@ def _pipeline_context(
         .all()
     }
     tag_affinity = {
-        row.tag_id: float(row.score or 0.0)
+        row.tag_id: _score(row)
         for row in db.query(ActorTagAffinity)
         .filter(
             ActorTagAffinity.actor_key == actor.actor_key,
@@ -368,19 +564,9 @@ def _pipeline_context(
         )
         .all()
     }
-    item_rows = (
-        db.query(ActorItemAffinity)
-        .filter(ActorItemAffinity.actor_key == actor.actor_key)
-        .order_by(ActorItemAffinity.score.desc(), ActorItemAffinity.last_event_at.desc())
-        .limit(24)
-        .all()
-    )
-    item_affinity = {row.post_id: float(row.score or 0.0) for row in item_rows}
-    seed_ids = [row.post_id for row in item_rows if row.score > 0][:8]
-    if seed_post_id:
-        seed_ids.insert(0, seed_post_id)
-
     related: dict[str, tuple[float, tuple[str, ...]]] = {}
+    # History seeds count half on Related, where the opened reel is the main seed.
+    affinity_weight = 0.5 if surface == "related" else 1.0
     if seed_ids and post_ids:
         similarities = db.query(ItemSimilarity).filter(
             ItemSimilarity.source_post_id.in_(set(seed_ids)),
@@ -394,14 +580,43 @@ def _pipeline_context(
         for post_id, score in related_scores.items():
             related[post_id] = (score, tuple(related_seeds[post_id][:4]))
 
-        seed_tag_rows = db.query(PostTag).filter(PostTag.post_id.in_(set(seed_ids))).all()
-        seed_tags = {row.tag_id for row in seed_tag_rows}
+        seed_tags: dict[str, set[str]] = defaultdict(set)
+        for row in db.query(PostTag).filter(PostTag.post_id.in_(set(seed_ids))):
+            seed_tags[row.post_id].add(row.tag_id)
         if seed_tags:
             for item in items.values():
-                overlap = len(seed_tags.intersection(item.tag_ids))
-                if overlap:
+                item_tags = set(item.tag_ids)
+                best, matched = 0.0, []
+                for seed_id in dict.fromkeys(seed_ids):
+                    overlap = len(seed_tags.get(seed_id, set()) & item_tags)
+                    if not overlap:
+                        continue
+                    # Per-seed Jaccard, shrunk by overlap / (overlap + 1) like co-watch
+                    # support, so one shared tag is weak evidence.
+                    jaccard = overlap / len(seed_tags[seed_id] | item_tags)
+                    weight = 1.0 if seed_id == seed_post_id else affinity_weight
+                    best = max(best, jaccard * overlap / (overlap + 1.0) * weight)
+                    matched.append(seed_id)
+                if matched:
                     old_score, old_seeds = related.get(item.post_id, (0.0, ()))
-                    related[item.post_id] = (max(old_score, min(1.0, overlap / max(1, len(seed_tags)))), old_seeds or tuple(seed_ids[:2]))
+                    related[item.post_id] = (max(old_score, best), old_seeds or tuple(matched[:4]))
+
+    seed_items: tuple[tuple[CatalogItem, float], ...] = ()
+    scores_by_text: dict[str, tuple[float, tuple[str, ...]]] = {}
+    scores_by_location: dict[str, tuple[float, tuple[str, ...]]] = {}
+    if seed_ids:
+        index = _catalog_index(db)
+        seed_items = tuple(
+            (index[post_id], 1.0 if post_id == seed_post_id else affinity_weight)
+            for post_id in dict.fromkeys(seed_ids)
+            if post_id in index
+        )
+        idf, vectors = _catalog_idf(db)
+        scores_by_text = text_scores(list(seed_items), items, idf, vectors=vectors)
+        scores_by_location = location_scores(list(seed_items), items)
+        for post_id, (score, seeds) in (*scores_by_text.items(), *scores_by_location.items()):
+            if score > related.get(post_id, (0.0, ()))[0]:
+                related[post_id] = (score, seeds)
 
     stats = {
         row.post_id: row
@@ -409,6 +624,18 @@ def _pipeline_context(
         .filter(PostRecommendationStats.post_id.in_(post_ids) if post_ids else False)
         .all()
     }
+    # Last week's daily stats, each day decayed by its age, keyed by post then column.
+    recent_stats: dict[str, dict[str, float]] = {}
+    if post_ids:
+        today = utcnow().date()
+        for row in db.query(PostRecommendationDailyStats).filter(
+            PostRecommendationDailyStats.post_id.in_(post_ids),
+            PostRecommendationDailyStats.day > today - timedelta(days=TRENDING_WINDOW_DAYS),
+        ):
+            weight = 0.5 ** (max(0, (today - row.day).days) / TRENDING_HALF_LIFE_DAYS)
+            totals = recent_stats.setdefault(row.post_id, {})
+            for column in ("impressions", "qualified_views", "completions", "likes", "saves", "shares"):
+                totals[column] = totals.get(column, 0.0) + weight * int(getattr(row, column) or 0)
     following_ids = set()
     if actor.user_id:
         following_ids = {
@@ -418,11 +645,27 @@ def _pipeline_context(
 
     session_creator: dict[str, float] = defaultdict(float)
     session_tag: dict[str, float] = defaultdict(float)
-    session_events = (
+    # Events sent without an impression (a like from a grid or profile) carry no
+    # session id; count the actor's own since this session began.
+    actor_column = (
+        EngagementEvent.user_id == actor.user_id
+        if actor.user_id
+        else EngagementEvent.anonymous_id == actor.anonymous_id
+    )
+    session_events = [] if session is None else (
         db.query(EngagementEvent)
         .filter(
-            EngagementEvent.recommendation_session_id == session.id,
+            or_(
+                EngagementEvent.recommendation_session_id == session.id,
+                and_(
+                    EngagementEvent.recommendation_session_id.is_(None),
+                    actor_column,
+                    EngagementEvent.created_at >= session.created_at,
+                ),
+            ),
             EngagementEvent.post_id.is_not(None),
+            # Only events that carry a signal, so impressions don't crowd them out of the last 100.
+            EngagementEvent.event_type.in_(EVENT_WEIGHTS),
         )
         .order_by(EngagementEvent.created_at.desc())
         .limit(100)
@@ -436,36 +679,60 @@ def _pipeline_context(
         .filter(Post.id.in_(event_post_ids) if event_post_ids else False)
         .all()
     }
-    event_values = {
-        "view": 0.8,
-        "complete": 1.0,
-        "like": 2.0,
-        "save": 2.5,
-        "share": 2.5,
-        "skip": -1.0,
-        "not_interested": -4.0,
-    }
     for event in session_events:
         post = event_posts.get(event.post_id)
         if not post:
             continue
-        value = event_values.get(event.event_type, 0.0)
+        value = _event_value(event)
         session_creator[post.owner_id] += value
         for link in post.tags:
             session_tag[link.tag_id] += value
 
     exposures = Counter(
         owner_id
-        for (owner_id,) in db.query(Post.owner_id)
-        .join(RecommendationImpression, RecommendationImpression.post_id == Post.id)
-        .filter(RecommendationImpression.session_id == session.id)
-        .all()
+        for (owner_id,) in (
+            []
+            if session is None
+            else db.query(Post.owner_id)
+            .join(RecommendationImpression, RecommendationImpression.post_id == Post.id)
+            .filter(RecommendationImpression.session_id == session.id)
+            .all()
+        )
     )
+    watched_post_ids: frozenset[str] = frozenset()
+    # The anonymous grid actor has no ids; its actor_column would match every signed-in event.
+    if manual_order is None and scope_order is None and items and (actor.user_id or actor.anonymous_id):
+        watched_post_ids = frozenset(
+            post_id
+            for (post_id,) in db.query(EngagementEvent.post_id)
+            .filter(
+                actor_column,
+                EngagementEvent.created_at >= utcnow() - timedelta(days=WATCHED_DAYS),
+                or_(
+                    EngagementEvent.event_type == "complete",
+                    and_(
+                        EngagementEvent.event_type == "view",
+                        EngagementEvent.watch_ms >= WATCHED_MS,
+                    ),
+                    # A skip the viewer chose; SQL NOT IN is false for NULL, so allow NULL explicitly.
+                    and_(
+                        EngagementEvent.event_type == "skip",
+                        or_(
+                            EngagementEvent.navigation_reason.is_(None),
+                            EngagementEvent.navigation_reason.notin_(_NAVIGATION_SKIPS),
+                        ),
+                    ),
+                ),
+            )
+            .distinct()
+            .all()
+            if post_id in items
+        )
     return PipelineContext(
         actor=actor,
         surface=surface,
         now=utcnow(),
-        session_id=session.id,
+        session_id=session.id if session is not None else "",
         seed_post_id=seed_post_id,
         manual_order=manual_order,
         scope_order=scope_order,
@@ -478,8 +745,75 @@ def _pipeline_context(
         session_creator_affinity=dict(session_creator),
         session_tag_affinity=dict(session_tag),
         stats=stats,
+        recent_stats=recent_stats,
         exposures_by_creator=dict(exposures),
+        seed_items=seed_items,
+        text_scores=scores_by_text,
+        location_scores=scores_by_location,
+        pool_only=pool_only,
+        watched_post_ids=watched_post_ids,
     )
+
+
+def rank_pool(
+    db: Session, *, actor: ActorIdentity, allowed_post_ids: set[str]
+) -> tuple[list[Candidate], frozenset[str]]:
+    """Score every allowed post (capped to the catalog pool) for one actor; no session, no rerank.
+
+    Also returns the ids the actor already watched or skipped.
+    """
+    context = _pipeline_context(
+        db,
+        actor=actor,
+        session=None,
+        surface="for_you",
+        seed_post_id=None,
+        allowed_post_ids=allowed_post_ids,
+        manual_order=None,
+        pool_only=True,
+        capped=True,
+    )
+    return rank_candidates(context, gather_source_hits(context)), context.watched_post_ids
+
+
+# (actor key, filters key, seed) -> (created monotonic, ids). Entries age out by
+# time alone: the store behind reel_records_version swaps every few seconds, so
+# keying on it would re-rank between pages.
+_grid_cache: dict[tuple[str, str, int], tuple[float, list[str]]] = {}
+_grid_cache_lock = threading.Lock()
+_GRID_ANONYMOUS_KEY = "grid:anonymous"
+
+
+def rank_grid(
+    db: Session, *, actor: ActorIdentity, allowed_post_ids: set[str], filters_key: str, seed: int
+) -> list[str]:
+    key = (actor.actor_key, filters_key, seed)
+    now = time.monotonic()
+    entry = _grid_cache.get(key)
+    if entry is not None and now - entry[0] < GRID_CACHE_TTL_S:
+        return entry[1]
+    ranked, watched = rank_pool(db, actor=actor, allowed_post_ids=allowed_post_ids)
+    owner_of = {candidate.item.post_id: candidate.item.owner_id for candidate in ranked}
+    # Watched reels go after all unwatched ones; each part is spread on its own.
+    ids = [
+        post_id
+        for part in (
+            [candidate.item.post_id for candidate in ranked if candidate.item.post_id not in watched],
+            [candidate.item.post_id for candidate in ranked if candidate.item.post_id in watched],
+        )
+        for post_id in block_diverse(part, owner_of, GRID_BLOCK, GRID_CREATOR_FREE, GRID_CREATOR_STEP)
+    ]
+    with _grid_cache_lock:
+        _grid_cache[key] = (now, ids)
+        # Anonymous keys evict only among themselves, so they cannot push out
+        # signed-in entries.
+        anonymous = actor.actor_key == _GRID_ANONYMOUS_KEY
+        peers = [k for k in _grid_cache if (k[0] == _GRID_ANONYMOUS_KEY) == anonymous]
+        while len(peers) > (GRID_CACHE_ANON_MAX if anonymous else GRID_CACHE_MAX):
+            oldest = min(peers, key=lambda k: _grid_cache[k][0])
+            del _grid_cache[oldest]
+            peers.remove(oldest)
+    return ids
 
 
 def _provenance(candidate) -> dict:
@@ -544,6 +878,8 @@ def get_reel_page(
     filters: dict | None = None,
     cursor: str | None = None,
     limit: int = DEFAULT_PAGE_SIZE,
+    pool_only: bool = False,
+    extra_post_ids: frozenset[str] = frozenset(),
 ) -> RecommendationPage:
     started = time.perf_counter()
     limit = max(1, min(int(limit), MAX_PAGE_SIZE))
@@ -591,6 +927,8 @@ def get_reel_page(
             restarted=restarted,
             limit=limit,
             started=started,
+            pool_only=pool_only,
+            extra_post_ids=extra_post_ids,
         )
     except IntegrityError:
         db.rollback()
@@ -642,6 +980,7 @@ def _replay_reel_page(
         allowed_post_ids=allowed_post_ids,
         excluded_post_ids=set(),
         surface=surface,
+        extra_post_ids=frozenset(row.post_id for row in rows),
     )
     rows = [row for row in rows if row.post_id in eligible]
     db.commit()
@@ -662,6 +1001,8 @@ def _materialize_reel_page(
     restarted: bool,
     limit: int,
     started: float,
+    pool_only: bool = False,
+    extra_post_ids: frozenset[str] = frozenset(),
 ) -> RecommendationPage:
     context = _pipeline_context(
         db,
@@ -672,16 +1013,35 @@ def _materialize_reel_page(
         allowed_post_ids=allowed_post_ids,
         manual_order=manual_order,
         scope_order=scope_order,
+        pool_only=pool_only,
+        capped=not pool_only,
+        extra_post_ids=extra_post_ids,
     )
     hits = gather_source_hits(context)
     ranked = rank_candidates(context, hits)
     pinned = None
     if page_index == 0 and seed_post_id:
         pinned = next((candidate for candidate in ranked if candidate.item.post_id == seed_post_id), None)
-    if pinned:
-        selected = [pinned, *rerank_page([candidate for candidate in ranked if candidate is not pinned], limit - 1)]
-    else:
-        selected = rerank_page(ranked, limit)
+    seed_owner = None
+    if surface == "related" and seed_post_id:
+        # The seed may already be delivered (pages 1+), so resolve it from the seed items.
+        seed_owner = next(
+            (item.owner_id for item, _ in context.seed_items if item.post_id == seed_post_id), None
+        )
+    explore = not context.pool_only and surface != "following"
+    # Unwatched reels fill the page first; the watched ones only top it up.
+    head = [pinned] if pinned else []
+    unwatched = [c for c in ranked if c is not pinned and c.item.post_id not in context.watched_post_ids]
+    watched = [c for c in ranked if c is not pinned and c.item.post_id in context.watched_post_ids]
+    first = rerank_page(unwatched, limit - len(head), explore=explore, preselected=head, seed_owner=seed_owner)
+    rest = rerank_page(
+        watched,
+        limit - len(head) - len(first),
+        explore=False,
+        preselected=[*head, *first],
+        seed_owner=seed_owner,
+    )
+    selected = [*head, *first, *rest]
     has_more = len(ranked) > len(selected)
     request = RecommendationRequest(
         session_id=session.id,
@@ -935,15 +1295,16 @@ def _materialize_creator_page(
         posts_by_creator[post.owner_id].append(post)
     users = [user for user in users if posts_by_creator.get(user.id)]
     user_ids = {user.id for user in users}
+    now = utcnow()
     affinities = {
-        row.creator_id: float(row.score or 0.0)
+        row.creator_id: decayed_affinity(float(row.score or 0.0), row.last_event_at, now)
         for row in db.query(ActorCreatorAffinity).filter(
             ActorCreatorAffinity.actor_key == actor.actor_key,
             ActorCreatorAffinity.creator_id.in_(user_ids) if user_ids else False,
         ).all()
     }
     tag_scores = {
-        row.tag_id: float(row.score or 0.0)
+        row.tag_id: decayed_affinity(float(row.score or 0.0), row.last_event_at, now)
         for row in db.query(ActorTagAffinity).filter(
             ActorTagAffinity.actor_key == actor.actor_key,
             ActorTagAffinity.score > 0,
@@ -958,7 +1319,6 @@ def _materialize_creator_page(
             two_hop[creator_id] += 1
 
     scored = []
-    now = utcnow()
     for user in users:
         creator_posts = posts_by_creator[user.id]
         newest = max(aware(post.created_at) for post in creator_posts)

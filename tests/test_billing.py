@@ -16,6 +16,7 @@ from server.billing.service import (
     RewardError,
     capture_stage,
     claim_reel_reward,
+    reel_reward_status,
     create_billing_job,
     create_quote,
     debit_credits,
@@ -27,6 +28,7 @@ from server.billing.service import (
     mark_stage_submitted,
     reserve_credits,
 )
+from server.billing.service import roll_reel_reward as _real_roll
 from server.social.database import Base
 from server.social.models import (
     CloudGenerationBilling,
@@ -601,6 +603,42 @@ def test_milestone_race_loser_records_claim_without_credit(sessions):
         assert row.awarded_credit is False
 
 
+def test_session_purge_keeps_todays_reward_claims(sessions):
+    """Purging expired recommendation sessions must not erase today's reward progress."""
+    from server.social.models import ReelRewardClaim
+
+    with sessions() as db:
+        viewer = add_user(db, "purge_viewer")
+        owner = add_user(db, "purge_owner")
+
+        def claim_ten(start):
+            results = []
+            for index in range(start, start + 10):
+                post, impression, _ = _reward_candidate(
+                    db, viewer, owner, index=index, media_type="image",
+                    duration_ms=3000, foreground_ms=3000,
+                )
+                results.append(claim_reel_reward(
+                    db, user_id=viewer.id, post_id=post.id, impression_id=impression.id, ip_hash="purge-ip",
+                ))
+            return results
+
+        claim_ten(400)
+        assert get_wallet(db, viewer.id)["available_credits"] == 1
+        # _purge_actor_history bulk-deletes expired sessions; impressions cascade with them.
+        db.query(RecommendationSession).filter(RecommendationSession.user_id == viewer.id).delete(
+            synchronize_session=False
+        )
+        db.commit()
+        db.expire_all()
+        assert db.query(ReelRewardClaim).filter_by(user_id=viewer.id).count() == 10
+
+        results = claim_ten(410)
+        assert results[-1]["eligible_reels_today"] == 20
+        assert sum(1 for result in results if result["credit_awarded"]) == 1
+        assert get_wallet(db, viewer.id)["available_credits"] == 2
+
+
 def test_reel_reward_enforces_video_threshold_and_self_view(sessions):
     with sessions() as db:
         viewer = add_user(db, "threshold_viewer")
@@ -608,8 +646,9 @@ def test_reel_reward_enforces_video_threshold_and_self_view(sessions):
         post, impression, event = _reward_candidate(
             db, viewer, owner, index=100, duration_ms=10000, foreground_ms=4999,
         )
-        with pytest.raises(RewardError, match="Watch at least 5 seconds"):
+        with pytest.raises(RewardError, match="Watch at least 5 seconds") as below:
             claim_reel_reward(db, user_id=viewer.id, post_id=post.id, impression_id=impression.id, ip_hash="threshold-ip")
+        assert below.value.reason == "below_threshold"
         event.foreground_ms = 5000
         db.commit()
         result = claim_reel_reward(
@@ -620,11 +659,12 @@ def test_reel_reward_enforces_video_threshold_and_self_view(sessions):
         self_post, self_impression, _ = _reward_candidate(
             db, viewer, viewer, index=101, media_type="image", duration_ms=3000, foreground_ms=3000,
         )
-        with pytest.raises(RewardError, match="Self-views"):
+        with pytest.raises(RewardError, match="Self-views") as self_view:
             claim_reel_reward(
                 db, user_id=viewer.id, post_id=self_post.id,
                 impression_id=self_impression.id, ip_hash="threshold-ip",
             )
+        assert self_view.value.reason == "self_view"
 
 
 def test_reel_reward_rejects_immediate_client_claim(sessions):
@@ -635,37 +675,89 @@ def test_reel_reward_rejects_immediate_client_claim(sessions):
             db, viewer, owner, index=150, duration_ms=20000,
             foreground_ms=10000, visible_seconds_ago=0,
         )
-        with pytest.raises(RewardError, match="server-observed viewing threshold"):
+        with pytest.raises(RewardError, match="server-observed viewing threshold") as early:
             claim_reel_reward(
                 db, user_id=viewer.id, post_id=post.id,
                 impression_id=impression.id, ip_hash="early-ip",
             )
+        assert early.value.reason == "too_early"
 
 
-def test_reel_reward_ip_cap_applies_across_accounts(sessions, monkeypatch):
-    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", "10")
+def test_reel_reward_ip_cap_counts_credits_across_accounts(sessions, monkeypatch):
+    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CREDITS", "1")
     with sessions() as db:
         first_viewer = add_user(db, "network_viewer_a")
         second_viewer = add_user(db, "network_viewer_b")
         owner = add_user(db, "network_owner")
-        for index in range(10):
+
+        def claim(viewer, index):
             post, impression, _ = _reward_candidate(
-                db, first_viewer, owner, index=200 + index,
+                db, viewer, owner, index=index,
                 media_type="image", duration_ms=3000, foreground_ms=3000,
             )
-            claim_reel_reward(
-                db, user_id=first_viewer.id, post_id=post.id,
+            return claim_reel_reward(
+                db, user_id=viewer.id, post_id=post.id,
                 impression_id=impression.id, ip_hash="shared-network",
             )
-        post, impression, _ = _reward_candidate(
-            db, second_viewer, owner, index=299,
-            media_type="image", duration_ms=3000, foreground_ms=3000,
+
+        results = [claim(first_viewer, 200 + index) for index in range(10)]
+        assert results[-1]["credit_awarded"] is True
+        # Claims that earn nothing never hit the network cap...
+        for index in range(9):
+            assert claim(second_viewer, 300 + index)["progress"] == index + 1
+        # ...only the claim that would earn a credit past it.
+        with pytest.raises(RewardError, match="network") as capped:
+            claim(second_viewer, 399)
+        assert capped.value.reason == "ip_cap"
+        assert reel_reward_status(db, second_viewer.id)["eligible_reels_today"] == 9
+        assert reel_reward_status(db, second_viewer.id)["credits_earned_today"] == 0
+        assert reel_reward_status(db, first_viewer.id)["credits_earned_today"] == 1
+
+
+@pytest.mark.parametrize("amount,tier", [(20, "big"), (50, "mega")])
+def test_reel_reward_jackpot_grants_the_rolled_amount_as_one_milestone(sessions, monkeypatch, amount, tier):
+    from server.billing import service
+
+    monkeypatch.setattr(service, "roll_reel_reward", lambda: (amount, tier))
+    with sessions() as db:
+        viewer = add_user(db, f"jackpot_viewer_{tier}")
+        owner = add_user(db, f"jackpot_owner_{tier}")
+        results = []
+        for index in range(10):
+            post, impression, _ = _reward_candidate(
+                db, viewer, owner, index=500 + index,
+                media_type="image", duration_ms=3000, foreground_ms=3000,
+            )
+            results.append(claim_reel_reward(
+                db, user_id=viewer.id, post_id=post.id,
+                impression_id=impression.id, ip_hash="jackpot-ip",
+            ))
+        assert all(r["jackpot"] is None and r["credits_awarded_amount"] == 0 for r in results[:9])
+        assert results[-1]["credit_awarded"] is True
+        assert results[-1]["jackpot"] == tier
+        assert results[-1]["credits_awarded_amount"] == amount
+        # A jackpot is still one of the five daily milestones.
+        assert results[-1]["credits_earned_today"] == 1
+        assert get_wallet(db, viewer.id)["available_credits"] == amount
+        # Replaying the winning claim never pays twice.
+        replay = claim_reel_reward(
+            db, user_id=viewer.id, post_id=post.id, impression_id=impression.id, ip_hash="jackpot-ip",
         )
-        with pytest.raises(RewardError, match="network"):
-            claim_reel_reward(
-                db, user_id=second_viewer.id, post_id=post.id,
-                impression_id=impression.id, ip_hash="shared-network",
-            )
+        assert replay["duplicate"] is True
+        assert get_wallet(db, viewer.id)["available_credits"] == amount
+
+
+def test_roll_reel_reward_odds(monkeypatch):
+    # conftest pins roll_reel_reward; _real_roll is the function captured at import.
+    from server.billing import service
+
+    def roll(value):
+        monkeypatch.setattr(service.secrets, "randbelow", lambda _n: value)
+        return _real_roll()
+
+    assert [roll(v) for v in (0, 4)] == [(50, "mega")] * 2
+    assert [roll(v) for v in (5, 24)] == [(20, "big")] * 2
+    assert [roll(v) for v in (25, 999)] == [(1, None)] * 2
 
 
 def test_timeout_keeps_submitted_stage_reserved_until_reconciled(sessions):

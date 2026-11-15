@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AuthNotice, StatusGlyph } from './AuthKit.jsx';
+import Turnstile from './Turnstile.jsx';
+import useBotCheck from './useBotCheck.js';
 
 export const RESEND_SECONDS = 30;
 
-// "Check your email" screen shown after sign-up (and from the sign-in hint). `onResend`
+// "Check your email" screen shown after sign-up (and from the sign-in hint). `onResend(turnstileToken)`
 // resolves with `{debug_token?}`; the cooldown mirrors the password-reset screen.
 export default function CheckEmailView({ email, debugToken, onResend, onChangeEmail }) {
   const [cooldown, setCooldown] = useState(RESEND_SECONDS);
@@ -12,6 +14,7 @@ export default function CheckEmailView({ email, debugToken, onResend, onChangeEm
   const [error, setError] = useState('');
   const [resent, setResent] = useState(false);
   const [token, setToken] = useState(debugToken || '');
+  const bot = useBotCheck('resend');
 
   const counting = cooldown > 0;
   useEffect(() => {
@@ -22,11 +25,16 @@ export default function CheckEmailView({ email, debugToken, onResend, onChangeEm
 
   const resend = async () => {
     if (resending || cooldown > 0) return;
+    if (bot.needsToken) {
+      setError('Complete the bot check before resending the email.');
+      return;
+    }
+    const turnstileToken = bot.consume();
     setResending(true);
     setError('');
     setResent(false);
     try {
-      const result = await onResend();
+      const result = await onResend(turnstileToken);
       if (result?.debug_token) setToken(result.debug_token);
       setResent(true);
       setCooldown(RESEND_SECONDS);
@@ -55,6 +63,7 @@ export default function CheckEmailView({ email, debugToken, onResend, onChangeEm
       ) : (
         <p className="sx-au-hint">Nothing in your inbox? Check spam, or resend the link.</p>
       )}
+      <Turnstile {...bot.widget} onToken={(value) => { bot.widget.onToken(value); if (value && error) setError(''); }} />
       {error ? <AuthNotice tone="err">{error}</AuthNotice> : null}
       {resent ? <AuthNotice tone="ok">If that address is waiting for verification, a new link was sent. Older links no longer work.</AuthNotice> : null}
       <div className="sx-au-actions">

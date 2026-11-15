@@ -40,19 +40,47 @@ def test_deploy_script_refuses_to_run_off_main_or_without_a_fast_forward():
     script = (ROOT / "deploy/deploy.sh").read_text()
     assert "set -euo pipefail" in script
     assert "merge --ff-only" in script
-    assert "refs/heads/main" in script
+    assert 'refs/heads/$branch' in script and 'DEPLOY_BRANCH:-main' in script
 
 
 def test_a_newer_push_to_main_cannot_cancel_a_running_deploy():
     # The workflow-level group applies to the whole run, deploy job included.
     cancel = WORKFLOW["concurrency"]["cancel-in-progress"]
-    assert cancel == "${{ github.ref != 'refs/heads/main' }}"
+    assert cancel == "${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}"
 
 
-def test_deploy_script_runs_to_the_end_when_a_command_reads_stdin(tmp_path):
-    # CI streams the script over SSH stdin (`bash -s`). `docker compose exec -T`
-    # reads stdin too, and once swallowed the rest of the script: the deploy
-    # stopped after the dump and still exited 0. Here every stub drains stdin.
+def _sit_job_text() -> str:
+    return yaml.safe_dump(WORKFLOW["jobs"]["deploy-sit"])
+
+
+def test_sit_deploy_waits_for_checks_and_runs_only_for_dev_pushes():
+    sit = WORKFLOW["jobs"]["deploy-sit"]
+    assert set(sit["needs"]) == CHECK_JOBS
+    assert sit["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+
+
+def test_sit_deploy_uses_its_own_environment_and_never_the_prod_key():
+    sit = WORKFLOW["jobs"]["deploy-sit"]
+    assert sit["environment"] == "sit"
+    assert sit["concurrency"] == {"group": "deploy-sit", "cancel-in-progress": False}
+    text = _sit_job_text()
+    for prod_only in ("VPS_SSH_KEY", "secrets.VPS_USER", "production"):
+        assert prod_only not in text, prod_only
+
+
+def test_sit_deploy_streams_deploy_sh_as_echosit_on_dev_and_probes():
+    text = "\n".join(str(step.get("run", "")) for step in WORKFLOW["jobs"]["deploy-sit"]["steps"])
+    for needed in ("DEPLOY_BRANCH=dev", "docker.sock", "StrictHostKeyChecking=yes", "deploy/deploy.sh",
+                   "grep -q '^deployed ' deploy.log", "scripts/verify_staging.cjs",
+                   "https://sit.echomultiverse.com", "https://sit-media.echomultiverse.com",
+                   "SIT_PROBE_PASSWORD"):
+        assert needed in text, needed
+
+
+def _run_deploy(tmp_path, *, head="refs/heads/main", env=None, dotenv=None, image_tags=""):
+    """Run deploy.sh as CI does (streamed on stdin) against stub docker/git/curl.
+
+    Returns the finished process and the log of stubbed calls."""
     import os
     import subprocess
 
@@ -60,13 +88,20 @@ def test_deploy_script_runs_to_the_end_when_a_command_reads_stdin(tmp_path):
     bin_dir.mkdir()
     calls = tmp_path / "calls.log"
     calls.write_text("")
+    (tmp_path / "tags.txt").write_text(image_tags)
+    if dotenv is not None:
+        (tmp_path / ".env").write_text(dotenv)
     stubs = {
-        "docker": 'cat > /dev/null\necho "docker $*" >> "$CALLS"\n',
-        "curl": "cat > /dev/null\n",
+        "docker": (
+            'cat > /dev/null\necho "docker $*" >> "$CALLS"\n'
+            'case "$*" in "image ls"*) cat "$TAGS" ;; esac\n'
+        ),
+        "curl": 'cat > /dev/null\necho "curl $*" >> "$CALLS"\n',
         "git": (
             "cat > /dev/null\n"
+            'echo "git $*" >> "$CALLS"\n'
             'case "$*" in\n'
-            '  "symbolic-ref -q HEAD") echo refs/heads/main ;;\n'
+            f'  "symbolic-ref -q HEAD") echo {head} ;;\n'
             "  rev-parse*) echo 0123456789abcdef ;;\n"
             "  diff*) exit 1 ;;\n"  # migrations/ changed, so the dump runs
             "esac\n"
@@ -76,13 +111,82 @@ def test_deploy_script_runs_to_the_end_when_a_command_reads_stdin(tmp_path):
         path = bin_dir / name
         path.write_text("#!/bin/sh\n" + body)
         path.chmod(0o755)
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(tmp_path),
-           "ECHO_DIR": str(tmp_path), "CALLS": str(calls)}
+    run_env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(tmp_path),
+               "ECHO_DIR": str(tmp_path), "CALLS": str(calls), "TAGS": str(tmp_path / "tags.txt")}
+    run_env.pop("DEPLOY_BRANCH", None)
+    run_env.update(env or {})
     with open(ROOT / "deploy/deploy.sh", "rb") as script:
-        result = subprocess.run(["bash", "-s", "--", "0123456789abcdef"], stdin=script, env=env,
+        result = subprocess.run(["bash", "-s", "--", "0123456789abcdef"], stdin=script, env=run_env,
                                 capture_output=True, text=True, timeout=60)
-    ran = calls.read_text()
+    return result, calls.read_text()
+
+
+def test_deploy_script_runs_to_the_end_when_a_command_reads_stdin(tmp_path):
+    # CI streams the script over SSH stdin (`bash -s`). `docker compose exec -T`
+    # reads stdin too, and once swallowed the rest of the script: the deploy
+    # stopped after the dump and still exited 0. Here every stub drains stdin.
+    result, ran = _run_deploy(tmp_path)
     assert "migrations changed" in result.stdout
     assert "docker compose build" in ran
     assert "docker compose --profile tunnel up -d" in ran
     assert result.returncode == 0 and "deployed" in result.stdout
+
+
+def test_deploy_defaults_to_main_and_port_8000(tmp_path):
+    result, ran = _run_deploy(tmp_path)
+    assert result.returncode == 0
+    assert "http://127.0.0.1:8000/api/readyz" in ran
+    assert "git fetch --quiet origin main" in ran
+    assert "docker image rm" not in ran
+
+
+def test_deploy_branch_and_port_come_from_env_and_dotenv(tmp_path):
+    result, ran = _run_deploy(tmp_path, head="refs/heads/dev", env={"DEPLOY_BRANCH": "dev"},
+                              dotenv='SX_ENV=production\nSX_APP_PORT="8001"\n')
+    assert result.returncode == 0, result.stderr
+    assert "http://127.0.0.1:8001/api/readyz" in ran
+    assert "git fetch --quiet origin dev" in ran
+
+
+def test_deploy_refuses_branch_mismatch(tmp_path):
+    result, ran = _run_deploy(tmp_path, head="refs/heads/main", env={"DEPLOY_BRANCH": "dev"})
+    assert result.returncode != 0
+    assert "checkout is not on dev" in result.stderr
+    assert "docker compose build" not in ran
+
+
+def test_sit_deploy_prunes_old_rollback_tags_keeping_three(tmp_path):
+    old = ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"]  # newest first
+    tags = "\n".join(["latest", "0123456789abcdef", *old]) + "\n"
+    result, ran = _run_deploy(tmp_path, head="refs/heads/dev", env={"DEPLOY_BRANCH": "dev"},
+                              image_tags=tags)
+    assert result.returncode == 0, result.stderr
+    removed = [line for line in ran.splitlines() if line.startswith("docker image rm")]
+    assert len(removed) == 1
+    assert "echo-app:cccccccccccc" in removed[0] and "echo-app:dddddddddddd" in removed[0]
+    for kept in ("latest", "0123456789abcdef", "aaaaaaaaaaaa", "bbbbbbbbbbbb"):
+        assert f"echo-app:{kept}" not in removed[0]
+    assert "docker image prune -f" in ran
+    assert "docker builder prune -f --filter until=72h" in ran
+
+
+def test_sit_prune_with_few_tags_is_a_no_op(tmp_path):
+    result, ran = _run_deploy(tmp_path, head="refs/heads/dev", env={"DEPLOY_BRANCH": "dev"},
+                              image_tags="latest\n0123456789abcdef\n")
+    assert result.returncode == 0, result.stderr
+    assert "docker image rm" not in ran
+
+
+def test_sit_deploy_never_dumps_the_database(tmp_path):
+    # SIT's data is throwaway, and a stopped SIT stack would fail the dump and
+    # with it the deploy; the dumps would also pile up on the shared disk.
+    result, ran = _run_deploy(tmp_path, head="refs/heads/dev", env={"DEPLOY_BRANCH": "dev"})
+    assert result.returncode == 0, result.stderr
+    assert "docker compose exec" not in ran
+    assert "dumping the database" not in result.stdout
+
+
+def test_prod_deploy_still_dumps_when_migrations_change(tmp_path):
+    result, ran = _run_deploy(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "docker compose exec -T postgres" in ran

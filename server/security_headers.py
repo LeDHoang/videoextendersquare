@@ -164,7 +164,9 @@ class SecurityHeadersMiddleware:
         frameable = path in _SAME_ORIGIN_FRAMEABLE
         mode = csp_mode()
         policy = None
-        if mode != "off" and not path.startswith(_CSP_EXEMPT):
+        # Production serves no API docs: those paths fall through to the SPA shell
+        # and get the same policy as any other page.
+        if mode != "off" and not (path.startswith(_CSP_EXEMPT) and not is_production()):
             policy = build_policy(nonce, mode)
             if frameable:
                 policy = policy.replace("frame-ancestors 'none'", "frame-ancestors 'self'")

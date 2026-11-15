@@ -1,0 +1,4 @@
+reels_feed {"conc": 1, "n": 290, "statuses": {"200": 290}, "good_rps": 14.47, "p50": 68, "p95": 79, "p99": 94, "max": 120}
+reels_feed {"conc": 2, "n": 329, "statuses": {"200": 329}, "good_rps": 16.38, "p50": 120, "p95": 147, "p99": 171, "max": 206}
+reels_feed {"conc": 5, "n": 338, "statuses": {"200": 338}, "good_rps": 16.66, "p50": 298, "p95": 355, "p99": 414, "max": 431}
+reels_feed {"conc": 10, "n": 336, "statuses": {"200": 336}, "good_rps": 16.38, "p50": 606, "p95": 675, "p99": 705, "max": 735}

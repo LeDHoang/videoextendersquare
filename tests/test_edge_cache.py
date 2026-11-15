@@ -160,3 +160,16 @@ def test_refresh_is_not_cacheable(anonymous):
 def test_neighbouring_routes_are_unchanged(anonymous, path):
     response = anonymous.get(path)
     assert response.headers.get("cache-control") != PUBLIC
+
+
+def test_anonymous_grid_for_you_is_shared_and_cacheable(anonymous, app):
+    first = anonymous.get("/api/reels?sort=for_you&limit=24")
+    other = TestClient(app)
+    other.cookies.set(auth.ANON_COOKIE, "another-anonymous-browser")
+    second = other.get("/api/reels?sort=for_you&limit=24")
+    assert first.status_code == second.status_code == 200, first.text
+    assert first.content == second.content
+    assert POSTED in first.text
+    for response in (first, second):
+        assert response.headers["cache-control"] == PUBLIC
+        assert "set-cookie" not in response.headers

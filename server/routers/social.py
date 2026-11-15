@@ -328,10 +328,10 @@ def media_card(
         card["size"] = ""
     stereo = (post.stereo_layout or "mono") != "mono"
     if post.media_type == "image":
-        card["preview_url"] = card["url"]
-        # A 3D still keeps its left-eye poster from post_card.
-        if not (stereo and card.get("poster_url")):
-            card["poster_url"] = card["url"]
+        # The tile from post_card: the WebP tile, else the poster (a 3D
+        # still's left-eye one), else the full image.
+        card["poster_url"] = card.get("poster_url") or card["url"]
+        card["preview_url"] = card["poster_url"]
         card["codec"] = "IMG"
         return card
     # Grid assets of a 3D video come from its left-eye rendition.
@@ -385,11 +385,13 @@ class VerifyEmailRequest(BaseModel):
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
+    turnstile_token: str | None = None
 
 
 class LoginRequest(BaseModel):
     identifier: str
     password: str
+    turnstile_token: str | None = None
 
 
 class PasswordChangeRequest(BaseModel):
@@ -413,6 +415,7 @@ class PostUpdateRequest(BaseModel):
 class CommentRequest(BaseModel):
     text: str
     timestamp: float | None = None
+    parent_id: str | None = None
 
 
 class ViewRequest(BaseModel):
@@ -540,7 +543,7 @@ def register(
     rate_limiter.check(db, f"register-device-day:{device_hash}", env_int("SX_REGISTER_DEVICE_DAILY", 5, minimum=1), 24 * 60 * 60)
     if req.accept_terms is not True:
         error(400, "TERMS_NOT_ACCEPTED", "You must agree to the Terms of Service and Privacy Policy.", "accept_terms")
-    verify_turnstile(req.turnstile_token, request_identity(request))
+    verify_turnstile(req.turnstile_token, request_identity(request), "signup")
     email = normalize_email(str(req.email))
     username = validate_username(req.username)
     password = validate_password(req.password)
@@ -626,6 +629,10 @@ def resend_verification(
     validate_origin(request)
     email = normalize_email(str(req.email))
     rate_limiter.check(db, f"resend-verification-ip:{request_identity(request)}", 8, 60 * 60)
+    # After the IP limit (no free siteverify calls), before the per-account one
+    # (tokenless bots cannot use up someone else's quota).
+    # "login" too: the sign-in page's "Resend the link" reuses that page's widget.
+    verify_turnstile(req.turnstile_token, request_identity(request), "resend", "login")
     rate_limiter.check(db, f"resend-verification-account:{email}", 3, 60 * 60)
     user = db.query(User).filter(
         User.email_norm == email,
@@ -639,23 +646,35 @@ def resend_verification(
     return _verification_accepted(raw_token)
 
 
+LOGIN_FAILURES_BEFORE_BOT_CHECK = 5
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+
+
 @router.post("/api/auth/login")
 def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
     identity = request_identity(request)
     if settings.login_rate_limit_enabled():
         rate_limiter.check(db, f"login-ip:{identity}", 20, 15 * 60)
-        rate_limiter.check(db, f"login-account:{str(req.identifier or '').strip().casefold()}", 10, 15 * 60)
     identifier = str(req.identifier or "").strip().casefold()
+    # The bot check starts after LOGIN_FAILURES_BEFORE_BOT_CHECK wrong passwords on this
+    # account or from this IP. Unknown accounts count too, so it is no probing oracle.
+    failure_keys = (f"login-fail-account:{identifier}", f"login-fail-ip:{identity}")
+    if any(rate_limiter.count(key, LOGIN_FAILURE_WINDOW_SECONDS) >= LOGIN_FAILURES_BEFORE_BOT_CHECK for key in failure_keys):
+        # Before the per-account limit, so tokenless bots cannot lock someone out.
+        verify_turnstile(req.turnstile_token, identity, "login")
+    if settings.login_rate_limit_enabled():
+        rate_limiter.check(db, f"login-account:{identifier}", 10, 15 * 60)
     user = db.query(User).filter(
         User.status.in_(("active", "suspended")),
         User.account_type == "real",
         or_(User.email_norm == identifier, User.username_norm == identifier),
     ).first()
-    if not user:
-        _verify_dummy_password(req.password)
-        error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
-    if not verify_password(user.password_hash, req.password):
+    if not user or not verify_password(user.password_hash, req.password):
+        if not user:
+            _verify_dummy_password(req.password)
+        for key in failure_keys:
+            rate_limiter.record(key, LOGIN_FAILURE_WINDOW_SECONDS)
         error(401, "INVALID_CREDENTIALS", "Email/username or password is incorrect.")
     # Only after the right password, so the status is not an account-probing oracle.
     if user.status == "suspended":
@@ -1237,9 +1256,13 @@ def list_comments(
     context: AuthContext | None = Depends(get_optional_auth),
 ):
     post = get_visible_post(db, post_id, auth_user_id(context))
-    rows = db.query(Comment).options(joinedload(Comment.author), joinedload(Comment.post)).filter(
+    # Inactive authors' comments are hidden, as in the feed's records.
+    rows = db.query(Comment).options(joinedload(Comment.author), joinedload(Comment.post)).join(
+        User, User.id == Comment.author_id
+    ).filter(
         Comment.post_id == post.id,
         Comment.deleted_at.is_(None),
+        User.status == "active",
     ).order_by(Comment.created_at.asc()).all()
     viewer_id = auth_user_id(context)
     hidden_ids = blocked_user_ids(db, viewer_id)
@@ -1272,12 +1295,26 @@ def create_post_comment(
         error(422, "EMPTY_COMMENT", "Comment text cannot be empty.", "text")
     if len(text) > 500:
         error(422, "COMMENT_TOO_LONG", "Comments are limited to 500 characters.", "text")
+    parent_id = None
+    if req.parent_id:
+        parent = get_visible_comment(db, req.parent_id, context.user.id)
+        if parent.post_id != post.id:
+            error(422, "INVALID_PARENT_COMMENT", "Replies must be on the same post.", "parent_id")
+        # One level of threading: a reply to a reply joins the top-level thread.
+        # Once that top-level comment is deleted (deletes are final), its replies
+        # stand top-level, so a reply to one threads under it instead.
+        root_deleted = parent.parent_id is not None and db.query(Comment.id).filter(
+            Comment.id == parent.parent_id, Comment.deleted_at.is_(None)
+        ).first() is None
+        parent_id = parent.id if root_deleted else (parent.parent_id or parent.id)
     timestamp_ms = None
-    if req.timestamp is not None:
+    # Replies are general: they never pop up on the video timeline.
+    if req.timestamp is not None and parent_id is None:
         timestamp_ms = max(0, min(round(float(req.timestamp) * 1000), 24 * 60 * 60 * 1000))
     comment = Comment(
         post_id=post.id,
         author_id=context.user.id,
+        parent_id=parent_id,
         text=text,
         timestamp_ms=timestamp_ms,
     )
@@ -1459,7 +1496,7 @@ def create_event(
     validate_origin(request)
     allowed = {
         "impression", "open", "playback", "view", "complete", "skip", "reward_eligible",
-        "search_impression", "search_select", "share", "share_sent",
+        "search_impression", "search_select", "share", "share_sent", "replay",
         "profile_open", "follow", "unfollow", "not_interested", "hide_creator", "dismiss_creator",
         "pack_impression", "pack_open", "pack_start", "pack_resume", "pack_item_view", "pack_complete",
         "pack_share", "pack_message_open", "collection_add",

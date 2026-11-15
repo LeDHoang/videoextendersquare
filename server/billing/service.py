@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -50,6 +51,11 @@ class PricingUnavailable(QuoteError):
 class RewardError(BillingError):
     code = "REWARD_INELIGIBLE"
 
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        # Machine-readable cause: the client retries only timing reasons.
+        self.reason = reason
+
 
 class DailySpendCapExceeded(BillingError):
     code = "DAILY_SPEND_CAP"
@@ -65,13 +71,13 @@ def flag_enabled(name: str) -> bool:
 
 _BILLING_FLAGS = ("SX_CREDITS_ENABLED", "SX_STRIPE_ENABLED", "SX_REEL_REWARDS_ENABLED")
 _DEV_SECURITY_SECRET = "echo-development-secret-change-me"
-_REEL_REWARD_IP_DAILY_DEFAULT = 50
+_REEL_REWARD_IP_DAILY_DEFAULT = 25
 
 
 def reel_reward_ip_cap() -> int:
-    """Daily per-IP reward cap. Honors low operator values (min 1)."""
+    """Daily per-IP cap on reward credits (not claims). Honors low operator values (min 1)."""
     try:
-        return max(1, int(os.environ.get("SX_REEL_REWARD_IP_DAILY_CLAIMS", str(_REEL_REWARD_IP_DAILY_DEFAULT))))
+        return max(1, int(os.environ.get("SX_REEL_REWARD_IP_DAILY_CREDITS", str(_REEL_REWARD_IP_DAILY_DEFAULT))))
     except (TypeError, ValueError):
         return _REEL_REWARD_IP_DAILY_DEFAULT
 
@@ -901,6 +907,16 @@ def owns_job(db: Session, job_id: str, user_id: str) -> bool:
     ).first() is not None
 
 
+def roll_reel_reward() -> tuple[int, str | None]:
+    """A milestone's credit amount: usually 1, rarely a jackpot (2% +20, 0.5% +50)."""
+    roll = secrets.randbelow(1000)
+    if roll < 5:
+        return 50, "mega"
+    if roll < 25:
+        return 20, "big"
+    return 1, None
+
+
 def claim_reel_reward(
     db: Session,
     *,
@@ -924,14 +940,14 @@ def claim_reel_reward(
     session = db.get(RecommendationSession, impression.session_id) if impression else None
     post = db.get(Post, post_id)
     if not impression or not session or impression.post_id != post_id or session.user_id != user_id:
-        raise RewardError("Recommendation impression is invalid or belongs to another viewer")
+        raise RewardError("Recommendation impression is invalid or belongs to another viewer", "invalid_impression")
     if not impression.first_visible_at:
-        raise RewardError("The reel must be visibly presented before it can earn rewards")
+        raise RewardError("The reel must be visibly presented before it can earn rewards", "not_visible")
     visible_at = aware(impression.first_visible_at)
     if visible_at < day_start or session.status != "active" or aware(session.expires_at) <= now:
-        raise RewardError("Recommendation impression is no longer eligible for rewards")
+        raise RewardError("Recommendation impression is no longer eligible for rewards", "stale_impression")
     if not post or post.owner_id == user_id:
-        raise RewardError("Self-views are not eligible for rewards")
+        raise RewardError("Self-views are not eligible for rewards", "self_view")
 
     existing = db.query(ReelRewardClaim).filter(
         ReelRewardClaim.user_id == user_id,
@@ -963,16 +979,16 @@ def claim_reel_reward(
         .first()
     )
     if not event:
-        raise RewardError("Qualified foreground playback telemetry was not found")
+        raise RewardError("Qualified foreground playback telemetry was not found", "no_telemetry")
     media_type = str(post.media_type or (event.context or {}).get("media_type") or "video").casefold()
     duration_ms = max(0, int(event.duration_ms or 0))
     threshold_ms = 3000 if media_type == "image" else min(10000, max(3000, round(duration_ms * 0.5)))
     foreground_ms = max(0, int(event.foreground_ms or 0))
     if foreground_ms < threshold_ms:
-        raise RewardError(f"Watch at least {threshold_ms / 1000:g} seconds in the foreground")
+        raise RewardError(f"Watch at least {threshold_ms / 1000:g} seconds in the foreground", "below_threshold")
     server_elapsed_ms = max(0, int((aware(event.created_at) - visible_at).total_seconds() * 1000))
     if server_elapsed_ms + 500 < threshold_ms:
-        raise RewardError("The reel was claimed before the server-observed viewing threshold")
+        raise RewardError("The reel was claimed before the server-observed viewing threshold", "too_early")
 
     user_count = db.query(func.count(ReelRewardClaim.id)).filter(
         ReelRewardClaim.user_id == user_id, ReelRewardClaim.utc_date == today
@@ -982,17 +998,21 @@ def claim_reel_reward(
         ReelRewardClaim.utc_date == today,
         ReelRewardClaim.awarded_credit.is_(True),
     ).scalar() or 0
-    ip_count = db.query(func.count(ReelRewardClaim.id)).filter(
-        ReelRewardClaim.ip_hash == ip_hash, ReelRewardClaim.utc_date == today
-    ).scalar() or 0
-    ip_cap = reel_reward_ip_cap()
     if user_count >= 50 or awarded_count >= 5:
         return _reward_payload(user_count, awarded_count, False, daily_cap=True)
-    if ip_count >= ip_cap:
-        raise RewardError("Daily reward activity limit reached for this network")
 
     next_count = int(user_count) + 1
     should_award = next_count % 10 == 0 and int(awarded_count) < 5
+    if should_award:
+        # The network cap counts credits, so one heavy viewer cannot use up a
+        # shared network's quota with claims that earn nothing.
+        ip_credits = db.query(func.count(ReelRewardClaim.id)).filter(
+            ReelRewardClaim.ip_hash == ip_hash,
+            ReelRewardClaim.utc_date == today,
+            ReelRewardClaim.awarded_credit.is_(True),
+        ).scalar() or 0
+        if ip_credits >= reel_reward_ip_cap():
+            raise RewardError("Daily reward credit limit reached for this network", "ip_cap")
     claim = ReelRewardClaim(
         user_id=user_id,
         post_id=post_id,
@@ -1009,6 +1029,7 @@ def claim_reel_reward(
     # IntegrityError (mapped to 409 upstream) before any credit is granted.
     db.flush()
     awarded = False
+    amount, jackpot = roll_reel_reward() if should_award else (0, None)
     if should_award:
         # Concurrent milestone claims for different posts serialize on the
         # ledger idempotency key, so exactly one of them is credited. The
@@ -1016,12 +1037,12 @@ def claim_reel_reward(
         _, awarded = grant_credits(
             db,
             user_id,
-            1,
+            amount,
             source="earned",
             idempotency_key=f"reel-reward:{user_id}:{today}:{int(awarded_count) + 1}",
             reference_type="reel_reward",
             reference_id=claim.id,
-            details={"post_id": post_id, "impression_id": impression_id},
+            details={"post_id": post_id, "impression_id": impression_id, "jackpot": jackpot},
         )
         if sa_inspect(claim).transient:
             # Lost the grant race: grant_credits rolled back this
@@ -1037,8 +1058,24 @@ def claim_reel_reward(
     db.refresh(account)
     return {
         **_reward_payload(next_count, int(awarded_count) + (1 if awarded else 0), awarded),
+        "credits_awarded_amount": amount if awarded else 0,
+        "jackpot": jackpot if awarded else None,
         "wallet": _wallet_payload(account),
     }
+
+
+def reel_reward_status(db: Session, user_id: str) -> dict[str, Any]:
+    """Today's reel-reward progress, for wallets opened before any claim."""
+    today = utcnow().date().isoformat()
+    count = db.query(func.count(ReelRewardClaim.id)).filter(
+        ReelRewardClaim.user_id == user_id, ReelRewardClaim.utc_date == today
+    ).scalar() or 0
+    awarded = db.query(func.count(ReelRewardClaim.id)).filter(
+        ReelRewardClaim.user_id == user_id,
+        ReelRewardClaim.utc_date == today,
+        ReelRewardClaim.awarded_credit.is_(True),
+    ).scalar() or 0
+    return _reward_payload(count, awarded, False)
 
 
 def _reward_payload(count: int, awarded: int, credit_awarded: bool, **extra: Any) -> dict[str, Any]:

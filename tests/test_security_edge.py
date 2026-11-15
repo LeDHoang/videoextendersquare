@@ -162,13 +162,13 @@ def test_import_time_constant_and_env_both_close(app, monkeypatch):
 
 
 def test_rewards_cap_parsing_edges(monkeypatch):
-    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", "-5")
+    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CREDITS", "-5")
     assert reel_reward_ip_cap() == 1
-    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", "  20 ")
+    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CREDITS", "  20 ")
     assert reel_reward_ip_cap() == 20
-    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", "")
-    assert reel_reward_ip_cap() == 50
-    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CLAIMS", "1000000")
+    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CREDITS", "")
+    assert reel_reward_ip_cap() == 25
+    monkeypatch.setenv("SX_REEL_REWARD_IP_DAILY_CREDITS", "1000000")
     assert reel_reward_ip_cap() == 1000000
 
 

@@ -24,6 +24,7 @@ const stats = (reportSpike) => ({
   spike_floor: 10,
   open_reports: 7,
   open_support_requests: 2,
+  accounts: { total: 1234, active_now: 56, active_window_min: 15, capacity: 800, capacity_warn: 560 },
   queue_limits: { open_reports: 20, open_support_requests: 10 },
   windows: { '24h': windowStats(reportSpike), '7d': windowStats(false) },
   disk: [{ volume: 'output', ok: true, free_gb: 42.5 }],
@@ -55,10 +56,11 @@ const ops = {
   limits,
 };
 
-const respond = ({ statsBody = stats(false), opsBody = ops, hourlyBody = hourly, flaggedBody = { accounts: [] } } = {}) => (path) => {
+const respond = ({ statsBody = stats(false), opsBody = ops, hourlyBody = hourly, flaggedBody = { accounts: [] }, sentryBody = { configured: false } } = {}) => (path) => {
   if (path === '/api/moderation/stats') return Promise.resolve(statsBody);
   if (path === '/api/moderation/stats/hourly') return hourlyBody instanceof Error ? Promise.reject(hourlyBody) : Promise.resolve(hourlyBody);
   if (path === '/api/ops/metrics') return opsBody instanceof Error ? Promise.reject(opsBody) : Promise.resolve(opsBody);
+  if (path === '/api/ops/sentry') return sentryBody instanceof Error ? Promise.reject(sentryBody) : Promise.resolve(sentryBody);
   if (path === '/api/moderation/stats/accounts') return flaggedBody instanceof Error ? Promise.reject(flaggedBody) : Promise.resolve(flaggedBody);
   return Promise.resolve({ reports: [] });
 };
@@ -86,6 +88,9 @@ describe('ModerationPage overview', () => {
     expect(mocks.api.get).toHaveBeenCalledWith('/api/moderation/stats');
     expect(mocks.api.get).toHaveBeenCalledWith('/api/moderation/stats/hourly');
     expect(screen.getByText('300')).toBeTruthy();
+    expect(screen.getByText('1,234')).toBeTruthy();
+    expect(screen.getAllByText('56')).toHaveLength(2); // ONLINE NOW tile and PEOPLE ONLINE chip
+    expect(screen.getByText(/of 800 the server can serve/)).toBeTruthy();
     expect(screen.getByRole('img', { name: '@loud 12' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'OPEN 9, RESOLVED 0, DISMISSED 0' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'SPAM 9' })).toBeTruthy();
@@ -167,6 +172,7 @@ describe('ModerationPage overview', () => {
     renderOverview();
     await waitFor(() => expect(screen.getByText('OPEN REPORTS')).toBeTruthy());
     expect(mocks.api.get).not.toHaveBeenCalledWith('/api/ops/metrics');
+    expect(mocks.api.get).not.toHaveBeenCalledWith('/api/ops/sentry');
     expect(screen.queryByText(/SERVER HEALTH · LAST/)).toBeNull();
     expect(screen.queryByRole('button', { name: /^SERVER ERRORS:/ })).toBeNull();
   });
@@ -186,6 +192,34 @@ describe('ModerationPage overview', () => {
     expect(chip('SERVER ERRORS').dataset.state).toBe('warn');
     expect(chip('DATABASE CONNECTIONS').dataset.state).toBe('ok');
     expect(chip('FAILED AI JOBS').dataset.state).toBe('warn');
+  });
+
+  it('lists Sentry issues for an admin and turns the check red on a new one', async () => {
+    mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
+    const issue = (shortId, substatus) => ({
+      short_id: shortId, title: 'ValueError: ' + shortId, culprit: 'server.jobs', level: 'error', substatus,
+      count: 12, first_seen: new Date().toISOString(), last_seen: new Date().toISOString(), url: 'https://sentry.example/' + shortId,
+    });
+    mocks.api.get.mockImplementation(respond({ sentryBody: { configured: true, environment: 'production', issues: [issue('SRV-1', 'ongoing'), issue('SRV-2', 'new')] } }));
+    renderOverview();
+    await waitFor(() => expect(chip('SENTRY ISSUES').dataset.state).toBe('bad'));
+    expect(chip('SENTRY ISSUES').textContent).toMatch(/1 new, regressed or escalating/);
+    expect(screen.getByText(/SENTRY · LAST 24 H/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'SRV-2' }).getAttribute('href')).toBe('https://sentry.example/SRV-2');
+    expect(screen.getByRole('link', { name: 'SRV-2' }).closest('tr').textContent).toMatch(/NEW/);
+  });
+
+  it('keeps the Sentry check amber when it is not connected or does not answer', async () => {
+    mocks.auth.user = { username: 'boss', role: 'admin', can_moderate: true };
+    mocks.api.get.mockImplementation(respond());
+    const { unmount } = renderOverview();
+    await waitFor(() => expect(chip('SENTRY ISSUES').dataset.state).toBe('warn'));
+    expect(chip('SENTRY ISSUES').textContent).toMatch(/not connected/);
+    unmount();
+    mocks.api.get.mockImplementation(respond({ sentryBody: { configured: true, error: 'Sentry did not answer (ConnectTimeout)' } }));
+    renderOverview();
+    await waitFor(() => expect(chip('SENTRY ISSUES').textContent).toMatch(/ConnectTimeout/));
+    expect(chip('SENTRY ISSUES').dataset.state).toBe('warn');
   });
 
   it('keeps rate and latency checks amber below the request minimum', async () => {

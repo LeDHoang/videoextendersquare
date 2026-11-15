@@ -420,6 +420,20 @@ def test_the_vr_rendition_lands_last_and_reaches_the_feed(setup, tmp_path):
     assert [item["vr2k_url"] for item in payload] == [f"https://media.example.com/uploads/{stored.stem}-2k.mp4"]
 
 
+def test_a_video_of_2k_or_less_gets_no_vr_rendition(setup, tmp_path, monkeypatch):
+    client, Session, s3, ffmpeg, futures = setup
+    monkeypatch.setattr(SM, "probe_media_info", lambda src: {"duration_ms": 1000, "width": 1920, "height": 1080})
+    body = publish_video(client, tmp_path)
+    stored = stored_path(body)
+    ffmpeg.gate.set()
+    futures[0].result(timeout=10)
+    assert f".{stored.stem}-2k.mp4.part" not in ffmpeg.encodes
+    assert f".{stored.stem}-preview.mp4.part" in ffmpeg.encodes
+    with Session() as db:
+        payload = reels._build_payload(post_media_items(db), "h264", db=db)
+    assert [item["vr2k_url"] for item in payload] == [None]
+
+
 @pytest.mark.parametrize(("stereo", "scale", "maxrate"), [
     (None, "2*trunc(min(iw,2048)/2)", "8M"),
     ("sbs", "scale='2*trunc(min(iw,4096)/2)':-2", "14M"),

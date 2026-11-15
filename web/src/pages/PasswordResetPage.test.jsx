@@ -5,11 +5,17 @@ import PasswordResetPage from './PasswordResetPage.jsx';
 
 const mocks = vi.hoisted(() => ({
   auth: { refresh: vi.fn() },
-  api: { post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn() },
 }));
 
 vi.mock('../api/client.js', () => ({ api: mocks.api }));
 vi.mock('../hooks/AuthContext.jsx', () => ({ useAuth: () => mocks.auth }));
+// The real widget loads Cloudflare's script; this stand-in just hands out a token on click.
+vi.mock('../components/auth/Turnstile.jsx', () => ({
+  default: ({ siteKey, action, onToken }) => (siteKey
+    ? <button type="button" data-action={action} onClick={() => onToken('cf-token')}>SOLVE BOT CHECK</button>
+    : null),
+}));
 
 class FakeApiError extends Error {
   constructor(message, { code, field, status = 400 } = {}) {
@@ -45,6 +51,7 @@ const click = (name) => fireEvent.click(screen.getByRole('button', { name }));
 
 describe('PasswordResetPage — request a link', () => {
   beforeEach(() => {
+    mocks.api.get.mockReset();
     mocks.api.post.mockReset().mockResolvedValue(SENT);
     mocks.auth.refresh.mockReset().mockResolvedValue(null);
   });
@@ -335,5 +342,46 @@ describe('PasswordResetPage — choose a new password', () => {
     expect(screen.getByLabelText('CONFIRM PASSWORD')).toHaveAttribute('type', 'password');
     fireEvent.click(second);
     expect(screen.getByLabelText('CONFIRM PASSWORD')).toHaveAttribute('type', 'text');
+  });
+});
+
+describe('PasswordResetPage — bot check', () => {
+  beforeEach(() => {
+    mocks.api.get.mockReset().mockResolvedValue({ turnstile_site_key: '0xSITE' });
+    mocks.api.post.mockReset().mockResolvedValue(SENT);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('blocks the reset request until the bot check is solved, then sends its token', async () => {
+    renderAt('/forgot-password');
+    type('EMAIL', 'maker@example.com');
+    const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+    expect(solve).toHaveAttribute('data-action', 'reset');
+    click('SEND RESET LINK');
+    expect(mocks.api.post).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+    fireEvent.click(solve);
+    click('SEND RESET LINK');
+    await screen.findByText('CHECK YOUR INBOX', { selector: 'h1' });
+    expect(mocks.api.post).toHaveBeenCalledWith('/api/auth/password-reset/request', { email: 'maker@example.com', turnstile_token: 'cf-token' });
+  });
+
+  it('needs a fresh bot check to resend the link', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderAt('/forgot-password');
+    type('EMAIL', 'maker@example.com');
+    fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+    click('SEND RESET LINK');
+    await screen.findByText('CHECK YOUR INBOX', { selector: 'h1' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    click('RESEND LINK');
+    expect(mocks.api.post).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+    fireEvent.click(await screen.findByRole('button', { name: 'SOLVE BOT CHECK' }));
+    await act(async () => { click('RESEND LINK'); });
+    expect(mocks.api.post).toHaveBeenLastCalledWith('/api/auth/password-reset/request', { email: 'maker@example.com', turnstile_token: 'cf-token' });
   });
 });

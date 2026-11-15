@@ -106,6 +106,70 @@ class RelatedItemSource:
         return _ranked_hits(self.name, rows)
 
 
+class TextRelatedSource:
+    name = "text_related"
+
+    def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
+        rows = [
+            (post_id, score, seeds)
+            for post_id, (score, seeds) in context.text_scores.items()
+            if post_id in context.items and score > 0
+        ]
+        return _ranked_hits(self.name, rows)
+
+
+class LocationRelatedSource:
+    name = "location_related"
+
+    def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
+        rows = [
+            (post_id, score, seeds)
+            for post_id, (score, seeds) in context.location_scores.items()
+            if post_id in context.items and score > 0
+        ]
+        return _ranked_hits(self.name, rows)
+
+
+class CreatorOtherReelsSource:
+    """The opened reel's creator's other reels, newest first. Not a relatedness score."""
+
+    name = "creator_other_reels"
+
+    def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
+        if not context.seed_post_id:
+            return []
+        seed = next((item for item, _ in context.seed_items if item.post_id == context.seed_post_id), None)
+        if seed is None:
+            return []
+        own = sorted(
+            (
+                item
+                for item in context.items.values()
+                if item.owner_id == seed.owner_id and item.post_id != seed.post_id
+            ),
+            key=lambda item: (-item.created_at.timestamp(), item.post_id),
+        )[:20]
+        return [
+            (item.post_id, SourceHit(self.name, rank, 1.0 / (1.0 + rank), (seed.post_id,)))
+            for rank, item in enumerate(own, start=1)
+        ]
+
+
+class ScopePoolSource:
+    """Every item of a filtered feed, newest first. Affinity features do the ranking."""
+
+    name = "scope_pool"
+
+    def generate(self, context: PipelineContext) -> list[tuple[str, SourceHit]]:
+        ordered = sorted(
+            context.items.values(), key=lambda item: (-item.created_at.timestamp(), item.post_id)
+        )
+        return [
+            (item.post_id, SourceHit(self.name, rank, 1.0))
+            for rank, item in enumerate(ordered, start=1)
+        ]
+
+
 class SessionContextSource:
     name = "session_context"
 
@@ -137,7 +201,19 @@ class TrendingSource:
             evidence = (qualified + 2.0) / (impressions + 5.0)
             completion = (completions + 1.0) / (qualified + 3.0)
             legacy = math.log1p(max(0, item.view_count) + 5 * max(0, item.like_count))
-            rows.append((item.post_id, evidence + 0.5 * completion + 0.05 * legacy + math.log1p(positives), ()))
+            all_time = evidence + 0.5 * completion + 0.05 * legacy + math.log1p(positives)
+            # Last week leads; all-time totals only break near-ties. With no recent rows
+            # the recent part is the same for every post, so the all-time order stands.
+            recent = context.recent_stats.get(item.post_id, {})
+            recent_qualified = recent.get("qualified_views", 0.0)
+            recent_positives = recent.get("likes", 0.0) + 2 * recent.get("saves", 0.0) + 3 * recent.get("shares", 0.0)
+            recent_score = (
+                (recent_qualified + 2.0) / (recent.get("impressions", 0.0) + 5.0)
+                + 0.5 * (recent.get("completions", 0.0) + 1.0) / (recent_qualified + 3.0)
+                + math.log1p(recent_positives)
+                + 0.5 * math.log1p(recent_qualified)
+            )
+            rows.append((item.post_id, recent_score + 0.1 * all_time, ()))
         return _ranked_hits(self.name, rows)
 
 
@@ -158,6 +234,9 @@ DEFAULT_SOURCES: tuple[CandidateSource, ...] = (
     CreatorAffinitySource(),
     TagAffinitySource(),
     RelatedItemSource(),
+    TextRelatedSource(),
+    LocationRelatedSource(),
+    CreatorOtherReelsSource(),
     SessionContextSource(),
     TrendingSource(),
     FreshExplorationSource(),
@@ -168,6 +247,8 @@ def gather_source_hits(context: PipelineContext) -> dict[str, dict[str, SourceHi
     """Return post -> source -> hit while preserving all provenance."""
     if context.manual_order is not None:
         sources: tuple[CandidateSource, ...] = (ManualOrderSource(),)
+    elif context.pool_only:
+        sources = (ScopePoolSource(),)
     elif context.surface == "following":
         sources = (FollowingRecentSource(),)
     else:

@@ -1,0 +1,70 @@
+reels_feed {"conc": 1, "n": 298, "statuses": {"200": 298}, "good_rps": 14.87, "p50": 66, "p95": 80, "p99": 93, "max": 137}
+reels_feed {"conc": 2, "n": 327, "statuses": {"200": 327}, "good_rps": 16.29, "p50": 118, "p95": 152, "p99": 208, "max": 319}
+reels_feed {"conc": 5, "n": 323, "statuses": {"200": 323}, "good_rps": 15.9, "p50": 316, "p95": 380, "p99": 402, "max": 443}
+reels_feed {"conc": 10, "n": 311, "statuses": {"200": 311}, "good_rps": 15.1, "p50": 658, "p95": 739, "p99": 789, "max": 848}
+reels_feed {"conc": 15, "n": 329, "statuses": {"200": 329}, "good_rps": 15.76, "p50": 953, "p95": 1039, "p99": 1073, "max": 1097}
+reels_feed {"conc": 25, "n": 347, "statuses": {"200": 347}, "good_rps": 16.24, "p50": 1524, "p95": 1670, "p99": 1703, "max": 1806}
+reels_feed {"conc": 50, "n": 365, "statuses": {"200": 365}, "good_rps": 15.81, "p50": 3084, "p95": 3357, "p99": 3386, "max": 3402}
+creators {"conc": 1, "n": 457, "statuses": {"200": 457}, "good_rps": 22.82, "p50": 42, "p95": 57, "p99": 72, "max": 81}
+creators {"conc": 2, "n": 529, "statuses": {"200": 529}, "good_rps": 26.44, "p50": 75, "p95": 91, "p99": 99, "max": 124}
+creators {"conc": 5, "n": 500, "statuses": {"200": 500}, "good_rps": 24.81, "p50": 197, "p95": 264, "p99": 287, "max": 337}
+creators {"conc": 10, "n": 479, "statuses": {"200": 479}, "good_rps": 23.73, "p50": 410, "p95": 543, "p99": 605, "max": 663}
+creators {"conc": 15, "n": 473, "statuses": {"200": 473}, "good_rps": 23.05, "p50": 641, "p95": 836, "p99": 915, "max": 998}
+creators {"conc": 25, "n": 472, "statuses": {"200": 472}, "good_rps": 22.8, "p50": 1006, "p95": 1672, "p99": 2143, "max": 2908}
+creators {"conc": 50, "n": 493, "statuses": {"200": 493}, "good_rps": 22.51, "p50": 1869, "p95": 3796, "p99": 5154, "max": 8755}
+reels {"conc": 1, "n": 1753, "statuses": {"200": 1753}, "good_rps": 87.61, "p50": 11, "p95": 14, "p99": 20, "max": 180}
+reels {"conc": 2, "n": 1785, "statuses": {"200": 1785}, "good_rps": 89.2, "p50": 21, "p95": 31, "p99": 37, "max": 322}
+reels {"conc": 5, "n": 1750, "statuses": {"200": 1750}, "good_rps": 86.59, "p50": 54, "p95": 71, "p99": 86, "max": 568}
+reels {"conc": 10, "n": 1793, "statuses": {"200": 1793}, "good_rps": 89.15, "p50": 107, "p95": 130, "p99": 383, "max": 572}
+reels {"conc": 15, "n": 1742, "statuses": {"200": 1742}, "good_rps": 86.45, "p50": 165, "p95": 201, "p99": 552, "max": 788}
+reels {"conc": 25, "n": 1826, "statuses": {"200": 1826}, "good_rps": 90.09, "p50": 269, "p95": 301, "p99": 565, "max": 770}
+reels {"conc": 50, "n": 1763, "statuses": {"200": 1763}, "good_rps": 86.31, "p50": 550, "p95": 952, "p99": 1091, "max": 1195}
+player {"conc": 1, "n": 239, "statuses": {"200": 239}, "good_rps": 11.92, "p50": 82, "p95": 98, "p99": 121, "max": 163}
+player {"conc": 2, "n": 290, "statuses": {"200": 290}, "good_rps": 14.46, "p50": 136, "p95": 163, "p99": 193, "max": 255}
+player {"conc": 5, "n": 288, "statuses": {"200": 288}, "good_rps": 14.17, "p50": 349, "p95": 423, "p99": 479, "max": 558}
+player {"conc": 10, "n": 299, "statuses": {"200": 299}, "good_rps": 14.53, "p50": 681, "p95": 762, "p99": 803, "max": 864}
+player {"conc": 15, "n": 290, "statuses": {"200": 290}, "good_rps": 13.77, "p50": 1083, "p95": 1186, "p99": 1215, "max": 1302}
+player {"conc": 25, "n": 306, "statuses": {"200": 306}, "good_rps": 14.17, "p50": 1747, "p95": 1924, "p99": 1963, "max": 1968}
+player {"conc": 50, "n": 340, "statuses": {"200": 340}, "good_rps": 14.6, "p50": 3384, "p95": 3510, "p99": 3530, "max": 3550}
+player_inline {"conc": 1, "n": 260, "statuses": {"200": 260}, "good_rps": 12.97, "p50": 76, "p95": 90, "p99": 105, "max": 119}
+player_inline {"conc": 2, "n": 282, "statuses": {"200": 282}, "good_rps": 14.05, "p50": 139, "p95": 166, "p99": 206, "max": 243}
+player_inline {"conc": 5, "n": 281, "statuses": {"200": 281}, "good_rps": 13.81, "p50": 359, "p95": 462, "p99": 503, "max": 515}
+player_inline {"conc": 10, "n": 283, "statuses": {"200": 283}, "good_rps": 13.75, "p50": 718, "p95": 825, "p99": 886, "max": 896}
+player_inline {"conc": 15, "n": 296, "statuses": {"200": 296}, "good_rps": 14.11, "p50": 1064, "p95": 1142, "p99": 1184, "max": 1205}
+player_inline {"conc": 25, "n": 309, "statuses": {"200": 309}, "good_rps": 14.27, "p50": 1749, "p95": 1837, "p99": 1865, "max": 1906}
+player_inline {"conc": 50, "n": 324, "statuses": {"200": 324}, "good_rps": 13.87, "p50": 3589, "p95": 3786, "p99": 3843, "max": 3888}
+tags {"conc": 1, "n": 1449, "statuses": {"200": 1449}, "good_rps": 72.42, "p50": 13, "p95": 18, "p99": 21, "max": 104}
+tags {"conc": 2, "n": 1535, "statuses": {"200": 1535}, "good_rps": 76.31, "p50": 25, "p95": 37, "p99": 43, "max": 185}
+tags {"conc": 5, "n": 1524, "statuses": {"200": 1524}, "good_rps": 76.01, "p50": 65, "p95": 81, "p99": 94, "max": 272}
+tags {"conc": 10, "n": 1519, "statuses": {"200": 1519}, "good_rps": 75.56, "p50": 131, "p95": 151, "p99": 221, "max": 257}
+tags {"conc": 15, "n": 1463, "statuses": {"200": 1463}, "good_rps": 72.5, "p50": 200, "p95": 261, "p99": 303, "max": 362}
+tags {"conc": 25, "n": 1532, "statuses": {"200": 1532}, "good_rps": 75.52, "p50": 327, "p95": 362, "p99": 452, "max": 529}
+tags {"conc": 50, "n": 1528, "statuses": {"200": 1528}, "good_rps": 73.63, "p50": 668, "p95": 746, "p99": 765, "max": 845}
+locations_activity {"conc": 1, "n": 377, "statuses": {"200": 377}, "good_rps": 18.82, "p50": 51, "p95": 66, "p99": 76, "max": 127}
+locations_activity {"conc": 2, "n": 404, "statuses": {"200": 404}, "good_rps": 20.18, "p50": 96, "p95": 118, "p99": 195, "max": 282}
+locations_activity {"conc": 5, "n": 406, "statuses": {"200": 406}, "good_rps": 20.1, "p50": 253, "p95": 319, "p99": 443, "max": 556}
+locations_activity {"conc": 10, "n": 418, "statuses": {"200": 418}, "good_rps": 20.48, "p50": 476, "p95": 578, "p99": 663, "max": 767}
+locations_activity {"conc": 15, "n": 427, "statuses": {"200": 427}, "good_rps": 20.56, "p50": 727, "p95": 803, "p99": 848, "max": 917}
+locations_activity {"conc": 25, "n": 433, "statuses": {"200": 433}, "good_rps": 20.51, "p50": 1197, "p95": 1459, "p99": 1583, "max": 1617}
+locations_activity {"conc": 50, "n": 463, "statuses": {"200": 463}, "good_rps": 20.71, "p50": 2395, "p95": 2534, "p99": 2545, "max": 2591}
+search_suggest {"conc": 1, "n": 649, "statuses": {"200": 649}, "good_rps": 32.43, "p50": 30, "p95": 37, "p99": 44, "max": 122}
+search_suggest {"conc": 2, "n": 627, "statuses": {"200": 627}, "good_rps": 31.3, "p50": 62, "p95": 84, "p99": 107, "max": 192}
+search_suggest {"conc": 5, "n": 648, "statuses": {"200": 648}, "good_rps": 31.96, "p50": 155, "p95": 188, "p99": 278, "max": 322}
+search_suggest {"conc": 10, "n": 650, "statuses": {"200": 650}, "good_rps": 32.07, "p50": 306, "p95": 357, "p99": 513, "max": 575}
+search_suggest {"conc": 15, "n": 631, "statuses": {"200": 631}, "good_rps": 30.9, "p50": 474, "p95": 623, "p99": 682, "max": 744}
+search_suggest {"conc": 25, "n": 672, "statuses": {"200": 672}, "good_rps": 32.42, "p50": 764, "p95": 837, "p99": 889, "max": 928}
+search_suggest {"conc": 50, "n": 687, "statuses": {"200": 687}, "good_rps": 31.92, "p50": 1545, "p95": 1697, "p99": 1744, "max": 1753}
+session {"conc": 1, "n": 660, "statuses": {"200": 660}, "good_rps": 32.88, "p50": 9, "p95": 87, "p99": 104, "max": 175, "session": {"good_per_min": 328.8, "p50": 178, "p95": 203, "p99": 342}}
+session {"conc": 2, "n": 762, "statuses": {"200": 762}, "good_rps": 37.57, "p50": 17, "p95": 151, "p99": 177, "max": 306, "session": {"good_per_min": 375.7, "p50": 307, "p95": 366, "p99": 546}}
+session {"conc": 5, "n": 780, "statuses": {"200": 780}, "good_rps": 37.75, "p50": 38, "p95": 359, "p99": 462, "max": 551, "session": {"good_per_min": 377.5, "p50": 773, "p95": 973, "p99": 1065}}
+session {"conc": 10, "n": 798, "statuses": {"200": 798}, "good_rps": 37.58, "p50": 73, "p95": 690, "p99": 849, "max": 950, "session": {"good_per_min": 375.8, "p50": 1505, "p95": 1924, "p99": 2194}}
+session {"conc": 15, "n": 810, "statuses": {"200": 810}, "good_rps": 37.81, "p50": 248, "p95": 1022, "p99": 1086, "max": 1192, "session": {"good_per_min": 378.1, "p50": 2279, "p95": 2736, "p99": 2808}}
+session {"conc": 25, "n": 900, "statuses": {"200": 900}, "good_rps": 38.72, "p50": 182, "p95": 1789, "p99": 1877, "max": 2001, "session": {"good_per_min": 387.2, "p50": 3808, "p95": 4068, "p99": 4268}}
+session {"conc": 50, "n": 900, "statuses": {"200": 900}, "good_rps": 36.93, "p50": 653, "p95": 3667, "p99": 3896, "max": 4047, "session": {"good_per_min": 369.3, "p50": 7946, "p95": 8346, "p99": 8638}}
+session_spa {"conc": 1, "n": 672, "statuses": {"200": 672}, "good_rps": 33.51, "p50": 9, "p95": 83, "p99": 103, "max": 182, "session": {"good_per_min": 335.1, "p50": 174, "p95": 202, "p99": 320}}
+session_spa {"conc": 2, "n": 786, "statuses": {"200": 786}, "good_rps": 38.96, "p50": 16, "p95": 140, "p99": 163, "max": 295, "session": {"good_per_min": 389.6, "p50": 298, "p95": 348, "p99": 557}}
+session_spa {"conc": 5, "n": 774, "statuses": {"200": 774}, "good_rps": 37.76, "p50": 48, "p95": 372, "p99": 454, "max": 694, "session": {"good_per_min": 377.6, "p50": 767, "p95": 993, "p99": 1217}}
+session_spa {"conc": 10, "n": 780, "statuses": {"200": 780}, "good_rps": 36.52, "p50": 99, "p95": 688, "p99": 800, "max": 902, "session": {"good_per_min": 365.2, "p50": 1577, "p95": 1848, "p99": 2069}}
+session_spa {"conc": 15, "n": 810, "statuses": {"200": 810}, "good_rps": 37.43, "p50": 92, "p95": 1063, "p99": 1155, "max": 1330, "session": {"good_per_min": 374.3, "p50": 2347, "p95": 2668, "p99": 2914}}
+session_spa {"conc": 25, "n": 882, "statuses": {"200": 882}, "good_rps": 37.94, "p50": 149, "p95": 1803, "p99": 1947, "max": 2106, "session": {"good_per_min": 379.4, "p50": 3853, "p95": 4318, "p99": 4392}}
+session_spa {"conc": 50, "n": 900, "statuses": {"200": 900}, "good_rps": 37.23, "p50": 669, "p95": 3658, "p99": 3833, "max": 3888, "session": {"good_per_min": 372.3, "p50": 7875, "p95": 8483, "p99": 8931}}

@@ -492,6 +492,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   let domOverlayInput = null;
   let vrKeyboardOpen = false;
   let pendingSyncTime = null;
+  // Comment the open keyboard replies to ({ id, author_name, prefill }), or null.
+  let pendingReplyTo = null;
 
   // Telemetry & Render Stats
   const renderStats = {
@@ -7893,10 +7895,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   function refreshPanelScrollBounds(comments) {
     const ui = getUICanvas();
     if (!ui || ui.CP_LIST_TOP === undefined) return;
-    let filtered = comments;
-    if (cPanelTab === 'general') {
-      filtered = comments.filter((c) => c.timestamp === null || c.timestamp === undefined);
-    }
+    const filtered = ui.filterPanelComments(comments, cPanelTab);
     const listH = ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP;
     const contentH = filtered.length * (ui.CP_ITEM_H + ui.CP_ITEM_GAP);
     cPanelMaxScroll = Math.max(0, contentH - listH);
@@ -8180,6 +8179,12 @@ window.WebXRVR = window.WebXRVR || (function () {
   let shellMainCanvas = null, shellMainCtx = null, shellMainTexture = null, shellMainMesh = null;
   let shellNavCanvas = null, shellNavCtx = null, shellNavTexture = null, shellNavMesh = null;
   let shellKbCanvas = null, shellKbCtx = null, shellKbTexture = null, shellKbMesh = null;
+  let shellRewardCanvas = null, shellRewardCtx = null, shellRewardTexture = null, shellRewardMesh = null;
+  // Reel-reward popup under the nav: { amount, jackpot, until } on the nowMs() clock, null when hidden.
+  let shellReward = null;
+  let shellRewardPainted = null;
+  const SHELL_REWARD_MS = 4200;
+  const SHELL_JACKPOT_MS = 6000;
   let shellKbWasShown = false;
   let shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
   // Grid thumbnails: url → { img, ok }, oldest first (Map order) for LRU eviction.
@@ -8446,8 +8451,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       const p = makeShellPanel(SHELL_KB_SIZE.w, SHELL_KB_SIZE.h, sc.KB_W, sc.KB_H, 1, 7);
       shellKbCanvas = p.canvas; shellKbCtx = p.ctx; shellKbTexture = p.texture; shellKbMesh = p.mesh;
     }
+    if (!shellRewardMesh) {
+      const p = makeShellPanel(SHELL_NAV_SIZE.w * sc.REWARD_W / sc.NAV_W, SHELL_NAV_SIZE.h * sc.REWARD_H / sc.NAV_H,
+        sc.REWARD_W, sc.REWARD_H, 1, 7);
+      shellRewardCanvas = p.canvas; shellRewardCtx = p.ctx; shellRewardTexture = p.texture; shellRewardMesh = p.mesh;
+      shellRewardPainted = null;
+    }
     shellPainted = { mainVersion: -1, mainContent: -1, navVersion: -1, kbVersion: -1, kbKeys: '', mainHover: null, navHover: null, kbHover: null, seenVersion: -1, seenAt: 0 };
     shell.refreshUnread();
+    shell.refreshCredits();
   }
 
   function headYaw() {
@@ -8495,6 +8507,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       shellNavMesh.quaternion.copy(anchor.quaternion);
       shellNavMesh.position.copy(anchor.position)
         .add(new THREE.Vector3(0, -(anchorH + navH) / 2 - gap, 0).applyQuaternion(anchor.quaternion));
+      if (shellRewardMesh) {
+        // The reward popup hangs a quarter nav height under the bar, at its scale.
+        const sc = getShellCanvas();
+        const rewardH = navH * sc.REWARD_H / sc.NAV_H;
+        shellRewardMesh.scale.set(k, k, 1);
+        shellRewardMesh.quaternion.copy(anchor.quaternion);
+        shellRewardMesh.position.copy(shellNavMesh.position)
+          .add(new THREE.Vector3(0, -(navH + rewardH) / 2 - navH * 0.25, 0).applyQuaternion(anchor.quaternion));
+      }
     };
     place(shellNavK);
     const dist = shellNavMesh.position.distanceTo(head);
@@ -8521,6 +8542,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     const open = pointerActive && isShellOpen();
     // fix24: the nav strip hides together with the dock (open shell keeps it).
     if (shellNavMesh) shellNavMesh.visible = pointerActive && (controlsVisible || open);
+    // The popup shows even with the dock auto-hidden: rewards land mid-playback.
+    if (shellRewardMesh) shellRewardMesh.visible = pointerActive && !!shellReward;
     if (shellMainMesh) shellMainMesh.visible = open;
     if (shellKbMesh) shellKbMesh.visible = open && isShellKeyboardShown();
     if (!open) return;
@@ -8617,6 +8640,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       themeT = themeSwitchAnim.to ? k : 1 - k;
       if (k >= 1) themeSwitchAnim = null;
     }
+    if (shellReward && now >= shellReward.until) {
+      shellReward = null;
+      applyShellVisibility();
+    }
+    if (shellRewardCtx && shellRewardMesh && shellRewardMesh.visible &&
+        (themeT !== undefined || shellRewardPainted !== shellReward)) {
+      sc.renderRewardPopup(shellRewardCtx, shellReward);
+      shellRewardTexture.needsUpdate = true;
+      renderStats.panelUploads += 1;
+      shellRewardPainted = shellReward;
+    }
     if (shellNavCtx && shellNavMesh && shellNavMesh.visible && (themeT !== undefined ||
         shellPainted.navVersion !== state.contentVersion || shellPainted.navHover !== navHover)) {
       sc.renderNavBar(shellNavCtx, state, navHover, themeT);
@@ -8657,6 +8691,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (shellNavTexture) { try { shellNavTexture.dispose(); } catch (e) {} }
     shellMainCanvas = shellMainCtx = shellMainTexture = shellMainMesh = null;
     if (shellKbTexture) { try { shellKbTexture.dispose(); } catch (e) {} }
+    if (shellRewardTexture) { try { shellRewardTexture.dispose(); } catch (e) {} }
+    shellRewardCanvas = shellRewardCtx = shellRewardTexture = shellRewardMesh = null;
+    shellReward = shellRewardPainted = null;
     shellNavCanvas = shellNavCtx = shellNavTexture = shellNavMesh = null;
     shellKbCanvas = shellKbCtx = shellKbTexture = shellKbMesh = null;
     shellKbWasShown = false;
@@ -8695,7 +8732,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       return !!shell.share(o);
     },
     refreshUnread() { if (shell) shell.refreshUnread(); },
-    noteReward(result) { if (shell) shell.noteReward(result); },
+    noteReward(result) {
+      if (shell) shell.noteReward(result);
+      if (!result || !result.credit_awarded) return;
+      shellReward = {
+        amount: Math.max(1, Number(result.credits_awarded_amount) || 1),
+        jackpot: result.jackpot || null,
+        until: nowMs() + (result.jackpot ? SHELL_JACKPOT_MS : SHELL_REWARD_MS),
+      };
+      applyShellVisibility();
+      vrLastUiUploadT = -1;
+    },
   };
   // </vr-shell-glue>
 
@@ -12032,7 +12079,8 @@ window.WebXRVR = window.WebXRVR || (function () {
                 if (m.map && m.map !== videoTexture && m.map !== controlsTexture &&
                     m.map !== commentsTexture && m.map !== overlayTexture &&
                     m.map !== guideTexture && m.map !== earthPreviewTexture &&
-                    m.map !== shellMainTexture && m.map !== shellNavTexture) {
+                    m.map !== shellMainTexture && m.map !== shellNavTexture &&
+                    m.map !== shellRewardTexture) {
                   try { m.map.dispose(); } catch (e) {}
                 }
                 try { m.dispose(); } catch (e) {}
@@ -12406,6 +12454,23 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (callbacks.onLikeComment) callbacks.onLikeComment(id);
       return true;
     }
+    if (desc.indexOf('reply:') === 0) {
+      // Signed out, replying opens sign-in, like the footer's add button.
+      const user = callbacks.getCurrentUser ? callbacks.getCurrentUser() : null;
+      if (!user && callbacks.getCurrentUser && callbacks.onOpenAccount) {
+        callbacks.onOpenAccount();
+        return true;
+      }
+      const id = desc.slice(6);
+      const comments = callbacks.getComments ? callbacks.getComments() : [];
+      const c = comments.find((x) => x.id === id);
+      if (c) {
+        setPanelHighlight(id);
+        openVrKeyboard(c);
+        vrLastUiUploadT = -1;
+      }
+      return true;
+    }
     if (desc.indexOf('profile:') === 0) {
       const username = desc.slice(8);
       if (username && callbacks.onOpenProfile) callbacks.onOpenProfile(username);
@@ -12446,7 +12511,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     cPanelTab = 'all';
     const ui = getUICanvas();
     const comments = callbacks.getComments ? callbacks.getComments() : [];
-    const idx = comments.findIndex((c) => c.id === commentId);
+    // Row order is the panel's threaded order, not the raw list's.
+    const rows = ui && ui.filterPanelComments ? ui.filterPanelComments(comments, cPanelTab) : comments;
+    const idx = rows.findIndex((c) => c.id === commentId);
     const listH = ui ? (ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP) : 520;
     const itemH = ui ? (ui.CP_ITEM_H + ui.CP_ITEM_GAP) : 112;
     if (idx >= 0) {
@@ -12498,7 +12565,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     } catch (e) { domOverlayRoot = null; domOverlayInput = null; }
   }
 
-  function openVrKeyboard() {
+  // replyTo: the comment to reply to; omitted for a new top-level comment.
+  function openVrKeyboard(replyTo) {
     if (!debugFlags.domoverlay) {
       showNotification('KEYBOARD DISABLED (?domoverlay=0)');
       return;
@@ -12525,7 +12593,15 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     const source = getVisualSource();
     pendingSyncTime = source.kind === 'static-card' ? null : Math.round(source.currentTime * 10) / 10;
-    domOverlayInput.value = '';
+    // Replying to a reply joins the same thread; the "@name" prefill says who it answers.
+    const replyName = replyTo ? (replyTo.author_name || '') : '';
+    pendingReplyTo = replyTo
+      ? { id: replyTo.id, author_name: replyName, prefill: replyTo.parent_id && replyName ? '@' + replyName : '' }
+      : null;
+    domOverlayInput.placeholder = pendingReplyTo
+      ? (replyName ? 'Reply to @' + replyName + '…' : 'Type a reply…')
+      : 'Type a VR comment…';
+    domOverlayInput.value = pendingReplyTo && pendingReplyTo.prefill ? pendingReplyTo.prefill + ' ' : '';
     domOverlayInput.style.display = 'block';
     vrKeyboardOpen = true;
     try { domOverlayInput.focus(); } catch (e) {}
@@ -12541,7 +12617,15 @@ window.WebXRVR = window.WebXRVR || (function () {
       domOverlayInput.style.display = 'none';
       try { domOverlayInput.blur(); } catch (e) {}
     }
-    if (text && callbacks.onPostComment) callbacks.onPostComment(text, pendingSyncTime);
+    const reply = pendingReplyTo;
+    pendingReplyTo = null;
+    if (!text || !callbacks.onPostComment) return;
+    // Replies are general: no sync time. One still only its "@name" prefill is not sent.
+    if (reply) {
+      if (text !== reply.prefill) callbacks.onPostComment(text, null, reply.id);
+    } else {
+      callbacks.onPostComment(text, pendingSyncTime);
+    }
   }
 
   function onCommentInputKeydown(e) {

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -412,6 +413,8 @@ class Comment(Base):
     id = Column(String(64), primary_key=True, default=uuid4_string)
     post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
     author_id = Column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    # Top-level comment this one replies to; replies never nest deeper.
+    parent_id = Column(String(64), ForeignKey("comments.id", ondelete="CASCADE"), nullable=True, index=True)
     text = Column(String(500), nullable=False)
     timestamp_ms = Column(Integer, nullable=True)
     legacy_like_count = Column(Integer, nullable=False, default=0)
@@ -701,12 +704,29 @@ class PostRecommendationStats(Base):
     qualified_views = Column(Integer, nullable=False, default=0)
     completions = Column(Integer, nullable=False, default=0)
     skips = Column(Integer, nullable=False, default=0)
+    # Skips under 1.5s that were not navigation (filter change, unload, ...).
+    fast_skips = Column(Integer, nullable=False, default=0, server_default="0")
     likes = Column(Integer, nullable=False, default=0)
     saves = Column(Integer, nullable=False, default=0)
     shares = Column(Integer, nullable=False, default=0)
     negative_feedback = Column(Integer, nullable=False, default=0)
     total_watch_ms = Column(Integer, nullable=False, default=0)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
+class PostRecommendationDailyStats(Base):
+    """Per-post engagement for one UTC day; trending reads the last week."""
+
+    __tablename__ = "post_recommendation_daily_stats"
+
+    post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    day = Column(Date, primary_key=True, index=True)
+    impressions = Column(Integer, nullable=False, default=0)
+    qualified_views = Column(Integer, nullable=False, default=0)
+    completions = Column(Integer, nullable=False, default=0)
+    likes = Column(Integer, nullable=False, default=0)
+    saves = Column(Integer, nullable=False, default=0)
+    shares = Column(Integer, nullable=False, default=0)
 
 
 class CoWatchPair(Base):
@@ -1142,7 +1162,7 @@ class ReelRewardClaim(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     post_id = Column(String(36), ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
     impression_id = Column(
-        String(36), ForeignKey("recommendation_impressions.id", ondelete="CASCADE"), nullable=False, index=True
+        String(36), ForeignKey("recommendation_impressions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     utc_date = Column(String(10), nullable=False, index=True)
     ip_hash = Column(String(64), nullable=False, index=True)

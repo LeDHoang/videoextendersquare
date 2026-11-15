@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
@@ -17,13 +17,14 @@ from server.social.models import (
     EngagementEvent,
     ItemSimilarity,
     Post,
+    PostRecommendationDailyStats,
     PostRecommendationStats,
     RecommendationImpression,
     RecommendationSession,
     utcnow,
 )
 
-from .config import EVENT_WEIGHTS
+from .config import AFFINITY_HALF_LIFE_DAYS, EVENT_WEIGHTS, NEGATIVE_AFFINITY_FADE_DAYS
 
 
 class RecommendationAttributionError(ValueError):
@@ -126,20 +127,29 @@ def _event_value(event: EngagementEvent) -> float:
     elif event.event_type == "complete" and event.duration_ms and event.duration_ms < 3000:
         value *= 0.5
     elif event.event_type == "skip":
-        if event.navigation_reason in {
-            "playback_error",
-            "background",
-            "unload",
-            "filter_change",
-            "not_interested",
-            "hide_creator",
-        }:
+        if event.navigation_reason in _NAVIGATION_SKIPS:
             return 0.0
         if event.watch_ratio is not None and event.watch_ratio >= 0.5:
             value = -0.25
-        elif (event.watch_ms or 0) < 1500:
+        elif _is_fast_skip(event):
             value = -2.0
     return value
+
+
+# Skips caused by navigation or errors, not by the viewer judging the reel.
+_NAVIGATION_SKIPS = frozenset(
+    {"playback_error", "background", "unload", "filter_change", "not_interested", "hide_creator"}
+)
+
+
+def _is_fast_skip(event: EngagementEvent) -> bool:
+    """A skip under 1.5s that was neither navigation nor most of a short reel."""
+    return (
+        event.event_type == "skip"
+        and event.navigation_reason not in _NAVIGATION_SKIPS
+        and not (event.watch_ratio is not None and event.watch_ratio >= 0.5)
+        and (event.watch_ms or 0) < 1500
+    )
 
 
 def _update_post_stats(db: Session, event: EngagementEvent) -> None:
@@ -157,6 +167,8 @@ def _update_post_stats(db: Session, event: EngagementEvent) -> None:
         stats.completions = int(stats.completions or 0) + 1
     elif event.event_type == "skip":
         stats.skips = int(stats.skips or 0) + 1
+        if _is_fast_skip(event):
+            stats.fast_skips = int(stats.fast_skips or 0) + 1
     elif event.event_type == "like":
         stats.likes = int(stats.likes or 0) + 1
     elif event.event_type == "unlike":
@@ -171,6 +183,41 @@ def _update_post_stats(db: Session, event: EngagementEvent) -> None:
         stats.negative_feedback = int(stats.negative_feedback or 0) + 1
     stats.total_watch_ms = int(stats.total_watch_ms or 0) + max(0, int(event.watch_ms or 0))
     stats.updated_at = utcnow()
+    _update_daily_stats(db, event)
+
+
+# Event type -> (daily column, step); trending reads these per UTC day.
+_DAILY_COUNTS = {
+    "impression": ("impressions", 1),
+    "view": ("qualified_views", 1),
+    "complete": ("completions", 1),
+    "like": ("likes", 1),
+    "unlike": ("likes", -1),
+    "save": ("saves", 1),
+    "unsave": ("saves", -1),
+    "share": ("shares", 1),
+    "share_sent": ("shares", 1),
+}
+
+
+def _update_daily_stats(db: Session, event: EngagementEvent) -> None:
+    counted = _DAILY_COUNTS.get(event.event_type)
+    if not counted:
+        return
+    column, step = counted
+    created = event.created_at or utcnow()
+    # SQLite hands back naive datetimes; they are UTC.
+    day = (created if created.tzinfo else created.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).date()
+    # A new row every day per post, so first writes race often: insert-or-select.
+    row = get_or_create(
+        db,
+        PostRecommendationDailyStats,
+        PostRecommendationDailyStats.post_id == event.post_id,
+        PostRecommendationDailyStats.day == day,
+        post_id=event.post_id,
+        day=day,
+    )
+    setattr(row, column, max(0, int(getattr(row, column) or 0) + step))
 
 
 def _identity_values(event: EngagementEvent) -> tuple[str | None, str | None, str | None]:
@@ -181,13 +228,29 @@ def _identity_values(event: EngagementEvent) -> tuple[str | None, str | None, st
     return None, None, None
 
 
+def decayed_affinity(score: float, last_event_at: datetime | None, now: datetime) -> float:
+    """*score* halved every AFFINITY_HALF_LIFE_DAYS whole days since *last_event_at*;
+    a negative score fades linearly to 0 over NEGATIVE_AFFINITY_FADE_DAYS instead."""
+    if last_event_at is None:
+        return score
+    if last_event_at.tzinfo is None:
+        last_event_at = last_event_at.replace(tzinfo=timezone.utc)
+    days = max(0, (now - last_event_at).days)
+    if score < 0:
+        return score * max(0.0, 1.0 - days / NEGATIVE_AFFINITY_FADE_DAYS)
+    return score * 0.5 ** (days / AFFINITY_HALF_LIFE_DAYS)
+
+
 def _update_affinity_row(row, value: float, event: EngagementEvent) -> None:
-    row.score = max(-40.0, min(80.0, float(row.score or 0.0) + value))
+    at = event.created_at or utcnow()
+    # Decay the old score first, so a new event does not revive a stale one.
+    old = decayed_affinity(float(row.score or 0.0), row.last_event_at, at)
+    row.score = max(-40.0, min(80.0, old + value))
     if value > 0:
         row.positive_count = int(row.positive_count or 0) + 1
     elif value < 0:
         row.negative_count = int(row.negative_count or 0) + 1
-    row.last_event_at = event.created_at or utcnow()
+    row.last_event_at = at
     row.updated_at = utcnow()
 
 

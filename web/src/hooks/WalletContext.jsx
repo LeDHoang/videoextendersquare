@@ -11,6 +11,8 @@ export function WalletProvider({ children }) {
   const [catalogStatus, setCatalogStatus] = useState('loading');
   const [falKey, setFalKey] = useState({ configured: false, hint: '' });
   const [loading, setLoading] = useState(true);
+  // The latest reel-reward credit grant, for the header pill's "+N" highlight.
+  const [lastAward, setLastAward] = useState(null);
   const userIdRef = useRef(null);
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
@@ -54,16 +56,25 @@ export function WalletProvider({ children }) {
     // Background updates (reward toasts, N-job batch settlements) refresh
     // silently — no loading flash in the header/sidebar/panel.
     const update = () => refresh({ silent: true }).catch(() => {});
+    const award = (detail) => {
+      setLastAward({
+        amount: Math.max(1, Number(detail?.credits_awarded_amount) || 1),
+        jackpot: detail?.jackpot || null,
+        at: Date.now(),
+      });
+      update();
+    };
+    const onAwardEvent = (event) => award(event.detail);
     const onMessage = (event) => {
       if (event.origin !== window.location.origin) return;
-      if (event.data?.type === 'echo:credits-awarded') update();
+      if (event.data?.type === 'echo:credits-awarded') award(event.data);
     };
     window.addEventListener('echo:credits-updated', update);
-    window.addEventListener('echo:credits-awarded', update);
+    window.addEventListener('echo:credits-awarded', onAwardEvent);
     window.addEventListener('message', onMessage);
     return () => {
       window.removeEventListener('echo:credits-updated', update);
-      window.removeEventListener('echo:credits-awarded', update);
+      window.removeEventListener('echo:credits-awarded', onAwardEvent);
       window.removeEventListener('message', onMessage);
     };
   }, [refresh]);
@@ -96,12 +107,13 @@ export function WalletProvider({ children }) {
     catalogStatus,
     falKey,
     loading,
+    lastAward,
     refresh,
     quote,
     estimate,
     saveFalKey,
     deleteFalKey,
-  }), [wallet, catalog, catalogStatus, falKey, loading, refresh, quote, estimate, saveFalKey, deleteFalKey]);
+  }), [wallet, catalog, catalogStatus, falKey, loading, lastAward, refresh, quote, estimate, saveFalKey, deleteFalKey]);
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }

@@ -142,6 +142,64 @@ def test_rate_limit_returns_429(app):
         assert codes[-1] == 429
 
 
+def _bot_refused(response):
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"]["code"] == "BOT_CHECK_FAILED"
+
+
+def test_signed_out_request_needs_turnstile_when_on(app, turnstile_on):
+    payload = {"category": "bug", "email": "me@example.com", "body": "It broke."}
+    with TestClient(app) as client:
+        for extra in ({}, {"turnstile_token": "bad-token"}):
+            _bot_refused(client.post("/api/support", json={**payload, **extra}))
+        with app.state.Session() as db:
+            assert db.query(SupportRequest).count() == 0
+        assert app.state.sent == []
+        ok = client.post("/api/support", json={**payload, "turnstile_token": "good-support"})
+        assert ok.status_code == 202, ok.text
+        assert len(app.state.sent) == 1
+
+
+def test_signed_in_request_skips_turnstile(app, turnstile_on):
+    with TestClient(app) as client:
+        register_verified(client, json={
+            "email": "member@example.com",
+            "username": "member",
+            "password": PASSWORD,
+            "accept_terms": True,
+            "turnstile_token": "good-signup",
+        })
+        calls_before = len(turnstile_on)
+        response = mutate(client, "POST", "/api/support", {"category": "bug", "body": "It broke."})
+        assert response.status_code == 202, response.text
+        assert len(turnstile_on) == calls_before
+
+
+def test_reset_request_needs_turnstile_when_on(app, turnstile_on, monkeypatch):
+    mailed: list[str] = []
+    monkeypatch.setattr(account_safety, "send_password_reset_email", lambda to, token: mailed.append(to) or True)
+    with TestClient(app) as client:
+        register_verified(client, json={
+            "email": "resetme@example.com",
+            "username": "resetme",
+            "password": PASSWORD,
+            "accept_terms": True,
+            "turnstile_token": "good-signup",
+        })
+        client.cookies.clear()
+        # Same refusal for a known and an unknown address, and tokenless tries do not
+        # use up the 3/h per-account quota.
+        for email in ("nobody@example.com", *["resetme@example.com"] * 4):
+            _bot_refused(client.post("/api/auth/password-reset/request", json={"email": email}))
+        assert mailed == []
+        ok = client.post(
+            "/api/auth/password-reset/request",
+            json={"email": "resetme@example.com", "turnstile_token": "good-reset"},
+        )
+        assert ok.status_code == 200, ok.text
+        assert mailed == ["resetme@example.com"]
+
+
 def test_signed_in_user_rate_limit_returns_429(app):
     with TestClient(app) as client:
         register(client, "busy_user")

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { AuthField, AuthLayout, AuthNotice, PasswordField, PasswordRules, StatusGlyph, SubmitButton } from '../components/auth/AuthKit.jsx';
+import Turnstile from '../components/auth/Turnstile.jsx';
+import useBotCheck from '../components/auth/useBotCheck.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { validateEmail, validateNewPassword } from '../utils/authForm.js';
 
@@ -38,6 +40,7 @@ function RequestForm({ onSent, notice }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const input = useRef(null);
+  const bot = useBotCheck('reset');
   const problem = validateEmail(email);
 
   const submit = async (event) => {
@@ -48,10 +51,17 @@ function RequestForm({ onSent, notice }) {
       input.current?.focus();
       return;
     }
+    if (bot.needsToken) {
+      setError('Complete the bot check before requesting a link.');
+      return;
+    }
+    const turnstileToken = bot.consume();
     setBusy(true);
     setError('');
     try {
-      const result = await api.post('/api/auth/password-reset/request', { email: email.trim() });
+      const payload = { email: email.trim() };
+      if (turnstileToken) payload.turnstile_token = turnstileToken;
+      const result = await api.post('/api/auth/password-reset/request', payload);
       onSent({ email: email.trim(), message: result?.message || '', debugToken: result?.debug_token || '' });
     } catch (requestError) {
       setError(requestError.message || 'Could not send the reset link.');
@@ -78,6 +88,7 @@ function RequestForm({ onSent, notice }) {
           onBlur={() => setTouched(true)}
           error={touched ? problem : ''}
         />
+        <Turnstile {...bot.widget} onToken={(token) => { bot.widget.onToken(token); if (token && error) setError(''); }} />
         {error ? <AuthNotice tone="err">{error}</AuthNotice> : null}
         <SubmitButton busy={busy}>SEND RESET LINK</SubmitButton>
       </form>
@@ -91,6 +102,7 @@ function SentView({ sent, onResend, onChangeEmail }) {
   const [resending, setResending] = useState(false);
   const [error, setError] = useState('');
   const [resent, setResent] = useState(false);
+  const bot = useBotCheck('reset');
 
   const counting = cooldown > 0;
   useEffect(() => {
@@ -101,11 +113,16 @@ function SentView({ sent, onResend, onChangeEmail }) {
 
   const resend = async () => {
     if (resending || cooldown > 0) return;
+    if (bot.needsToken) {
+      setError('Complete the bot check before resending the link.');
+      return;
+    }
+    const turnstileToken = bot.consume();
     setResending(true);
     setError('');
     setResent(false);
     try {
-      await onResend();
+      await onResend(turnstileToken);
       setResent(true);
       setCooldown(RESEND_SECONDS);
     } catch (requestError) {
@@ -131,6 +148,7 @@ function SentView({ sent, onResend, onChangeEmail }) {
       ) : (
         <p className="sx-au-hint">Nothing in your inbox? Check spam, or confirm you used the email on your account.</p>
       )}
+      <Turnstile {...bot.widget} onToken={(token) => { bot.widget.onToken(token); if (token && error) setError(''); }} />
       {error ? <AuthNotice tone="err">{error}</AuthNotice> : null}
       {resent ? <AuthNotice tone="ok">A new link was requested. Older links no longer work.</AuthNotice> : null}
       <div className="sx-au-actions">
@@ -245,7 +263,10 @@ function ResetFlow({ requestOnly, token, updated }) {
     refresh?.();
   };
 
-  const resend = () => api.post('/api/auth/password-reset/request', { email: sent.email }).then((result) => {
+  const resend = (turnstileToken) => api.post(
+    '/api/auth/password-reset/request',
+    turnstileToken ? { email: sent.email, turnstile_token: turnstileToken } : { email: sent.email },
+  ).then((result) => {
     setSent((current) => ({ ...current, message: result?.message || current.message, debugToken: result?.debug_token || current.debugToken }));
   });
 

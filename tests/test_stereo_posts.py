@@ -110,7 +110,9 @@ def test_stereo_image_post_gets_left_eye_mono_rendition(client, tmp_path, layout
     assert meta["stereo_crop"] is False
     assert meta["url"].endswith("-mono.png")
     assert meta["stereo_url"] == f"/media/{meta['path']}"
-    assert meta["poster_url"].endswith("-mono-poster.jpg")
+    # The tile is the WebP tile of the left eye; 2D shows its 2D WebP.
+    assert meta["poster_url"].endswith("-mono-tile.webp")
+    assert meta["images"][0]["display_url"].endswith("-mono-2d.webp")
     assert meta["images"][0]["stereo_layout"] == layout
     assert meta["images"][0]["url"] == meta["url"]
 
@@ -330,8 +332,8 @@ def test_profile_card_of_stereo_still_keeps_left_eye_poster(client, tmp_path):
     with client.testing_session() as db:
         card = social.media_card(db.query(Post).one(), db)
     assert card["url"].endswith("-mono.png")
-    assert card["preview_url"] == card["url"]
-    assert card["poster_url"].endswith("-mono-poster.jpg")
+    assert card["preview_url"] == card["poster_url"]
+    assert card["poster_url"].endswith("-mono-tile.webp")
     rel, preview_url, poster_url, err = reels._gen_explore_assets(meta["path"])
     assert err is None and preview_url.endswith("-mono.png") and poster_url.endswith("-mono-poster.jpg")
 

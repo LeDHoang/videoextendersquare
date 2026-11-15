@@ -41,6 +41,7 @@ function loadPreload(items) {
     clearPreloadVideo: () => { calls.clears += 1; preloadVideo.src = ''; },
     isImageItem: (item) => !!item && item.media_type === 'image',
     playbackUrlFor: (item) => item.url,
+    itemPlaybackUrl: (item) => item.url,
     blobFor: () => null,
     Image: function Image() { calls.warmedImages.push(this); },
     setTimeout: (fn, ms) => { const id = nextTimer++; timers.set(id, { fn, ms }); return id; },

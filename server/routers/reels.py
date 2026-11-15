@@ -31,8 +31,15 @@ from server.settings import is_production
 from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
+from server.social.geo import (
+    CITY_COORDS,
+    haversine_km as _haversine_km,
+    location_coords as _location_coords,
+    location_key as _location_key,
+)
 from server.social.models import Comment, EngagementEvent, Post, PostLike, PostSave, PostSlide, ViewDedup
-from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page
+from server.social.recommendations import RecommendationCursorError, actor_identity, get_reel_page, rank_grid
+from server.social.recommendations.types import ActorIdentity
 from server.social.services import (
     post_media_items,
     published_media_paths,
@@ -76,6 +83,9 @@ PLAYER_SCRIPTS = {
     "__VR_SHELL_JS__": "vr_shell.js",
     "__WEBXR_VR_JS__": "webxr_vr.js",
 }
+# Loaded by /player-inline after the others have run: the controller photo
+# (about 650 KB) is read only when the VR guide panel is drawn.
+LAZY_PLAYER_SCRIPTS = {"quest_controller_img.js"}
 _player_script_hashes: dict = {}
 
 # Tiny mtime-checked cache for icon snippets (14 one-KB files; re-read only
@@ -507,56 +517,6 @@ def _related_tag_rows(slug: str, catalog: dict[str, dict], limit: int = 5) -> li
 
 # ─── LOCATION EXPLORE ───────────────────────────────────────────────────
 
-# Static coordinates for the seeded LOCATION_POOL cities so proximity
-# ranking works even when reels carry no per-reel lat/lon.
-CITY_COORDS = {
-    "austin,usa": (30.2672, -97.7431),
-    "los angeles,usa": (34.0522, -118.2437),
-    "new york,usa": (40.7128, -74.0060),
-    "miami,usa": (25.7617, -80.1918),
-    "chicago,usa": (41.8781, -87.6298),
-    "seattle,usa": (47.6062, -122.3321),
-    "london,uk": (51.5074, -0.1278),
-    "manchester,uk": (53.4808, -2.2426),
-    "paris,france": (48.8566, 2.3522),
-    "berlin,germany": (52.5200, 13.4050),
-    "tokyo,japan": (35.6762, 139.6503),
-    "osaka,japan": (34.6937, 135.5023),
-    "seoul,south korea": (37.5665, 126.9780),
-    "bangkok,thailand": (13.7563, 100.5018),
-    "singapore,singapore": (1.3521, 103.8198),
-    "mumbai,india": (19.0760, 72.8777),
-    "sydney,australia": (-33.8688, 151.2093),
-    "toronto,canada": (43.6532, -79.3832),
-    "mexico city,mexico": (19.4326, -99.1332),
-    "são paulo,brazil": (-23.5505, -46.6333),
-    "lagos,nigeria": (6.5244, 3.3792),
-    "cairo,egypt": (30.0444, 31.2357),
-    "nairobi,kenya": (-1.2921, 36.8219),
-    "auckland,new zealand": (-36.8509, 174.7645),
-}
-
-
-def _location_key(city: str, country: str) -> str:
-    """Return the stable URL key for a city+country place."""
-    city_slug = re.sub(r"[^\w]+|_+", "-", str(city or "").casefold()).strip("-")
-    country_slug = re.sub(r"[^\w]+|_+", "-", str(country or "").casefold()).strip("-")
-    if not city_slug:
-        return ""
-    return city_slug + ("--" + country_slug if country_slug else "")
-
-
-def _location_coords(city: str, country: str, lat=None, lon=None) -> tuple[float, float] | None:
-    """Prefer per-reel coordinates, fall back to the static city table."""
-    try:
-        if lat is not None and lon is not None:
-            return (float(lat), float(lon))
-    except (TypeError, ValueError):
-        pass
-    lookup = (str(city or "").casefold().strip() + "," + str(country or "").casefold().strip())
-    return CITY_COORDS.get(lookup)
-
-
 def _location_with_coords(loc):
     """A reel location with lat/lon filled from the city table when the reel has none.
 
@@ -584,14 +544,6 @@ def _item_location_key(video: dict, metadata: dict) -> str:
     meta = _item_meta(video, metadata)
     location = meta.get("location") if isinstance(meta.get("location"), dict) else {}
     return _location_key(location.get("city", ""), location.get("country", ""))
-
-
-def _haversine_km(first: tuple[float, float], second: tuple[float, float]) -> float:
-    lat1, lon1 = math.radians(first[0]), math.radians(first[1])
-    lat2, lon2 = math.radians(second[0]), math.radians(second[1])
-    delta_lat, delta_lon = lat2 - lat1, lon2 - lon1
-    inner = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
-    return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(inner)))
 
 
 def _location_catalog(raw: list[dict], db: Session | None = None) -> dict[str, dict]:
@@ -1278,6 +1230,12 @@ def invalidate_scan_cache() -> None:
     _scan_cache["at"] = 0.0
 
 
+def _admin_refresh(refresh: bool, viewer: AuthContext | None) -> bool:
+    """`?refresh=true` re-scans only for an admin. Anyone else is ignored
+    silently, as /api/health does: a re-scan reads every post and slide."""
+    return bool(refresh) and isinstance(viewer, AuthContext) and viewer.user.role == "admin"
+
+
 # ─── Pydantic Models for Comments API ────────────────────────────────────
 
 class CommentCreate(BaseModel):
@@ -1599,31 +1557,17 @@ def _build_payload_entries(
                 rel = Path(src_path).resolve().relative_to(output_root).as_posix()
             except (OSError, ValueError):
                 continue
-            if is_stereo:
-                # 2D shows the left-eye rendition; stereo_url is the full still.
-                cover = _image_entry(rel, meta.get("width"), meta.get("height"), layout, files)
-                url, poster_url = cover["url"], cover["poster_url"]
-                images = (social_row or {}).get("images") or [cover]
-            else:
-                url = public_url(rel)
-                poster_url = _sibling_media_url(src_path, SM.explore_poster_path(src_path), output_root, files) or url
-                # Every image of the post in order (a loose file is a 1-image post).
-                images = (social_row or {}).get("images") or [{
-                    "path": rel,
-                    "url": url,
-                    "poster_url": poster_url,
-                    "width": meta.get("width"),
-                    "height": meta.get("height"),
-                    "stereo_layout": "mono",
-                    "stereo_url": None,
-                    "stereo_crop": False,
-                    "depth_url": stereo["depth_url"],
-                }]
+            # 2D shows the left-eye rendition of a stereo still; stereo_url is
+            # the full still. The tile is the WebP tile when one exists.
+            cover = _image_entry(rel, meta.get("width"), meta.get("height"), layout if is_stereo else "mono", files)
+            url, poster_url = cover["url"], cover["poster_url"]
+            # Every image of the post in order (a loose file is a 1-image post).
+            images = (social_row or {}).get("images") or [cover]
             payload.append({
                 **base,
                 "media_type": "image",
                 "url": url,
-                "preview_url": url,
+                "preview_url": poster_url,
                 "poster_url": poster_url,
                 "images": images,
                 "dwell_ms": (social_row or {}).get("dwell_ms") or IMAGE_POST_DWELL_MS,
@@ -1879,11 +1823,14 @@ def _recommendation_feed_data(
     feed: str | None = None,
     author: str | None = None,
     post: str | None = None,
+    scope_ids: str = "",
     cursor: str | None = None,
     limit: int = 12,
 ) -> dict:
     """Build one stable materialized feed page and hydrate its media payload."""
-    if refresh:
+    limiter_key = viewer.user.id if isinstance(viewer, AuthContext) else f"ip:{request_identity(request)}"
+    rate_limiter.check(db, f"rec-feed:{limiter_key}", 60, 60, shared=True)
+    if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
     requested_surface = (surface or "").strip().casefold()
@@ -1944,7 +1891,27 @@ def _recommendation_feed_data(
     # of that list first (from the opened reel on, then the ones before it), and
     # only then the other reels, ranked as related to the opened reel.
     scope_first = None
-    if requested_surface == "related" and seed_post and (search.strip() or tag or location or author):
+    scope_id_order: list[str] = []
+    if requested_surface == "related" and seed_post and scope_ids.strip():
+        # A grid tap: the client sends its reels already ordered from the tapped
+        # one on. Keep that order; ids missing from ``raw`` (unknown, hidden,
+        # unpublished, blocked) drop out. This wins over the search/tag build.
+        requested_ids = list(dict.fromkeys(part.strip() for part in scope_ids.split(",") if part.strip()))[:200]
+        if seed_post.id not in requested_ids:
+            requested_ids.insert(0, seed_post.id)
+        id_to_path = dict(
+            db.query(Post.id, Post.media_path).filter(Post.id.in_(requested_ids)).all()
+        )
+        raw_by_path = {video["rel_path"]: video for video in raw}
+        scoped_videos = []
+        for requested_id in requested_ids:
+            video = raw_by_path.get(id_to_path.get(requested_id))
+            if video:
+                scope_id_order.append(requested_id)
+                scoped_videos.append(video)
+        in_scope = {video["rel_path"] for video in scoped_videos}
+        videos = scoped_videos + [video for video in videos if video["rel_path"] not in in_scope]
+    elif requested_surface == "related" and seed_post and (search.strip() or tag or location or author):
         scoped = _apply_filters(
             raw, folder, search, sort, media, tag, location, recent_activity=recent_activity, db=db,
         )
@@ -1973,11 +1940,19 @@ def _recommendation_feed_data(
     allowed_post_ids = set(path_to_post_id.values())
     explicit_scope = bool(search.strip() or tag or location or author)
     personalized = requested_surface == "for_you" and sort in {"for_you", "personalized"} and not explicit_scope
+    pool_only = (
+        requested_surface == "for_you"
+        and sort in {"for_you", "personalized"}
+        and bool(search.strip() or tag or location)
+        and not author
+    )
     manual_order = None
-    if requested_surface == "for_you" and not personalized:
+    if requested_surface == "for_you" and not personalized and not pool_only:
         manual_order = [path_to_post_id[path] for path in paths if path in path_to_post_id]
     scope_order = None
-    if scope_first is not None:
+    if scope_id_order:
+        scope_order = scope_id_order
+    elif scope_first is not None:
         scope_order = [path_to_post_id[path] for path in scoped_list if path in path_to_post_id]
 
     anonymous_hash = ensure_anonymous_cookie(request, response)
@@ -1994,6 +1969,9 @@ def _recommendation_feed_data(
         "feed": feed or "",
         "author": author or "",
         "post": post or "",
+        "scope": hashlib.blake2b(",".join(scope_id_order).encode("utf-8"), digest_size=8).hexdigest()
+        if scope_id_order
+        else "",
     }
     try:
         page = get_reel_page(
@@ -2007,6 +1985,8 @@ def _recommendation_feed_data(
             filters=feed_filters,
             cursor=cursor,
             limit=limit,
+            pool_only=pool_only,
+            extra_post_ids=frozenset(scope_id_order),
         )
     except RecommendationCursorError as exc:
         raise HTTPException(
@@ -2090,8 +2070,24 @@ def _decode_list_cursor(cursor: str, filters: str) -> tuple[tuple, int | None]:
     return key, seed
 
 
+_GRID_ANONYMOUS_ACTOR = ActorIdentity(actor_key="grid:anonymous", user_id=None, anonymous_id=None)
+_GRID_SEED_SECONDS = 600
+
+
+def _grid_ranks(videos: list[dict], filters: str, seed: int, viewer_id: str | None, db: Session):
+    """Rank of each post for the for_you grid, and the post id of each path."""
+    path_to_post_id = {
+        row.media_path: row.id
+        for row in db.query(Post.id, Post.media_path).filter(Post.media_path.in_([v["rel_path"] for v in videos]))
+    }
+    actor = actor_identity(viewer_id, None) if viewer_id else _GRID_ANONYMOUS_ACTOR
+    ids = rank_grid(db, actor=actor, allowed_post_ids=set(path_to_post_id.values()), filters_key=filters, seed=seed)
+    return {post_id: index for index, post_id in enumerate(ids)}, path_to_post_id
+
+
 def _list_page_key(sort: str, scoped: bool, seed: int | None, videos: list[dict],
-                   recent_activity: dict[str, dict] | None, db: Session):
+                   recent_activity: dict[str, dict] | None, db: Session,
+                   ranks: dict[str, int] | None = None, path_to_post_id: dict[str, str] | None = None):
     """A total order for one page of the list, in the order _apply_filters gives.
 
     Each key ends with the path, so the cursor (the last item's key) still
@@ -2117,6 +2113,10 @@ def _list_page_key(sort: str, scoped: bool, seed: int | None, videos: list[dict]
             .filter(Post.media_path.in_([item["rel_path"] for item in videos]))
         }
         return lambda item: (*posts[item["rel_path"]], item["rel_path"])
+    if ranks is not None:
+        # Ranked posts first; the rest (no post, past the cap) follow, newest first.
+        lookup = path_to_post_id or {}
+        return lambda item: (ranks.get(lookup.get(item["rel_path"]), len(ranks)), -mtime(item), item["rel_path"])
     if sort not in ("oldest", "alphabetical", "shuffle", "recent_trending", "views", "likes", "trending"):
         return lambda item: (-mtime(item), item["rel_path"])
     if sort == "oldest":
@@ -2167,7 +2167,7 @@ def list_reels(
     next page with the same filters. Without ``limit`` the whole list comes
     with comments, as before; that form is deprecated.
     """
-    if refresh:
+    if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
     hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
@@ -2205,17 +2205,28 @@ def list_reels(
         videos.sort(key=lambda video: positions[video["rel_path"]])
     count = len(videos)
     next_cursor = None
+    filters = hashlib.blake2b(
+        json.dumps([folder, search, sort, window_days, media, tag, location, feed, author]).encode("utf-8"),
+        digest_size=8,
+    ).hexdigest()
+    grid = sort == "for_you" and scoped_paths is None and not post
     if limit is not None or cursor:
         if not post:
             limit = _REELS_PAGE_MAX if limit is None else max(1, min(int(limit), _REELS_PAGE_MAX))
-            filters = hashlib.blake2b(
-                json.dumps([folder, search, sort, window_days, media, tag, location, feed, author]).encode("utf-8"),
-                digest_size=8,
-            ).hexdigest()
             anchor, seed = _decode_list_cursor(cursor, filters) if cursor else (None, None)
             if sort == "shuffle" and seed is None:
                 seed = int(time.time()) // 60
-            key = _list_page_key(sort, scoped_paths is not None, seed, videos, recent_activity, db)
+            ranks = path_to_post_id = None
+            if grid:
+                current_bucket = int(time.time()) // _GRID_SEED_SECONDS
+                if seed is None:
+                    seed = current_bucket
+                elif seed not in (current_bucket, current_bucket - 1):
+                    # Older buckets have expired from the cache; a forged seed
+                    # would only churn it.
+                    raise _invalid_cursor()
+                ranks, path_to_post_id = _grid_ranks(videos, filters, seed, viewer_id, db)
+            key = _list_page_key(sort, scoped_paths is not None, seed, videos, recent_activity, db, ranks, path_to_post_id)
             videos.sort(key=key)
             if anchor is not None:
                 try:
@@ -2229,6 +2240,9 @@ def list_reels(
         for entry in payload:
             entry["comments_count"] = len(entry.pop("comments", None) or [])
     else:
+        if grid:
+            ranks, path_to_post_id = _grid_ranks(videos, filters, int(time.time()) // _GRID_SEED_SECONDS, viewer_id, db)
+            videos.sort(key=_list_page_key(sort, False, None, videos, None, db, ranks, path_to_post_id))
         payload = _build_payload(videos, codec, viewer_id=viewer_id, db=db)
     return {
         "total": len(raw),
@@ -2258,14 +2272,13 @@ def reels_feed(
     feed: str | None = None,
     author: str | None = None,
     post: str | None = None,
+    scope_ids: str = "",
     cursor: str | None = None,
     limit: int = 12,
     viewer: AuthContext | None = Depends(get_optional_auth),
     db: Session = Depends(get_db),
 ):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    limiter_key = viewer.user.id if isinstance(viewer, AuthContext) else f"ip:{request_identity(request)}"
-    rate_limiter.check(db, f"rec-feed:{limiter_key}", 60, 60, shared=True)
     return _recommendation_feed_data(
         request=request,
         response=response,
@@ -2285,6 +2298,7 @@ def reels_feed(
         feed=feed,
         author=author,
         post=post,
+        scope_ids=scope_ids,
         cursor=cursor,
         limit=limit,
     )
@@ -2331,7 +2345,7 @@ def get_reel_tag(
     slug = _tag_slug(tag_name)
     if not slug:
         raise HTTPException(status_code=400, detail="Tag cannot be empty")
-    if refresh:
+    if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
 
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
@@ -2477,7 +2491,7 @@ def get_reel_location(
     slug = _location_key(*_split_location_key(location_key))
     if not slug:
         raise HTTPException(status_code=400, detail="Location cannot be empty")
-    if refresh:
+    if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
 
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
@@ -2601,6 +2615,9 @@ def _gen_explore_assets(
         return _url(str(path)) if files is not None and SM.has_media_file(path, files) else None
 
     if p.suffix.lstrip(".").lower() in SM.IMAGE_EXTS:
+        tile_url = _recorded(SM.image_rendition_path(str(p), "tile"))
+        if tile_url:
+            return rel, tile_url, tile_url, None
         poster_url = _recorded(SM.explore_poster_path(str(p)))
         if not poster_url:
             if not media_store.fetch_local(p):
@@ -3410,7 +3427,7 @@ def reels_player_inline(
         if name:
             url = _player_script_url(name)
             if url:
-                scripts.append({"src": url})
+                scripts.append({"src": url, "lazy": True} if name in LAZY_PLAYER_SCRIPTS else {"src": url})
         else:
             scripts.append(
                 tag.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))

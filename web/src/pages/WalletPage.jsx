@@ -114,6 +114,7 @@ export default function WalletPage() {
   const [purchaseStatus, setPurchaseStatus] = useState(null);
   const [keyStatus, setKeyStatus] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [rewards, setRewards] = useState(null);
   const checkoutHandledRef = useRef(false);
   const mountedRef = useRef(true);
   const rowsRef = useRef([]);
@@ -146,7 +147,21 @@ export default function WalletPage() {
     }
   }, []);
 
+  // Today's reel-reward progress; hidden while rewards are off or the call fails.
+  const loadRewards = useCallback(async () => {
+    try {
+      const result = await api.get('/api/rewards/reels/status');
+      if (mountedRef.current) setRewards(result?.enabled ? result : null);
+    } catch {
+      if (mountedRef.current) setRewards(null);
+    }
+  }, []);
+
   const userId = user?.id;
+  useEffect(() => {
+    if (userId) loadRewards();
+  }, [userId, loadRewards]);
+
   useEffect(() => {
     if (!userId) return;
     rowsRef.current = [];
@@ -204,7 +219,7 @@ export default function WalletPage() {
   const refreshAll = async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refresh({ silent: true }), loadTransactions()]);
+      await Promise.all([refresh({ silent: true }), loadTransactions(), loadRewards()]);
     } catch {
       // The wallet keeps its last good balance; the ledger shows its own error.
     } finally {
@@ -297,6 +312,13 @@ export default function WalletPage() {
               </div>
             </>
           ) : <div className="sx-ps-hint" role="status">Loading your balance…</div>}
+          {rewards ? (
+            <div className="sx-cr-hero-sub" data-testid="reel-reward-progress">
+              {rewards.daily_cap_reached
+                ? <>Reel rewards: daily cap reached · <b>{rewards.credits_earned_today}/5</b> earned today</>
+                : <>Reel rewards: <b>{rewards.progress}/{rewards.target}</b> reels to your next credit · {rewards.credits_earned_today}/5 earned today</>}
+            </div>
+          ) : null}
         </div>
         <div className="sx-cr-hero-side">
           {creditsReady ? <a href="#add-credits" className="sx-ps-btn sx-ps-btn--primary">Buy credits</a> : null}

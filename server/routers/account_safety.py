@@ -89,6 +89,7 @@ from server.social.staff import (
     suspend_user,
     target_owner,
 )
+from server.social.turnstile import verify_turnstile
 
 router = APIRouter(tags=["account-safety"])
 logger = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ def fail(status: int, code: str, message: str, field: str | None = None):
 
 class PasswordResetRequest(BaseModel):
     email: EmailStr
+    turnstile_token: str | None = None
 
 
 class PasswordResetConfirm(BaseModel):
@@ -297,6 +299,8 @@ def request_password_reset(req: PasswordResetRequest, request: Request, db: Sess
     identity = request_identity(request)
     email = normalize_email(str(req.email))
     rate_limiter.check(db, f"password-reset-ip:{identity}", 8, 60 * 60)
+    # Before the per-account limit, so tokenless bots cannot use up someone's quota.
+    verify_turnstile(req.turnstile_token, identity, "reset")
     rate_limiter.check(db, f"password-reset-account:{email}", 3, 60 * 60)
 
     user = db.query(User).filter(
@@ -573,6 +577,17 @@ def list_reports(
 
 STATS_WINDOWS = {"24h": timedelta(hours=24), "7d": timedelta(days=7)}
 SPIKE_FACTOR = 3
+ACTIVE_NOW_WINDOW = timedelta(minutes=15)
+
+
+def online_now(db: Session, now) -> tuple[int, int]:
+    """(active real accounts, those seen in the last ACTIVE_NOW_WINDOW).
+
+    last_seen_at is refreshed at most every 5 min (server/social/auth.py), so the
+    window must be longer; signed-out viewers are not counted.
+    """
+    real_accounts = db.query(func.count(User.id)).filter(User.account_type == "real", User.status == "active")
+    return real_accounts.scalar(), real_accounts.filter(User.last_seen_at > now - ACTIVE_NOW_WINDOW).scalar()
 
 
 def _spike(current: int, previous: int, floor: int) -> bool:
@@ -652,7 +667,15 @@ def moderation_stats(
             "credits_captured": _windowed(captured, now, delta, floor),
             "support_requests": _windowed(between(SupportRequest.created_at), now, delta, floor),
         }
+    total_accounts, active_now = online_now(db, now)
     return {
+        "accounts": {
+            "total": total_accounts,
+            "active_now": active_now,
+            "active_window_min": int(ACTIVE_NOW_WINDOW.total_seconds() // 60),
+            "capacity": limits["online_capacity"],
+            "capacity_warn": limits["online_warn"],
+        },
         "generated_at": now.isoformat(),
         "spike_floor": floor,
         "open_reports": db.query(func.count(Report.id)).filter(Report.status == "open").scalar(),

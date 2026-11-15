@@ -147,8 +147,8 @@
   // Data source for each grid section: request path + query, and how to read the reply.
   function sourceFor(route) {
     switch (route.section) {
-      case 'explore': return { path: '/api/reels', query: { sort: 'shuffle', limit: REEL_PAGE }, paged: true };
-      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'shuffle', limit: REEL_PAGE }, paged: true };
+      case 'explore': return { path: '/api/reels', query: { sort: 'for_you', limit: REEL_PAGE }, paged: true };
+      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'for_you', limit: REEL_PAGE }, paged: true };
       case 'tag': return {
         path: '/api/reels/tags/' + enc(route.arg), query: {},
         related: (r) => chips(r.related_tags, '/explore/tag/'),
@@ -227,6 +227,8 @@
     let unread = { total: 0, inbox: 0, requests: 0 };
     // Last reel-reward claim reply: { progress, remaining, capped } for the wallet's progress line.
     let rewards = null;
+    // Spendable credit balance for the nav's CREDITS tile; null until known (or signed out).
+    let credits = null;
     let version = 0;
     // Version of the last change beyond the focused field's text, layout or
     // shift: the main and nav panels repaint on this, not on every keystroke.
@@ -305,18 +307,43 @@
       }, () => {});
     }
 
+    function setCredits(wallet) {
+      if (!wallet || typeof wallet.available_credits !== 'number') return false;
+      if (wallet.available_credits === credits) return false;
+      credits = wallet.available_credits;
+      return true;
+    }
+
+    // Nav CREDITS tile balance.
+    function refreshCredits() {
+      if (!d.request || !user()) return;
+      Promise.resolve().then(() => d.request('/api/billing/wallet', {})).then((r) => {
+        if (setCredits(r)) dirty();
+      }, () => {});
+    }
+
     // Reel-reward claim reply from the player. An awarded credit reloads an open wallet.
     function noteReward(result) {
       if (!result) return;
       rewards = { progress: result.progress | 0, remaining: result.remaining | 0, capped: !!result.daily_cap_reached };
+      setCredits(result.wallet);
       const route = top();
       if (result.credit_awarded && route && route.section === 'wallet') load(route);
       dirty();
     }
 
+    // Today's progress for a wallet opened before any claim this session.
+    function refreshRewards() {
+      if (!d.request) return;
+      Promise.resolve().then(() => d.request('/api/rewards/reels/status', {})).then((r) => {
+        if (r && r.enabled) noteReward(r);
+      }, () => {});
+    }
+
     // Fills route.items/related/status; a reply for a route no longer on the stack is dropped.
     function load(route) {
       if (route.section === 'newchat') { findPeople(route, route.query || ''); return; }
+      if (route.section === 'wallet') refreshRewards();
       const src = sourceFor(route);
       if (!src) return;
       route.items = [];
@@ -339,6 +366,7 @@
         route.items = src.items ? src.items(r) : (Array.isArray(r.videos) ? r.videos : []);
         route.cursor = (src.paged && r.next_cursor) || null;
         route.detail = src.detailOf ? src.detailOf(r, det) : null;
+        if (route.section === 'wallet') setCredits(route.detail);
         route.highlights = ((hl && hl.items) || []).filter((p) => p.status === 'published');
         route.related = src.related ? src.related(r) : [];
         if (src.label) route.label = src.label(r);
@@ -738,6 +766,7 @@
         unread: unread.total,
         unreadBox: { inbox: unread.inbox, requests: unread.requests },
         rewards,
+        credits,
         version,
         contentVersion,
       };
@@ -750,6 +779,7 @@
       showHandoff,
       share,
       refreshUnread,
+      refreshCredits,
       noteReward,
       handleHit,
       scroll,

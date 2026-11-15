@@ -27,3 +27,19 @@ test('reward messages expose progress and awarded-credit status', () => {
   assert.match(rewards.progressMessage({ credit_awarded: true, credits_earned_today: 2 }), /\+1 ECHO CREDIT.*2\/5/);
   assert.equal(rewards.progressMessage({ daily_cap_reached: true }), 'DAILY REEL CREDIT CAP REACHED');
 });
+
+test('reward messages announce jackpots with their amount', () => {
+  const rewards = loadRewards();
+  assert.equal(
+    rewards.progressMessage({ credit_awarded: true, credits_earned_today: 3, credits_awarded_amount: 20, jackpot: 'big' }),
+    'JACKPOT! +20 ECHO CREDITS · 3/5 TODAY',
+  );
+  assert.equal(
+    rewards.progressMessage({ credit_awarded: true, credits_earned_today: 1, credits_awarded_amount: 50, jackpot: 'mega' }),
+    'JACKPOT! +50 ECHO CREDITS · 1/5 TODAY',
+  );
+  assert.match(
+    rewards.progressMessage({ credit_awarded: true, credits_earned_today: 1, credits_awarded_amount: 1, jackpot: null }),
+    /^\+1 ECHO CREDIT/,
+  );
+});

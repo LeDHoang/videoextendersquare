@@ -479,6 +479,23 @@ class RateLimiter:
                 detail={"code": "RATE_LIMITED", "message": "Too many requests. Try again shortly."},
             )
 
+    def count(self, key: str, window_seconds: int) -> int:
+        """Hits on ``key`` inside the window, without adding one (in-process only)."""
+        now = time.monotonic()
+        with self._lock:
+            entry = self._hits.get(key)
+            if not entry:
+                return 0
+            return sum(1 for hit in entry[1] if hit > now - max(1, int(window_seconds)))
+
+    def record(self, key: str, window_seconds: int) -> None:
+        """Add a hit on ``key`` without checking a limit (in-process only)."""
+        window = max(1, int(window_seconds))
+        with self._lock:
+            hits = self._hits.get(key, (window, deque()))[1]
+            self._hits[key] = (window, hits)
+            hits.append(time.monotonic())
+
     def reset(self) -> None:
         with self._lock:
             self._hits.clear()

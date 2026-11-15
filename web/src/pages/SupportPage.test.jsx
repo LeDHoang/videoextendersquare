@@ -5,11 +5,17 @@ import SupportPage from './SupportPage.jsx';
 
 const mocks = vi.hoisted(() => ({
   auth: { user: null },
-  api: { post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn() },
 }));
 
 vi.mock('../api/client.js', () => ({ api: mocks.api }));
 vi.mock('../hooks/AuthContext.jsx', () => ({ useAuth: () => mocks.auth }));
+// The real widget loads Cloudflare's script; this stand-in just hands out a token on click.
+vi.mock('../components/auth/Turnstile.jsx', () => ({
+  default: ({ siteKey, action, onToken }) => (siteKey
+    ? <button type="button" data-action={action} onClick={() => onToken('cf-token')}>SOLVE BOT CHECK</button>
+    : null),
+}));
 
 class FakeApiError extends Error {
   constructor(message, { code, field, status = 422 } = {}) {
@@ -27,6 +33,7 @@ const send = () => fireEvent.click(screen.getByRole('button', { name: 'SEND REQU
 describe('SupportPage', () => {
   beforeEach(() => {
     mocks.auth.user = null;
+    mocks.api.get.mockReset();
     mocks.api.post.mockReset().mockResolvedValue({ id: 'req-123', status: 'open', report_id: null });
   });
   afterEach(cleanup);
@@ -95,5 +102,37 @@ describe('SupportPage', () => {
     const trap = container.querySelector('.sx-support-trap');
     expect(trap).toHaveAttribute('aria-hidden', 'true');
     expect(trap.querySelector('input[name="website"]')).toHaveAttribute('tabindex', '-1');
+  });
+
+  describe('bot check', () => {
+    beforeEach(() => {
+      mocks.api.get.mockResolvedValue({ turnstile_site_key: '0xSITE' });
+    });
+
+    it('blocks a signed-out request until the bot check is solved, then sends its token', async () => {
+      renderAt('/support?category=appeal');
+      type('EMAIL', 'me@example.com');
+      type('DETAILS', 'Please review my suspension.');
+      const solve = await screen.findByRole('button', { name: 'SOLVE BOT CHECK' });
+      expect(solve).toHaveAttribute('data-action', 'support');
+      send();
+      expect(mocks.api.post).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toHaveTextContent('Complete the bot check');
+      fireEvent.click(solve);
+      send();
+      await waitFor(() => expect(mocks.api.post).toHaveBeenCalled());
+      expect(mocks.api.post.mock.calls[0][1].turnstile_token).toBe('cf-token');
+    });
+
+    it('does not ask a signed-in user for a bot check', async () => {
+      mocks.auth.user = { username: 'viewer' };
+      renderAt('/support?category=bug');
+      type('DETAILS', 'The feed does not load.');
+      send();
+      await waitFor(() => expect(mocks.api.post).toHaveBeenCalled());
+      expect(mocks.api.post.mock.calls[0][1]).not.toHaveProperty('turnstile_token');
+      expect(screen.queryByRole('button', { name: 'SOLVE BOT CHECK' })).not.toBeInTheDocument();
+      expect(mocks.api.get).not.toHaveBeenCalled();
+    });
   });
 });

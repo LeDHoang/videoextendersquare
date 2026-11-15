@@ -11,6 +11,9 @@
   function progressMessage(result) {
     const payload = result || {};
     if (payload.credit_awarded) {
+      const today = Number(payload.credits_earned_today || 0) + '/5 TODAY';
+      const amount = Math.max(1, Number(payload.credits_awarded_amount || 1));
+      if (payload.jackpot) return 'JACKPOT! +' + amount + ' ECHO CREDITS · ' + today;
       return '+1 ECHO CREDIT · ' + Number(payload.credits_earned_today || 0) + '/5 EARNED TODAY';
     }
     if (payload.daily_cap_reached) return 'DAILY REEL CREDIT CAP REACHED';

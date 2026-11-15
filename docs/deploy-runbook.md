@@ -7,6 +7,7 @@ Related docs:
 - `docs/backup-restore-runbook.md`: nightly backups and the restore drill.
 - `docs/manual-beta-checks.md`: the manual checks to run before inviting users.
 - `docs/to-beta.md`: release blockers and infrastructure verdicts.
+- `docs/sit-runbook.md`: SIT (`sit.echomultiverse.com`), where every `dev` push deploys before promotion to `main`.
 
 ## 1. One-time dashboard checklist
 
@@ -24,7 +25,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - Server `.env` (2026-10-29): built from `deploy/env.example`. The secrets were generated on the VPS with `openssl rand`, and a copy is kept off the box. The `<domain>` URL values and SMTP are still placeholders.
   - App and Postgres (2026-10-29): `docker compose up -d --build` runs both, healthy. The app listens on `127.0.0.1:8000` only. `/api/readyz` reports the database ok at schema `20261022_0017` and the output directory writable. cloudflared is not started yet.
 - Done with the domain (2026-11-07):
-  - the Tunnel public hostname `echomultiverse.com` → `http://app:8000`, with cloudflared running;
+  - the Tunnel public hostname `echomultiverse.com` → `http://proxy:8000`, with cloudflared running;
   - the `media.echomultiverse.com` custom domain, the `jobs/` lifecycle rule and CORS;
   - the Transform Rule, the Cache Rules, SSL/TLS Full and Always Use HTTPS;
   - the 30-day lifecycle rule on the backup bucket;
@@ -37,7 +38,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
 ### Cloudflare
 
 - [x] **Tunnel.** Go to Zero Trust → Networks → Tunnels and create a tunnel. Copy its connector token into `TUNNEL_TOKEN` in `.env`.
-  - Add a public hostname: `<domain>` → service `http://proxy:8000`. `proxy` is the compose service name (section "Read service" below). Production still points at `http://app:8000` until the switch in that section is made.
+  - Add a public hostname: `<domain>` → service `http://proxy:8000`. `proxy` is the compose service name (section "Read service" below).
   - Leave **HTTP Host Header** empty, which is the default. cloudflared then keeps the browser's `Host`. `validate_origin` in `server/social/auth.py` compares `Origin` with `Host`, so every mutating request returns 403 `ORIGIN_DENIED` if you override `Host`.
 - [x] **R2 public bucket.** Create it with location hint **`apac`** (Asia-Pacific).
   - Connect the custom domain `media.<domain>`. Do not enable the `r2.dev` URL.

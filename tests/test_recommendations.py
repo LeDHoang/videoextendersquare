@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
 import threading
+import uuid
 from datetime import timedelta
 
 from argon2 import PasswordHasher
@@ -16,15 +18,20 @@ from sqlalchemy.orm import joinedload, sessionmaker
 from verified_signup import register_verified
 from server.routers import reels, social
 from server.social import auth, database, safety
+from server.social.recommendations import service
+from server.social.recommendations.relatedness import text_scores
+from server.social.recommendations.sources import TextRelatedSource
 from server.social.database import Base, get_db
 from server.social.models import (
     ActorCreatorAffinity,
     ActorItemAffinity,
+    ActorTagAffinity,
     CoWatchPair,
     EngagementEvent,
     Follow,
     ItemSimilarity,
     Post,
+    PostRecommendationDailyStats,
     PostRecommendationStats,
     PostTag,
     RecommendationDismissal,
@@ -990,6 +997,48 @@ def test_a_reel_opened_from_a_tag_plays_that_tag_first(app):
     assert len(ids) == 9
 
 
+def test_feed_scope_ids_plays_given_order_then_related(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    scope = [posts[5].id, posts[9].id, posts[1].id, posts[11].id]
+    params = {
+        "folder": "ALL FOLDERS", "post": posts[5].id, "scope_ids": ",".join(scope), "limit": 6,
+    }
+    with TestClient(app) as client:
+        first = client.get("/api/reels/feed", params=params)
+        assert first.status_code == 200, first.text
+        body = first.json()
+        ids = [item["post_id"] for item in body["items"]]
+        assert ids[:4] == scope
+        assert set(ids[4:]).isdisjoint(scope)
+        assert all(item["recommendation"]["impression_id"] for item in body["items"])
+        seen = list(ids)
+        while body["has_more"]:
+            body = client.get("/api/reels/feed", params={**params, "cursor": body["next_cursor"]}).json()
+            seen.extend(item["post_id"] for item in body["items"])
+    assert len(seen) == len(set(seen)) == 12
+
+
+def test_feed_scope_ids_drops_junk(app, monkeypatch):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    hidden = posts[7]
+    with app.state.testing_session() as db:
+        db.get(Post, hidden.id).status = "draft"
+        db.commit()
+    monkeypatch.setattr(reels, "unavailable_media_paths_for_viewer", safety.unavailable_media_paths_for_viewer)
+    junk = ["nope", hidden.id, posts[2].id, posts[2].id, ""] + [str(uuid.uuid4()) for _ in range(250)]
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/reels/feed",
+            params={
+                "folder": "ALL FOLDERS", "post": posts[4].id, "scope_ids": ",".join(junk), "limit": 12,
+            },
+        )
+    assert response.status_code == 200, response.text
+    ids = [item["post_id"] for item in response.json()["items"]]
+    assert ids[:2] == [posts[4].id, posts[2].id]
+    assert hidden.id not in ids
+
+
 def test_a_reel_opened_without_a_scope_still_gets_related_reels(app):
     posts = seed_catalog(app, creators=2, posts_per_creator=2)
     with TestClient(app) as client:
@@ -999,3 +1048,1131 @@ def test_a_reel_opened_without_a_scope_still_gets_related_reels(app):
         ).json()
     ids = [item["post_id"] for item in body["items"]]
     assert ids[0] == posts[2].id and len(ids) == 4
+
+
+def test_dm_share_records_share_sent_and_moves_affinity(app, monkeypatch):
+    from server.routers import messages
+
+    monkeypatch.setenv("SX_MESSAGE_ENCRYPTION_KEY", "test-only-message-key-with-at-least-32-chars")
+    app.include_router(messages.router)
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    with TestClient(app) as sender_client, TestClient(app) as recipient_client:
+        sender = register(sender_client, "dm_sender")
+        recipient = register(recipient_client, "dm_recipient")
+        shared = sender_client.post(
+            "/api/messages/share-content",
+            headers=csrf_headers(sender_client),
+            json={
+                "kind": "reel",
+                "target_id": post.id,
+                "usernames": [recipient["username"]],
+                "note": "",
+                "client_id": "dm-share-t1",
+            },
+        )
+        assert shared.status_code == 200, shared.text
+        assert shared.json()["succeeded"] == 1
+
+    actor_key = f"u:{sender['id']}"
+    with app.state.testing_session() as db:
+        events = db.query(EngagementEvent).filter(EngagementEvent.post_id == post.id).all()
+        assert [event.event_type for event in events] == ["share_sent"]
+        assert events[0].source == "messages"
+        item = db.query(ActorItemAffinity).filter_by(actor_key=actor_key, post_id=post.id).one()
+        creator = db.query(ActorCreatorAffinity).filter_by(
+            actor_key=actor_key, creator_id=post.owner_id
+        ).one()
+        assert item.score > 0
+        assert creator.score > 0
+
+
+def test_replay_event_counts_once_per_impression(app):
+    seed_catalog(app, creators=3, posts_per_creator=2)
+    with TestClient(app) as client:
+        viewer = register(client, "replay_viewer")
+        feed = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 4},
+        ).json()
+        item = feed["items"][0]
+        actor_key = f"u:{viewer['id']}"
+
+        def score() -> float:
+            with app.state.testing_session() as db:
+                row = db.query(ActorItemAffinity).filter_by(
+                    actor_key=actor_key, post_id=item["post_id"]
+                ).first()
+                return row.score if row else 0.0
+
+        before = score()
+        scores = []
+        for index in range(2):
+            response = client.post(
+                "/api/events",
+                headers=csrf_headers(client),
+                json={
+                    "event_type": "replay",
+                    "post_id": item["post_id"],
+                    "source": "reels",
+                    "client_event_id": f"replay-{index}",
+                    "recommendation_impression_id": item["recommendation"]["impression_id"],
+                },
+            )
+            assert 200 <= response.status_code < 300, response.text
+            scores.append(score())
+        assert scores[0] > before
+        assert scores[1] == scores[0]
+
+
+def test_session_context_counts_unattributed_likes(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    with TestClient(app) as client:
+        viewer = register(client, "unattributed_viewer")
+        feed = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 2},
+        )
+        assert feed.status_code == 200, feed.text
+        session_id = feed.json()["session_id"]
+        with app.state.testing_session() as db:
+            owners = {
+                row.username: row.id
+                for row in db.query(User).filter(User.username.in_(["creator_2", "creator_3"]))
+            }
+        target = next(post for post in posts if post.owner_id == owners["creator_3"])
+        other = next(post for post in posts if post.owner_id == owners["creator_2"])
+        liked = client.put(f"/api/posts/{target.id}/like", headers=csrf_headers(client))
+        assert liked.status_code == 200, liked.text
+
+        actor = service.actor_identity(viewer["id"], None)
+
+        def context():
+            with app.state.testing_session() as db:
+                session = db.get(RecommendationSession, session_id)
+                return service._pipeline_context(
+                    db,
+                    actor=actor,
+                    session=session,
+                    surface=session.surface,
+                    seed_post_id=None,
+                    allowed_post_ids=None,
+                    manual_order=None,
+                )
+
+        # Session affinity uses the same event weights as the stored affinity (a like is 3).
+        assert context().session_creator_affinity[owners["creator_3"]] == 3.0
+
+        with app.state.testing_session() as db:
+            other_session = service._new_session(
+                db,
+                actor=actor,
+                surface="for_you",
+                seed_post_id=None,
+                filters={"other": True},
+                algorithm_version="test",
+            )
+            db.add(
+                EngagementEvent(
+                    event_type="like",
+                    user_id=viewer["id"],
+                    post_id=other.id,
+                    recommendation_session_id=other_session.id,
+                    source="reels",
+                    client_event_id="other-session-like",
+                )
+            )
+            db.commit()
+        assert owners["creator_2"] not in context().session_creator_affinity
+
+
+def test_catalog_base_carries_text_and_location(app):
+    posts = seed_catalog(app, creators=1, posts_per_creator=2)
+    with app.state.testing_session() as db:
+        first = db.get(Post, posts[0].id)
+        first.title = "Sunset ride"
+        first.caption = "#motorbike over Hanoi"
+        # Hanoi is not in CITY_COORDS, so the reel carries its own lat/lon.
+        first.location = {"city": "Hanoi", "country": "Vietnam", "lat": 21.0285, "lon": 105.8542}
+        db.commit()
+        service._catalog_base_cache["entry"] = (None, ())
+        items = {item.post_id: item for item in service._catalog_base(db)}
+    item = items[posts[0].id]
+    assert {"sunset", "ride", "motorbike", "hanoi"} <= set(item.text_tokens)
+    assert item.location.slug == "hanoi--vietnam"
+    assert item.location.coords == (21.0285, 105.8542)
+    assert items[posts[1].id].location is None
+
+
+def test_text_related_works_on_page_two_when_seed_was_delivered(app):
+    posts = seed_catalog(app, creators=3, posts_per_creator=3)
+    captions = [
+        "saigon night market neon", "night market neon lights", "night market food stalls",
+        "mountain hiking sunrise", "coffee brewing morning", "guitar practice session",
+        "beach volleyball summer", "city skyline timelapse", "forest waterfall drone",
+    ]
+    with app.state.testing_session() as db:
+        for post, caption in zip(posts, captions):
+            db.get(Post, post.id).caption = caption
+            db.get(Post, post.id).title = ""
+        db.commit()
+        service._catalog_base_cache["entry"] = (None, ())
+    seed = posts[0]
+    with TestClient(app) as client:
+        viewer = register(client, "text_viewer")
+        params = {"folder": "ALL FOLDERS", "sort": "newest", "post": seed.id, "limit": 2}
+        first = client.get("/api/reels/feed", params=params)
+        assert first.status_code == 200, first.text
+        body = first.json()
+        assert body["items"][0]["post_id"] == seed.id and body["next_cursor"]
+        second = client.get("/api/reels/feed", params={**params, "cursor": body["next_cursor"]})
+        assert second.status_code == 200, second.text
+        actor = service.actor_identity(viewer["id"], None)
+        with app.state.testing_session() as db:
+            session = db.get(RecommendationSession, body["session_id"])
+            context = service._pipeline_context(
+                db,
+                actor=actor,
+                session=session,
+                surface="related",
+                seed_post_id=seed.id,
+                allowed_post_ids=None,
+                manual_order=None,
+            )
+    assert seed.id not in context.items
+    assert [item.post_id for item, _ in context.seed_items] == [seed.id]
+    # Scored against the whole catalog, whichever reels page 0 happened to deliver.
+    with app.state.testing_session() as db:
+        full = text_scores(list(context.seed_items), service._catalog_index(db), service._catalog_idf(db)[0])
+    assert seed.id not in full
+    for post in posts[1:3]:
+        assert full[post.id][1] == (seed.id,) and full[post.id][0] > 0
+    assert posts[3].id not in full
+    # The pipeline's own scores are that same result restricted to undelivered reels.
+    assert context.text_scores == {k: v for k, v in full.items() if k in context.items}
+    hits = {post_id: hit for post_id, hit in TextRelatedSource().generate(context)}
+    assert set(hits) == set(context.text_scores) & set(context.items)
+    assert all(hit.source == "text_related" and hit.seed_post_ids == (seed.id,) for hit in hits.values())
+
+
+def _seed_creator_heavy_catalog(app, extra=5, creators=4):
+    """Creator X (creator_0) with 7 reels, three other creators with 2 reels each."""
+    posts = seed_catalog(app, creators=creators, posts_per_creator=2)
+    with app.state.testing_session() as db:
+        creator = db.query(User).filter(User.username == "creator_0").one()
+        tag = db.query(Tag).filter(Tag.slug == "cinematic").one()
+        extra_ids = []
+        for number in range(100, 100 + extra):
+            path = f"tests/reel-{number}.jpg"
+            post = Post(
+                owner_id=creator.id,
+                media_path=path,
+                media_type="image",
+                title=f"Reel {number}",
+                caption="cinematic test",
+                location={},
+                source="upload",
+                status="published",
+                created_at=utcnow() - timedelta(minutes=number),
+                view_count=number,
+                like_count=1,
+            )
+            db.add(post)
+            db.flush()
+            db.add(PostTag(post_id=post.id, tag_id=tag.id))
+            extra_ids.append(post.id)
+            app.state.scan_rows.append(
+                {
+                    "rel_path": path,
+                    "path": f"output/{path}",
+                    "filename": f"reel-{number}.jpg",
+                    "folder": "tests",
+                    "mtime": 1000 - number,
+                    "media_type": "image",
+                    "size_human": "1 KB",
+                }
+            )
+        db.commit()
+        owner_of = {post.id: post.owner_id for post in db.query(Post).all()}
+    newest = max(
+        (post for post in posts if post.owner_id == creator.id), key=lambda post: post.created_at
+    )
+    return creator.id, newest.id, owner_of
+
+
+def test_related_page_spreads_creator_other_reels(app):
+    creator_id, seed_id, owner_of = _seed_creator_heavy_catalog(app)
+    with TestClient(app) as client:
+        viewer = register(client, "spread_viewer")
+        with app.state.testing_session() as db:
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer['id']}",
+                    user_id=viewer["id"],
+                    creator_id=creator_id,
+                    score=60.0,
+                )
+            )
+            db.commit()
+        related = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "newest", "post": seed_id, "limit": 8},
+        )
+        assert related.status_code == 200, related.text
+        body = related.json()
+        ids = [item["post_id"] for item in body["items"]]
+        assert ids[0] == seed_id
+        owners = [owner_of[post_id] for post_id in ids]
+        x_count = owners.count(creator_id)
+        assert x_count > 3, owners
+        assert any(owner != creator_id for owner in owners)
+        back_to_back = sum(1 for a, b in zip(owners, owners[1:]) if a == b == creator_id)
+        assert back_to_back < x_count - 1, owners
+        with app.state.testing_session() as db:
+            impressions = (
+                db.query(RecommendationImpression)
+                .filter(RecommendationImpression.session_id == body["session_id"])
+                .all()
+            )
+        assert any(
+            owner_of[row.post_id] == creator_id
+            and any(source["name"] == "creator_other_reels" for source in row.provenance["sources"])
+            for row in impressions
+            if row.post_id != seed_id
+        )
+        # Guard: with no seed, for_you penalties keep each creator to 3 or fewer here.
+        feed = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 8},
+        )
+        assert feed.status_code == 200, feed.text
+        feed_owners = [owner_of[item["post_id"]] for item in feed.json()["items"]]
+        assert max(feed_owners.count(owner) for owner in set(feed_owners)) <= 3, feed_owners
+
+
+def test_algorithm_version_bump_restarts_session(app):
+    seed_catalog(app)
+    with TestClient(app) as client:
+        first = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 4},
+        )
+        assert first.status_code == 200, first.text
+        first_body = first.json()
+        with app.state.testing_session() as db:
+            db.get(RecommendationSession, first_body["session_id"]).algorithm_version = "reels-heuristic-v1"
+            db.commit()
+        second = client.get(
+            "/api/reels/feed",
+            params={
+                "folder": "ALL FOLDERS",
+                "sort": "for_you",
+                "limit": 4,
+                "cursor": first_body["next_cursor"],
+            },
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["restarted"] is True
+        with app.state.testing_session() as db:
+            replacement = db.get(RecommendationSession, second.json()["session_id"])
+            assert replacement.restart_reason == "algorithm_version_changed"
+
+
+def test_related_later_pages_keep_seed_creator_uncapped(app):
+    creator_id, seed_id, owner_of = _seed_creator_heavy_catalog(app, extra=16, creators=9)
+    with TestClient(app) as client:
+        viewer = register(client, "later_viewer")
+        with app.state.testing_session() as db:
+            for post in db.query(Post).filter(Post.owner_id == creator_id):
+                post.like_count, post.view_count = 5000, 50000
+            service._catalog_base_cache["entry"] = (None, ())
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer['id']}",
+                    user_id=viewer["id"],
+                    creator_id=creator_id,
+                    score=60.0,
+                )
+            )
+            db.commit()
+        params = {"folder": "ALL FOLDERS", "sort": "newest", "post": seed_id, "limit": 8}
+        first = client.get("/api/reels/feed", params=params)
+        assert first.status_code == 200, first.text
+        second = client.get("/api/reels/feed", params={**params, "cursor": first.json()["next_cursor"]})
+        assert second.status_code == 200, second.text
+        owners = [owner_of[item["post_id"]] for item in second.json()["items"]]
+        assert second.json()["items"] and owners.count(creator_id) > 3, ["X" if o == creator_id else "o" for o in owners]
+        feed = client.get(
+            "/api/reels/feed", params={"folder": "ALL FOLDERS", "sort": "for_you", "limit": 8}
+        )
+        feed_owners = [owner_of[item["post_id"]] for item in feed.json()["items"]]
+        assert max(feed_owners.count(owner) for owner in set(feed_owners)) <= 3, feed_owners
+
+
+def test_catalog_extras_survive_cap_and_replay(app, monkeypatch):
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    posts = seed_catalog(app, creators=2, posts_per_creator=3)
+    oldest_id = min(posts, key=lambda post: post.created_at).id
+    with app.state.testing_session() as db:
+        oldest = db.get(Post, oldest_id)
+        oldest.view_count = oldest.like_count = 0  # seeded engagement grows with age; make it weakest
+        db.commit()
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 3)
+    service._catalog_base_cache["entry"] = (None, ())
+    actor = actor_identity(None, "extras-probe")
+    kwargs = dict(actor=actor, allowed_post_ids=None, excluded_post_ids=set(), surface="for_you")
+    with app.state.testing_session() as db:
+        capped = service._catalog(db, **kwargs)
+        assert len(capped) == 3 and oldest_id not in capped
+        with_extra = service._catalog(db, **kwargs, extra_post_ids=frozenset({oldest_id}))
+        assert set(with_extra) == set(capped) | {oldest_id}
+        assert len(service._catalog(db, **kwargs, capped=False)) == 6
+
+        filters = {"folder": "ALL FOLDERS", "limit": 1}
+        recorded, cursor, page_cursor = [], None, None
+        while True:
+            page = get_reel_page(
+                db, actor=actor, surface="for_you", filters=filters, cursor=cursor,
+                limit=1, extra_post_ids=frozenset({oldest_id}),
+            )
+            recorded.append((page_cursor, tuple(item.target_id for item in page.items)))
+            if not page.has_more:
+                break
+            page_cursor = cursor = page.next_cursor
+        extra_page = next(i for i, (_, ids) in enumerate(recorded) if oldest_id in ids)
+        assert extra_page > 0
+
+        for page_cursor, ids in recorded[1:]:
+            replay = get_reel_page(
+                db, actor=actor, surface="for_you", filters=filters, cursor=page_cursor, limit=1
+            )
+            assert tuple(item.target_id for item in replay.items) == ids
+
+
+def test_tag_feed_keeps_set_and_orders_by_affinity(app, monkeypatch):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    tagged_ids = {post.id for post in posts}
+    oldest_owner = min(posts, key=lambda post: post.created_at).owner_id
+    with app.state.testing_session() as db:
+        for number in (12, 13):
+            path = f"tests/reel-{number}.jpg"
+            db.add(
+                Post(
+                    owner_id=oldest_owner,
+                    media_path=path,
+                    media_type="image",
+                    title=f"Reel {number}",
+                    caption="plain",
+                    location={},
+                    source="upload",
+                    status="published",
+                    created_at=utcnow() - timedelta(minutes=number),
+                )
+            )
+            app.state.scan_rows.append(
+                {
+                    "rel_path": path,
+                    "path": f"output/{path}",
+                    "filename": f"reel-{number}.jpg",
+                    "folder": "tests",
+                    "mtime": 1000 - number,
+                    "media_type": "image",
+                    "size_human": "1 KB",
+                }
+            )
+        db.commit()
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 3)
+    service._catalog_base_cache["entry"] = (None, ())
+    with TestClient(app) as client:
+        viewer = register(client, "tag_feed_viewer")
+        with app.state.testing_session() as db:
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer['id']}",
+                    user_id=viewer["id"],
+                    creator_id=oldest_owner,
+                    score=30.0,
+                )
+            )
+            db.commit()
+        params = {"folder": "ALL FOLDERS", "tag": "cinematic", "sort": "for_you", "limit": 4}
+        pages, cursor = [], None
+        while True:
+            page_params = dict(params, **({"cursor": cursor} if cursor else {}))
+            response = client.get("/api/reels/feed", params=page_params)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            pages.append(body)
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+        ids = [item["post_id"] for body in pages for item in body["items"]]
+        assert len(ids) == len(set(ids)) == 12
+        assert set(ids) == tagged_ids
+        assert pages[0]["items"][0]["creator"]["id"] == oldest_owner
+        with app.state.testing_session() as db:
+            rows = db.query(RecommendationImpression).all()
+        names = {source["name"] for row in rows for source in row.provenance["sources"]}
+        assert names.isdisjoint({"fresh_exploration", "global_quality_trending"}), names
+
+
+def test_author_feed_keeps_newest_order(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        owner = db.get(User, next(p.owner_id for p in posts if p.title in {"Reel 3", "Reel 4", "Reel 5"}))
+        username = owner.username
+    expected = [p.id for p in sorted(posts, key=lambda p: p.created_at, reverse=True) if p.owner_id == owner.id]
+    assert len(expected) == 3
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/reels/feed",
+            params={"folder": "ALL FOLDERS", "author": username, "sort": "for_you", "limit": 12},
+        )
+        assert response.status_code == 200, response.text
+        assert [item["post_id"] for item in response.json()["items"]] == expected
+
+
+def _seed_following(app, viewer_id, reels, affinity):
+    """reels: {key: (creator_key, age)}; affinity: {creator_key: score}. Viewer follows every creator."""
+    scan_rows = []
+    post_ids, creator_ids = {}, {}
+    with app.state.testing_session() as db:
+        for key, (creator_key, age) in reels.items():
+            if creator_key not in creator_ids:
+                creator = User(
+                    username=f"fol_{creator_key}",
+                    username_norm=f"fol_{creator_key}",
+                    display_name=creator_key,
+                    account_type="real",
+                    status="active",
+                )
+                db.add(creator)
+                db.flush()
+                db.add(Follow(follower_id=viewer_id, followee_id=creator.id))
+                creator_ids[creator_key] = creator.id
+            path = f"tests/fol-{key}.jpg"
+            post = Post(
+                owner_id=creator_ids[creator_key],
+                media_path=path,
+                media_type="image",
+                title=f"Reel {key}",
+                caption="following test",
+                location={},
+                source="upload",
+                status="published",
+                created_at=utcnow() - age,
+            )
+            db.add(post)
+            db.flush()
+            post_ids[key] = post.id
+            scan_rows.append(
+                {
+                    "rel_path": path,
+                    "path": f"output/{path}",
+                    "filename": f"fol-{key}.jpg",
+                    "folder": "tests",
+                    "mtime": 1000 - len(scan_rows),
+                    "media_type": "image",
+                    "size_human": "1 KB",
+                }
+            )
+        for creator_key, score in affinity.items():
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer_id}",
+                    user_id=viewer_id,
+                    creator_id=creator_ids[creator_key],
+                    score=score,
+                )
+            )
+        db.commit()
+    app.state.scan_rows = scan_rows
+    service._catalog_base_cache["entry"] = (None, ())
+    return post_ids
+
+
+def _following_ids(client, limit):
+    ids, cursor = [], None
+    while True:
+        params = {"folder": "ALL FOLDERS", "feed": "following", "limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        response = client.get("/api/reels/feed", params=params)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        ids += [item["post_id"] for item in body["items"]]
+        cursor = body["next_cursor"]
+        if not cursor:
+            return ids
+
+
+def test_following_blends_recency_and_affinity(app):
+    with TestClient(app) as client:
+        viewer = register(client, "blend_viewer")
+        posts = _seed_following(
+            app,
+            viewer["id"],
+            {
+                "A": ("a", timedelta(days=3)),
+                "B": ("b", timedelta(hours=1)),
+                "C": ("c", timedelta(hours=2)),
+                "D": ("d", timedelta(hours=10)),
+                "Dw": ("d", timedelta(minutes=30)),
+            },
+            {"a": 60.0, "c": 12.0, "d": 12.0},
+        )
+        with app.state.testing_session() as db:
+            db.add(
+                EngagementEvent(
+                    user_id=viewer["id"],
+                    post_id=posts["Dw"],
+                    event_type="complete",
+                    source="test",
+                    created_at=utcnow() - timedelta(days=1),
+                )
+            )
+            db.commit()
+        ids = _following_ids(client, 2)
+        assert sorted(ids) == sorted(posts.values())
+        assert ids.index(posts["A"]) < ids.index(posts["B"]), ids
+        assert ids.index(posts["C"]) < ids.index(posts["D"]), ids
+        assert ids[-1] == posts["Dw"], ids
+
+
+def test_following_new_reel_not_buried_by_diversity(app):
+    with TestClient(app) as client:
+        viewer = register(client, "diversity_viewer")
+        posts = _seed_following(
+            app,
+            viewer["id"],
+            {
+                "A1": ("a", timedelta(hours=1)),
+                "A2": ("a", timedelta(hours=2)),
+                "B": ("b", timedelta(days=5)),
+                "C": ("c", timedelta(days=6)),
+            },
+            {"a": 10.0, "b": 10.0, "c": 10.0},
+        )
+        ids = _following_ids(client, 4)
+        assert sorted(ids) == sorted(posts.values())
+        assert ids[0] == posts["A1"], ids
+        assert ids.index(posts["A2"]) < ids.index(posts["C"]), ids
+
+
+def _add_posts(app, specs):
+    """specs: (owner_id, age_days, like_count, view_count) newest-first not required; returns ids in spec order."""
+    ids = []
+    with app.state.testing_session() as db:
+        for number, (owner_id, age_days, likes, views) in enumerate(specs):
+            post = Post(
+                owner_id=owner_id,
+                media_path=f"tests/age-{number}.jpg",
+                media_type="image",
+                title=f"Age {number}",
+                caption="plain",
+                location={},
+                source="upload",
+                status="published",
+                created_at=utcnow() - timedelta(days=age_days, minutes=number),
+                view_count=views,
+                like_count=likes,
+            )
+            db.add(post)
+            db.flush()
+            ids.append(post.id)
+        db.commit()
+    return ids
+
+
+def _add_creators(app, count):
+    ids = []
+    with app.state.testing_session() as db:
+        for index in range(count):
+            creator = User(
+                username=f"age_creator_{index}",
+                username_norm=f"age_creator_{index}",
+                display_name=f"Age Creator {index}",
+                account_type="real",
+                status="active",
+            )
+            db.add(creator)
+            db.flush()
+            ids.append(creator.id)
+        db.commit()
+    return ids
+
+
+def test_old_banger_enters_pool_and_can_win(app, monkeypatch):
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    owner = _add_creators(app, 1)[0]
+    specs = [(owner, 0, 0, 0)] * 10 + [(owner, 730, 300, 5000)]
+    ids = _add_posts(app, specs)
+    banger = ids[-1]
+    with app.state.testing_session() as db:
+        db.add(
+            PostRecommendationStats(
+                post_id=banger, impressions=1000, qualified_views=800, completions=600, likes=300, saves=50
+            )
+        )
+        db.commit()
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 4)
+    service._catalog_base_cache["entry"] = (None, ())
+    actor = actor_identity(None, "banger-probe")
+    with app.state.testing_session() as db:
+        assert banger in {item.post_id for item in service._catalog_pool_order(db)[:4]}
+        catalog = service._catalog(
+            db, actor=actor, allowed_post_ids=None, excluded_post_ids=set(), surface="for_you"
+        )
+        assert banger in catalog
+        page = get_reel_page(
+            db, actor=actor, surface="for_you", filters={"folder": "ALL FOLDERS", "limit": 4}, cursor=None, limit=4
+        )
+        assert banger in {item.target_id for item in page.items}
+
+
+def test_long_tail_post_can_be_recommended(app, monkeypatch):
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    a, b, z = _add_creators(app, 3)
+    # Newest first by index; the three oldest belong to Z.
+    owners = [a, b] * 6 + [z] * 3
+    ids = _add_posts(app, [(owner, 0, 0, 0) for owner in owners])
+    oldest = ids[-1]
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 10)
+    service._catalog_base_cache["entry"] = (None, ())
+    actor = actor_identity(None, "long-tail-probe")
+    with app.state.testing_session() as db:
+        db.add(
+            ActorCreatorAffinity(
+                actor_key=actor.actor_key, anonymous_id="long-tail-probe", creator_id=z, score=40.0
+            )
+        )
+        db.commit()
+        assert oldest not in {item.post_id for item in service._catalog_pool_order(db)[:10]}
+        context = service._pipeline_context(
+            db, actor=actor, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+        assert oldest in context.items
+        page = get_reel_page(
+            db, actor=actor, surface="for_you", filters={"folder": "ALL FOLDERS", "limit": 15}, cursor=None, limit=15
+        )
+        assert oldest in {item.target_id for item in page.items}
+
+        monkeypatch.setattr(service, "LONG_TAIL_MAX", 2)
+        outside = service._catalog_pool_order(db)[10:]
+        assert len(service._long_tail_ids(db, actor=actor, outside=outside, seed_ids=[])) == 2
+
+
+def test_grid_for_you_puts_affine_creator_first(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    first_creator = next(post.owner_id for post in posts if post.media_path == "tests/reel-11.jpg")  # oldest creator
+    with TestClient(app) as client:
+        viewer = register(client, "grid_viewer")
+        with app.state.testing_session() as db:
+            db.add(
+                ActorCreatorAffinity(
+                    actor_key=f"u:{viewer['id']}", user_id=viewer["id"], creator_id=first_creator, score=40.0
+                )
+            )
+            db.commit()
+        for extra in ({}, {"search": "cinematic"}):
+            response = client.get("/api/reels", params={"sort": "for_you", "limit": 24, **extra})
+            assert response.status_code == 200, response.text
+            items = response.json()["videos"]
+            assert len(items) == 12
+            assert [item["creator"]["id"] for item in items[:3]] == [first_creator] * 3
+        seen, cursor = [], None
+        while True:
+            params = {"sort": "for_you", "limit": 5, **({"cursor": cursor} if cursor else {})}
+            body = client.get("/api/reels", params=params).json()
+            seen += [item["post_id"] for item in body["videos"]]
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+        assert len(seen) == len(set(seen)) == 12
+        assert {post.id for post in posts} == set(seen)
+
+
+def test_anonymous_grid_keys_cannot_evict_signed_in_entries(app, monkeypatch):
+    from server.social.recommendations import config
+
+    monkeypatch.setattr(service, "rank_pool", lambda *a, **k: ([], frozenset()))
+    signed_in = service.ActorIdentity(actor_key="u:someone", user_id="someone", anonymous_id=None)
+    anonymous = service.ActorIdentity(actor_key="grid:anonymous", user_id=None, anonymous_id=None)
+    with app.state.testing_session() as db:
+        service.rank_grid(db, actor=signed_in, allowed_post_ids=set(), filters_key="f", seed=1)
+        for seed in range(config.GRID_CACHE_ANON_MAX + 10):
+            service.rank_grid(db, actor=anonymous, allowed_post_ids=set(), filters_key="f", seed=seed)
+    assert ("u:someone", "f", 1) in service._grid_cache
+    anon_keys = [k for k in service._grid_cache if k[0] == "grid:anonymous"]
+    assert len(anon_keys) == config.GRID_CACHE_ANON_MAX
+
+
+def test_grid_list_cursor_seed_must_be_current_or_previous_bucket(app):
+    import time
+
+    seed_catalog(app, creators=4, posts_per_creator=3)
+    bucket = int(time.time()) // reels._GRID_SEED_SECONDS
+    with TestClient(app) as client:
+        first = client.get("/api/reels", params={"sort": "for_you", "limit": 5})
+        assert first.status_code == 200, first.text
+        cursor = first.json()["next_cursor"]
+        assert cursor
+        pad = "=" * (-len(cursor) % 4)
+        body = json.loads(base64.urlsafe_b64decode(cursor + pad))
+
+        def with_seed(seed):
+            body["seed"] = seed
+            raw = json.dumps(body, separators=(",", ":")).encode("utf-8")
+            return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+        stale = client.get("/api/reels", params={"sort": "for_you", "limit": 5, "cursor": with_seed(bucket - 5)})
+        assert stale.status_code == 400
+        assert stale.json()["detail"]["code"] == "INVALID_CURSOR"
+        previous = client.get("/api/reels", params={"sort": "for_you", "limit": 5, "cursor": with_seed(bucket - 1)})
+        assert previous.status_code == 200, previous.text
+
+
+def _mark_watched(app, user_id, post_ids):
+    with app.state.testing_session() as db:
+        for post_id in post_ids:
+            db.add(
+                EngagementEvent(
+                    user_id=user_id,
+                    post_id=post_id,
+                    event_type="complete",
+                    source="test",
+                    created_at=utcnow() - timedelta(days=1),
+                )
+            )
+        db.commit()
+
+
+def test_for_you_feed_puts_watched_reels_last(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    by_path = {post.media_path: post.id for post in posts}
+    # The most popular reels would lead the feed if they were not watched.
+    watched = [by_path["tests/reel-11.jpg"], by_path["tests/reel-10.jpg"]]
+    with TestClient(app) as client:
+        viewer = register(client, "watched_for_you")
+        _mark_watched(app, viewer["id"], watched)
+        ids, cursor = [], None
+        while True:
+            params = {"folder": "ALL FOLDERS", "sort": "for_you", "limit": 5, **({"cursor": cursor} if cursor else {})}
+            body = client.get("/api/reels/feed", params=params).json()
+            ids += [item["post_id"] for item in body["items"]]
+            cursor = body["next_cursor"]
+            if not cursor:
+                break
+    assert sorted(ids) == sorted(by_path.values())
+    assert set(ids[-2:]) == set(watched), ids
+
+
+def test_grid_for_you_puts_watched_reels_last(app):
+    posts = seed_catalog(app, creators=4, posts_per_creator=3)
+    by_path = {post.media_path: post.id for post in posts}
+    watched = [by_path["tests/reel-11.jpg"], by_path["tests/reel-10.jpg"]]
+    with TestClient(app) as client:
+        viewer = register(client, "watched_grid")
+        _mark_watched(app, viewer["id"], watched)
+        items = client.get("/api/reels", params={"sort": "for_you", "limit": 24}).json()["videos"]
+    ids = [item["post_id"] for item in items]
+    assert len(ids) == 12
+    assert set(ids[-2:]) == set(watched), ids
+
+
+def test_anonymous_grid_actor_has_no_watched_reels(app):
+    posts = seed_catalog(app, creators=2, posts_per_creator=2)
+    with TestClient(app) as client:
+        viewer = register(client, "watched_signed_in")
+    _mark_watched(app, viewer["id"], [posts[0].id])
+    anonymous = service.ActorIdentity(actor_key="grid:anonymous", user_id=None, anonymous_id=None)
+    with app.state.testing_session() as db:
+        context = service._pipeline_context(
+            db, actor=anonymous, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None, pool_only=True, capped=True,
+        )
+    assert context.watched_post_ids == frozenset()
+
+
+def test_events_upsert_one_daily_stats_row_per_post_and_day(app):
+    from datetime import timezone
+
+    from server.social.services import record_event
+
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    with app.state.testing_session() as db:
+        # Several events for one post in one transaction share one daily row.
+        for event_type in ("impression", "view", "view", "like"):
+            record_event(db, event_type=event_type, post_id=post.id, anonymous_id="daily-probe", source="reels")
+        db.commit()
+        rows = db.query(PostRecommendationDailyStats).filter(PostRecommendationDailyStats.post_id == post.id).all()
+    assert len(rows) == 1
+    assert rows[0].day == utcnow().astimezone(timezone.utc).date()
+    assert (rows[0].impressions, rows[0].qualified_views, rows[0].likes) == (1, 2, 1)
+
+
+def test_pipeline_context_decays_recent_daily_stats(app):
+    from server.social.recommendations import actor_identity
+
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    today = utcnow().date()
+    with app.state.testing_session() as db:
+        for days_ago, views in ((0, 4), (2, 4), (10, 100)):
+            db.add(PostRecommendationDailyStats(post_id=post.id, day=today - timedelta(days=days_ago), qualified_views=views))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor_identity(None, "recent-probe"), session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    # Today counts fully, two days ago at half weight, ten days ago not at all.
+    assert context.recent_stats[post.id]["qualified_views"] == pytest.approx(6.0)
+
+
+def _trending_order(items, stats, recent_stats):
+    from types import SimpleNamespace
+
+    from server.social.recommendations.sources import TrendingSource
+
+    context = SimpleNamespace(items={item.post_id: item for item in items}, stats=stats, recent_stats=recent_stats)
+    return [post_id for post_id, _hit in TrendingSource().generate(context)]
+
+
+def _trending_item(post_id, views=0, likes=0):
+    from server.social.recommendations.types import CatalogItem
+
+    return CatalogItem(post_id, "owner", (), utcnow(), likes, views)
+
+
+def test_trending_prefers_recent_engagement_over_old_totals():
+    from types import SimpleNamespace
+
+    old = _trending_item("old", views=50000, likes=5000)
+    fresh = _trending_item("fresh")
+    stats = {"old": SimpleNamespace(impressions=1000, qualified_views=800, completions=600, likes=300, saves=50, shares=20)}
+    recent = {"fresh": {"impressions": 40.0, "qualified_views": 30.0, "completions": 20.0, "likes": 10.0, "saves": 2.0, "shares": 1.0}}
+    assert _trending_order([old, fresh], stats, recent) == ["fresh", "old"]
+
+
+def test_trending_order_is_unchanged_without_recent_stats():
+    from types import SimpleNamespace
+
+    items = [_trending_item("low", views=10), _trending_item("high", views=10000, likes=500), _trending_item("mid", views=500)]
+    stats = {"mid": SimpleNamespace(impressions=20, qualified_views=10, completions=5, likes=2, saves=0, shares=0)}
+    assert _trending_order(items, stats, {}) == ["mid", "high", "low"]
+
+
+def test_fast_skips_are_counted_apart_from_navigation_and_late_skips(app):
+    from server.social.services import record_event
+
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    skips = (
+        {"watch_ms": 500},  # fast
+        {"watch_ms": 500, "navigation_reason": "filter_change"},  # navigation, not a judgment
+        {"watch_ms": 5000},  # watched a while
+        {"watch_ms": 1000, "watch_ratio": 0.6},  # most of a short reel
+    )
+    with app.state.testing_session() as db:
+        for index, extra in enumerate(skips):
+            record_event(db, event_type="skip", post_id=post.id, anonymous_id=f"skip-{index}", source="reels", **extra)
+        db.commit()
+        stats = db.get(PostRecommendationStats, post.id)
+    assert (stats.skips, stats.fast_skips) == (4, 1)
+
+
+def test_stats_quality_drops_with_fast_skips():
+    from types import SimpleNamespace
+
+    from server.social.recommendations.ranking import stats_quality
+
+    clean = SimpleNamespace(impressions=100, qualified_views=50, completions=20, fast_skips=0)
+    skipped = SimpleNamespace(impressions=100, qualified_views=50, completions=20, fast_skips=60)
+    assert stats_quality(skipped, 0, 0) < stats_quality(clean, 0, 0)
+
+
+def test_pool_order_uses_recommendation_stats_for_older_posts(app, monkeypatch):
+    owner = _add_creators(app, 1)[0]
+    # Newest first; with a cap of 2 the newest share is 1, the rest sort by quality x age.
+    ids = _add_posts(app, [(owner, 0, 0, 0), (owner, 10, 5, 100), (owner, 20, 0, 0), (owner, 30, 1, 10)])
+    proven = ids[2]
+    with app.state.testing_session() as db:
+        db.add(PostRecommendationStats(post_id=proven, impressions=200, qualified_views=180, completions=150, likes=60))
+        db.commit()
+    monkeypatch.setattr(service, "MAX_CATALOG_SIZE", 2)
+    service._catalog_base_cache["entry"] = (None, ())
+    with app.state.testing_session() as db:
+        order = [item.post_id for item in service._catalog_pool_order(db)]
+    # The proven post leads the older part; posts without stats keep their legacy order.
+    assert order == [ids[0], proven, ids[1], ids[3]]
+
+
+def test_one_shared_tag_does_not_beat_a_co_watch_similarity(app):
+    from server.social.recommendations import actor_identity
+
+    seed, tag_only, co_watched = seed_catalog(app, creators=1, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        db.add(ItemSimilarity(source_post_id=seed.id, target_post_id=co_watched.id, score=0.6, support=10))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor_identity(None, "tag-probe"), session=None, surface="related", seed_post_id=seed.id,
+            allowed_post_ids=None, manual_order=None,
+        )
+    # Every post shares the seed's one tag; that alone is weak evidence.
+    assert context.related_scores[tag_only.id][0] == pytest.approx(0.5)
+    assert context.related_scores[co_watched.id][0] == pytest.approx(0.6)
+
+
+def test_session_context_skips_events_without_a_signal(app):
+    from server.social.recommendations import actor_identity
+
+    posts = seed_catalog(app, creators=2, posts_per_creator=1)
+    liked, noisy = posts
+    actor = actor_identity(None, "session-noise")
+    with app.state.testing_session() as db:
+        session = service._new_session(
+            db, actor=actor, surface="for_you", seed_post_id=None, filters={}, algorithm_version="test",
+        )
+        now = utcnow()
+        db.add(EngagementEvent(
+            event_type="like", anonymous_id="session-noise", post_id=liked.id,
+            recommendation_session_id=session.id, source="reels", created_at=now - timedelta(minutes=10),
+        ))
+        # 100 newer events that carry no signal would push the like out of the last 100.
+        for index in range(100):
+            db.add(EngagementEvent(
+                event_type="impression", anonymous_id="session-noise", post_id=noisy.id,
+                recommendation_session_id=session.id, source="reels", created_at=now - timedelta(seconds=index),
+            ))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor, session=session, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.session_creator_affinity.get(liked.owner_id) == 3.0
+
+
+def test_recent_skips_count_as_seen_unless_navigation(app):
+    from server.social.recommendations import actor_identity
+
+    skipped, navigated, untouched = seed_catalog(app, creators=1, posts_per_creator=3)
+    with app.state.testing_session() as db:
+        for post, reason in ((skipped, None), (navigated, "background")):
+            db.add(EngagementEvent(
+                event_type="skip", anonymous_id="skip-probe", post_id=post.id, source="reels",
+                watch_ms=400, navigation_reason=reason, created_at=utcnow() - timedelta(days=1),
+            ))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor_identity(None, "skip-probe"), session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.watched_post_ids == frozenset({skipped.id})
+
+
+def test_negative_affinity_penalizes_disliked_creators_tags_and_reels():
+    import math
+
+    from server.social.recommendations import actor_identity, ranking
+    from server.social.recommendations.types import CatalogItem, PipelineContext
+
+    now = utcnow()
+    item = CatalogItem("p1", "creator", ("tag",), now, 0, 0, (), None)
+
+    def negative(creator=0.0, tag=0.0, reel=0.0):
+        context = PipelineContext(
+            actor=actor_identity(None, "neg-probe"), surface="for_you", now=now, session_id="",
+            seed_post_id=None, manual_order=None, scope_order=None, items={"p1": item}, following_ids=set(),
+            creator_affinity={"creator": creator}, tag_affinity={"tag": tag}, item_affinity={"p1": reel},
+            related_scores={}, session_creator_affinity={}, session_tag_affinity={}, stats={},
+            exposures_by_creator={},
+        )
+        return ranking._features(context, "p1", item, 0.0)[0]["negative_affinity"]
+
+    assert negative() == 0.0
+    assert negative(creator=5.0, tag=5.0, reel=5.0) == 0.0
+    assert negative(creator=-12.0) == pytest.approx(math.tanh(2.0))
+    # A disliked tag counts half: one dislike marks every reel that shares a broad tag.
+    assert negative(tag=-3.0) == pytest.approx(math.tanh(0.25))
+    # The most negative of the three counts.
+    assert negative(creator=-3.0, reel=-8.0) == pytest.approx(math.tanh(8.0 / 6.0))
+    assert negative(creator=-2.0, tag=-6.0) == pytest.approx(math.tanh(0.5))
+
+
+def test_pipeline_context_loads_negative_reel_affinities(app):
+    from server.social.recommendations import actor_identity
+
+    posts = seed_catalog(app, creators=1, posts_per_creator=26)
+    actor = actor_identity(None, "neg-rows")
+    with app.state.testing_session() as db:
+        # 24 liked reels fill the top-24 rows; the disliked one ranks below them all.
+        for post in posts[:24]:
+            db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="neg-rows", post_id=post.id, score=4.0))
+        db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="neg-rows", post_id=posts[24].id, score=-8.0))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.item_affinity[posts[24].id] == -8.0
+    assert posts[25].id not in context.item_affinity
+
+
+def test_decayed_affinity_halves_positives_and_fades_negatives_in_whole_days():
+    from server.social.recommendations.config import AFFINITY_HALF_LIFE_DAYS, NEGATIVE_AFFINITY_FADE_DAYS
+    from server.social.recommendations.events import decayed_affinity
+
+    now = utcnow()
+    assert decayed_affinity(10.0, now - timedelta(hours=20), now) == 10.0
+    assert decayed_affinity(10.0, now - timedelta(days=AFFINITY_HALF_LIFE_DAYS), now) == pytest.approx(5.0)
+    # Negatives fade in a straight line and are gone after NEGATIVE_AFFINITY_FADE_DAYS.
+    assert decayed_affinity(-12.0, now - timedelta(hours=20), now) == -12.0
+    assert decayed_affinity(-12.0, now - timedelta(days=NEGATIVE_AFFINITY_FADE_DAYS / 2), now) == pytest.approx(-6.0)
+    assert decayed_affinity(-12.0, now - timedelta(days=NEGATIVE_AFFINITY_FADE_DAYS), now) == 0.0
+    assert decayed_affinity(-12.0, now - timedelta(days=2 * NEGATIVE_AFFINITY_FADE_DAYS), now) == 0.0
+    # Naive timestamps (SQLite) are UTC; a timestamp after now does not grow the score.
+    assert decayed_affinity(10.0, (now - timedelta(days=AFFINITY_HALF_LIFE_DAYS)).replace(tzinfo=None), now) == pytest.approx(5.0)
+    assert decayed_affinity(10.0, now + timedelta(days=3), now) == 10.0
+    assert decayed_affinity(10.0, None, now) == 10.0
+
+
+def test_affinity_update_decays_the_old_score_before_adding():
+    from types import SimpleNamespace
+
+    from server.social.recommendations.config import AFFINITY_HALF_LIFE_DAYS
+    from server.social.recommendations.events import _update_affinity_row
+
+    now = utcnow()
+    row = SimpleNamespace(score=10.0, positive_count=0, negative_count=0, last_event_at=now - timedelta(days=AFFINITY_HALF_LIFE_DAYS), updated_at=None)
+    _update_affinity_row(row, 1.0, SimpleNamespace(created_at=now))
+    assert row.score == pytest.approx(6.0)
+    assert row.last_event_at == now
+    # An expired dislike does not stack onto a new one.
+    row = SimpleNamespace(score=-8.0, positive_count=0, negative_count=0, last_event_at=now - timedelta(days=40), updated_at=None)
+    _update_affinity_row(row, -1.0, SimpleNamespace(created_at=now))
+    assert row.score == pytest.approx(-1.0)
+
+
+def test_pipeline_context_decays_stored_affinities(app):
+    from server.social.recommendations import actor_identity
+    from server.social.recommendations.config import AFFINITY_HALF_LIFE_DAYS
+
+    posts = seed_catalog(app, creators=1, posts_per_creator=2)
+    actor = actor_identity(None, "decay-probe")
+    old = utcnow() - timedelta(days=2 * AFFINITY_HALF_LIFE_DAYS)
+    with app.state.testing_session() as db:
+        tag_id = db.query(PostTag.tag_id).filter(PostTag.post_id == posts[0].id).scalar()
+        db.add(ActorCreatorAffinity(actor_key=actor.actor_key, anonymous_id="decay-probe", creator_id=posts[0].owner_id, score=8.0, last_event_at=old))
+        db.add(ActorTagAffinity(actor_key=actor.actor_key, anonymous_id="decay-probe", tag_id=tag_id, score=4.0, last_event_at=old))
+        db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="decay-probe", post_id=posts[0].id, score=-8.0, last_event_at=old))
+        db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="decay-probe", post_id=posts[1].id, score=6.0))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.creator_affinity[posts[0].owner_id] == pytest.approx(2.0)
+    assert context.tag_affinity[tag_id] == pytest.approx(1.0)
+    assert context.item_affinity.get(posts[0].id, 0.0) == 0.0  # a dislike older than the fade is gone
+    assert context.item_affinity[posts[1].id] == 6.0

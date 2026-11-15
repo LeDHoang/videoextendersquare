@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from server.social import database, safety
+from server.social import database, safety, turnstile
 
 
 @pytest.fixture(scope="session")
@@ -58,6 +58,14 @@ def _fresh_reel_records():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_grid_cache():
+    """The for_you grid order is cached in process memory by actor, filters and seed."""
+    from server.social.recommendations import service
+
+    service._grid_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _roomy_device_limits(monkeypatch):
     """Tests sign up several users from one TestClient cookie jar, which is one
     device; tests/test_device_limits.py lowers these again."""
@@ -71,3 +79,42 @@ def _no_new_account_tier(monkeypatch):
     lower ``new`` tier limits. tests/test_trust_tiers.py sets these again."""
     monkeypatch.setenv("SX_TRUST_NEW_HOURS", "0")
     monkeypatch.setenv("SX_REEL_REWARD_MIN_ACCOUNT_AGE_HOURS", "0")
+
+
+@pytest.fixture(autouse=True)
+def _no_reel_jackpots(monkeypatch):
+    """Reel milestones rarely roll a jackpot; pin them to +1 so credit
+    balances are deterministic. Jackpot tests patch the roll again."""
+    from server.billing import service
+
+    monkeypatch.setattr(service, "roll_reel_reward", lambda: (1, None))
+
+
+# Turns the bot check on with a fake siteverify: "good-<action>" passes for that action
+# on echomultiverse.com; anything else fails.
+class _FakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+
+    def json(self):
+        return self._payload
+
+
+@pytest.fixture
+def turnstile_on(monkeypatch):
+    monkeypatch.setenv("SX_TURNSTILE_SECRET", "test-secret")
+    monkeypatch.setenv("SX_PUBLIC_URL", "https://echomultiverse.com")
+    calls: list[dict] = []
+
+    def fake_post(url, data=None, timeout=None):
+        calls.append({"url": url, "data": dict(data), "timeout": timeout})
+        good = data["response"].startswith("good-")
+        return _FakeResponse({
+            "success": good,
+            "hostname": "echomultiverse.com",
+            "action": data["response"][len("good-"):] if good else None,
+        })
+
+    monkeypatch.setattr(turnstile.httpx, "post", fake_post)
+    return calls
