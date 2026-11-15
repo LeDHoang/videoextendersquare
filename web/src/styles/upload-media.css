@@ -72,6 +72,14 @@
   gap: var(--sx-2);
 }
 
+/* Button wraps its content in one span: lay the icon and the words out there too. */
+.sx-upload-media .sx-btn > span,
+.sx-media-dialog .sx-btn > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sx-2);
+}
+
 .sx-upload-media .sx-media-add {
   position: relative;
   flex: none;
@@ -475,7 +483,8 @@
 
 /* ── File dialog ── */
 .sx-media-dialog {
-  width: min(100%, 1240px);
+  /* No wider than the square plus a comfortable settings column. */
+  width: min(100%, 1240px, calc(max(420px, 100dvh - 330px) + 640px));
   max-height: calc(100dvh - 2 * var(--sx-4));
   display: flex;
   flex-direction: column;
@@ -509,21 +518,26 @@
 
 .sx-media-dialog-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 440px);
+  /* The stage column is as wide as the square; the settings take the rest. */
+  grid-template-columns: minmax(0, var(--sx-media-stage)) minmax(340px, 1fr);
   gap: var(--sx-4);
   padding: var(--sx-4);
   min-height: 0;
   overflow: hidden;
+  /* As tall as the dialog allows beside its toolbar and player, never too small to read. */
+  --sx-media-stage: max(420px, calc(100dvh - 330px));
 }
 
 .sx-media-dialog-body .sx-studio-stage-col {
   position: static;
   max-height: calc(100dvh - 140px);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-/* The square never grows past the dialog's height. */
 .sx-media-dialog-body .sx-studio-stage-wrap {
-  max-width: calc(100dvh - 300px);
+  max-width: var(--sx-media-stage);
+  margin: 0;
 }
 
 .sx-media-side {
@@ -613,6 +627,16 @@
   color: var(--sx-bg);
 }
 
+/* Two model cards a row, so a model id is not broken over three lines. */
+.sx-media-options .sx-studio-models {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Two fields side by side line up on their inputs when one label wraps. */
+.sx-media-options .sx-studio-grid-2 {
+  align-items: end;
+}
+
 .sx-media-trim-bar {
   position: relative;
   height: 6px;
@@ -649,6 +673,15 @@
   .sx-media-dialog-body {
     grid-template-columns: minmax(0, 1fr);
     overflow-y: auto;
+  }
+
+  .sx-media-dialog-body .sx-studio-stage-col {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .sx-media-dialog-body .sx-studio-stage-wrap {
+    margin: 0 auto;
   }
 
   .sx-media-side {
