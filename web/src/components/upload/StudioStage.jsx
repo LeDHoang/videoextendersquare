@@ -372,7 +372,7 @@ export default function StudioStage({
           </div>
         ) : null}
 
-        {layout !== 'batch' && kind === 'video' && Number(meta.duration) > 10 ? (
+        {layout !== 'batch' && kind === 'video' && outpaintActive && Number(meta.duration) > 10 ? (
           <AccentBlock
             tone="warn"
             title={`${meta.duration}s EXCEEDS THE 10s THRESHOLD`}

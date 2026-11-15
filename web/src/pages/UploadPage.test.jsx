@@ -201,6 +201,14 @@ describe('UploadPage — video extender parity', () => {
     expect(document.querySelectorAll('.sx-studio-zone')).toHaveLength(2);
   });
 
+  it('drops the cloud outpainting warning when the clip is only stretched', async () => {
+    renderPage();
+    await pick(['portrait.mp4']);
+    expect(await screen.findByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeInTheDocument();
+    fireEvent.click(radio('Video Pipeline Mode', 'Stretch to fit'));
+    expect(screen.queryByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeNull();
+  });
+
   it('sends every video setting exactly as the Video page would', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v1' });
     renderPage();

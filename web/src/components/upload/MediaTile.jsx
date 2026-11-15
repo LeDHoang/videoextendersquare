@@ -40,7 +40,11 @@ export default function MediaTile({ item, now, retention, progress, price, onOpe
   const unsaved = shelf !== 'posted' && item.render?.status === 'ready' && item.render.kept === false;
   const saved = !!item.render?.kept || shelf === 'posted';
   const KindIcon = item.kind === 'video' ? IndustrialVideoIcon : IndustrialImageIcon;
-  const picture = item.kind === 'image' ? item.url || item.thumb : item.thumb;
+  // After a reload there is no local file, and without cloud storage no thumbnail:
+  // fall back to the result's browser-playable copy.
+  const resultUrl = item.render?.result?.preview_url;
+  const picture = item.kind === 'image' ? item.url || item.thumb || resultUrl : item.thumb;
+  const videoUrl = item.url || resultUrl;
   const pct = Math.round((progress?.progress || 0) * 100);
 
   return (
@@ -48,8 +52,8 @@ export default function MediaTile({ item, now, retention, progress, price, onOpe
       <button type="button" className="sx-media-open" onClick={() => onOpen(item)} aria-label={`Open ${item.name}`} title={item.name}>
         {picture ? (
           <img src={picture} alt="" className={stereo ? `sx-stereo-crop-${stereo}` : undefined} />
-        ) : item.kind === 'video' && item.url ? (
-          <video src={item.url} muted playsInline preload="metadata" />
+        ) : item.kind === 'video' && videoUrl ? (
+          <video src={videoUrl} muted playsInline preload="metadata" />
         ) : (
           <KindIcon className="sx-media-placeholder" />
         )}
