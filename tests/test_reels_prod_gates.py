@@ -154,10 +154,12 @@ def test_refresh_rescans_for_admins_only(app, monkeypatch, url):
     scans = []
     real = reels.post_media_items
     monkeypatch.setattr(reels, "post_media_items", lambda db: scans.append(1) or real(db))
+    # Loose files in a local output/ would fill the cache on their own; CI has none.
+    monkeypatch.setattr(reels.SM, "scan_output_media", lambda root: [])
     with TestClient(app) as anonymous, TestClient(app) as member, TestClient(app) as admin:
         user = register(member, "scan_member")
         register(admin, "scan_admin")
-        add_post(app, user["id"], "uploads/scan.mp4")
+        add_post(app, user["id"], "uploads/scan.mp4", media_files={"uploads/scan.mp4": {"bytes": 1}})
         anonymous.get("/api/reels")          # warms the cache
         assert len(scans) == 1
         anonymous.get(url)
