@@ -110,7 +110,7 @@ def build_policy(nonce: str, mode: str | None = None) -> str:
         ("img-src", ["'self'", "data:", "blob:", *media, *gif_origins()]),
         ("media-src", ["'self'", "blob:", *media]),
         ("connect-src", ["'self'", *media, NOMINATIM]),
-        ("frame-src", [TURNSTILE]),
+        ("frame-src", ["'self'", TURNSTILE]),
         ("frame-ancestors", ["'none'"]),
         ("object-src", ["'none'"]),
         ("base-uri", ["'none'"]),

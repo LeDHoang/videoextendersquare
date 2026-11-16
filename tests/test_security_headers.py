@@ -164,6 +164,8 @@ def test_policy_contents(client, monkeypatch):
     assert "https://media.tenor.com" in directives["img-src"]
     assert "https://nominatim.openstreetmap.org" in directives["connect-src"]
     assert directives["frame-ancestors"] == ["'none'"]
+    # ComparePage puts /api/compare/player in an iframe.
+    assert "'self'" in directives["frame-src"]
     assert directives["object-src"] == ["'none'"]
     assert directives["base-uri"] == ["'none'"]
 
