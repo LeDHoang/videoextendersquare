@@ -245,9 +245,9 @@
    A small screening room: carbon in both themes, so the bars of a file that is
    not square yet show as black, and the chips read on any picture. */
 .sx-media-tile {
-  --sx-tile-carbon: #0c0b09;
-  --sx-tile-chip: rgba(12, 11, 9, 0.74);
-  --sx-tile-ink: #f5f1e8;
+  --sx-tile-carbon: var(--sx-carbon);
+  --sx-tile-chip: color-mix(in srgb, var(--sx-carbon) 74%, transparent);
+  --sx-tile-ink: var(--sx-on-carbon);
   position: relative;
   aspect-ratio: 1;
   overflow: hidden;
@@ -319,7 +319,7 @@
   right: 0;
   bottom: 0;
   height: 4px;
-  background: rgba(245, 241, 232, 0.18);
+  background: color-mix(in srgb, var(--sx-on-carbon) 18%, transparent);
 }
 
 .sx-media-progress i {
@@ -386,7 +386,7 @@
 
 .sx-media-discard:hover {
   background: var(--sx-danger);
-  color: #fff;
+  color: var(--sx-on-danger);
 }
 
 .sx-media-check:focus-visible,
@@ -480,7 +480,7 @@
 
 .sx-media-badge.sx-danger {
   background: var(--sx-danger);
-  color: #fff;
+  color: var(--sx-on-danger);
 }
 
 .sx-media-ring {
@@ -500,7 +500,7 @@
 }
 
 .sx-media-ring-track {
-  stroke: rgba(245, 241, 232, 0.28);
+  stroke: color-mix(in srgb, var(--sx-on-carbon) 28%, transparent);
 }
 
 .sx-media-ring-left {

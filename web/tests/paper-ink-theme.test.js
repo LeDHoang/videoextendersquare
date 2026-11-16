@@ -19,8 +19,12 @@ function block(selector) {
   return declarations(tokensCss.slice(start, tokensCss.indexOf('\n}', start)));
 }
 
-// Highlighter and media colours read the same on paper and on carbon.
-const SHARED = ['--sx-spot', '--sx-spot-soft', '--sx-on-spot', '--sx-on-media', '--sx-media-scrim'];
+// Highlighter and media colours read the same on paper and on carbon. So do the
+// fixed carbon of a media tile, the type on it, and white type on the danger colour.
+const SHARED = [
+  '--sx-spot', '--sx-spot-soft', '--sx-on-spot', '--sx-on-media', '--sx-media-scrim',
+  '--sx-carbon', '--sx-on-carbon', '--sx-on-danger',
+];
 
 test('dark block redeclares every light colour except the shared ones', () => {
   const light = block(':root:root');
