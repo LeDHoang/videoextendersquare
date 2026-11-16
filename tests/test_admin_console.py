@@ -40,8 +40,8 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SX_REGISTRATION_ENABLED", "1")
     monkeypatch.delenv("SX_REGISTRATION_ALLOWLIST", raising=False)
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    monkeypatch.setenv("SX_ADMIN_USERS", "admin_user")
-    monkeypatch.setenv("SX_MODERATOR_USERS", "mod_user")
+    monkeypatch.setenv("SX_ADMIN_USERS", "admin_user@example.com")
+    monkeypatch.setenv("SX_MODERATOR_USERS", "mod_user@example.com")
     monkeypatch.setattr(support, "send_support_notification", lambda *args: None)
     republished_media: list = []
     monkeypatch.setattr(admin.media_store, "republish_paths", lambda paths: republished_media.extend(paths) or 0)

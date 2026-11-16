@@ -28,7 +28,7 @@ REASON = "abuse wave"
 def app(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "PASSWORD_HASHER", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
     monkeypatch.setenv("SX_SECURITY_SECRET", "test-only-security-secret")
-    monkeypatch.setenv("SX_ADMIN_USERS", "admin_user")
+    monkeypatch.setenv("SX_ADMIN_USERS", "admin_user@example.com")
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
     engine = create_engine(
         "sqlite:///" + str(tmp_path / "kill-switch.db"),

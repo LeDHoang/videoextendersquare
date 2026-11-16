@@ -142,8 +142,10 @@ def _verify_dummy_password(password: str) -> None:
         pass
 
 
-def configured_role(email: str, username: str) -> str:
-    identities = {email.casefold(), username.casefold()}
+def configured_role(email: str) -> str:
+    """Role the env lists give this email. Usernames are not matched: anyone can
+    register a free one, while an email is proven by the sign-up link."""
+    email = email.casefold()
     admins = {
         value.strip().casefold()
         for value in os.environ.get("SX_ADMIN_USERS", "").split(",")
@@ -154,7 +156,7 @@ def configured_role(email: str, username: str) -> str:
         for value in os.environ.get("SX_MODERATOR_USERS", "").split(",")
         if value.strip()
     }
-    return "admin" if identities & admins else "moderator" if identities & moderators else "user"
+    return "admin" if email in admins else "moderator" if email in moderators else "user"
 
 
 ROLE_RANKS = {"user": 0, "moderator": 1, "admin": 2}
@@ -170,7 +172,7 @@ def bootstrap_role(user: User) -> None:
     The env lists only bootstrap staff. Roles granted or removed in the admin
     console live in the database and survive the next sign-in.
     """
-    assigned_role = configured_role(user.email or "", user.username)
+    assigned_role = configured_role(user.email or "")
     if role_rank(assigned_role) > role_rank(user.role):
         user.role = assigned_role
 
@@ -569,7 +571,7 @@ def register(
         password_hash=hash_password(password),
         display_name=(req.display_name.strip() or username)[:60],
         account_type="real",
-        role=configured_role(email, username),
+        role=configured_role(email),
         status="pending",
         terms_version=TERMS_VERSION,
         terms_accepted_at=utcnow(),

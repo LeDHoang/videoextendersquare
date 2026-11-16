@@ -649,3 +649,19 @@ def test_fal_key_length_boundaries(monkeypatch):
     monkeypatch.setenv("SX_FAL_KEY_ENCRYPTION_KEY", "")
     with pytest.raises(FalKeyConfigurationError):
         encrypt_fal_key("u", "k")
+
+
+def test_staff_lists_match_email_only(app, monkeypatch):
+    """A listed username could be registered by anyone; an email is proven at sign-up."""
+    monkeypatch.setenv("SX_ADMIN_USERS", "edge_boss, Edge_Chief@Example.com")
+    monkeypatch.setenv("SX_MODERATOR_USERS", "edge_helper,edge_mod@example.com")
+    roles = {}
+    for username, email in (
+        ("edge_boss", "edge_one@example.com"),
+        ("edge_helper", "edge_two@example.com"),
+        ("edge_anyone", "edge_chief@example.com"),
+        ("edge_other", "edge_mod@example.com"),
+    ):
+        with TestClient(app) as client:
+            roles[username] = register(client, username, email)["role"]
+    assert roles == {"edge_boss": "user", "edge_helper": "user", "edge_anyone": "admin", "edge_other": "moderator"}

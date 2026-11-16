@@ -211,7 +211,7 @@ def test_post_edit_delete_follow_save_and_block_visibility(app):
 
 
 def test_reporting_and_moderation_suspend(app, monkeypatch):
-    monkeypatch.setenv("SX_ADMIN_USERS", "admin_user")
+    monkeypatch.setenv("SX_ADMIN_USERS", "admin@example.com")
     with (
         TestClient(app) as target_client,
         TestClient(app) as reporter_client,
