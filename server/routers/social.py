@@ -12,6 +12,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
@@ -80,6 +81,7 @@ from server.social.services import (
     encode_cursor,
     event_dict_is_valid,
     get_post_by_reference,
+    invalidate_reel_records,
     post_card,
     record_event,
     serialize_comment,
@@ -410,6 +412,7 @@ class PostUpdateRequest(BaseModel):
     caption: str | None = None
     tags: list[str] | None = None
     location: dict | None = None
+    visibility: Literal["public", "private"] | None = None
 
 
 class CommentRequest(BaseModel):
@@ -1114,7 +1117,12 @@ def update_post(
         post.location = dict(req.location)
     if req.tags is not None:
         sync_post_tags(db, post, req.tags)
+    visibility_changed = req.visibility is not None and req.visibility != post.visibility
+    if visibility_changed:
+        post.visibility = req.visibility
     db.commit()
+    if visibility_changed:
+        invalidate_reel_records()
     db.refresh(post)
     return {"post": media_card(post, db, context.user.id)}
 

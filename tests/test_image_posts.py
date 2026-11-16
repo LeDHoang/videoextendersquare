@@ -195,6 +195,21 @@ def test_publish_multi_image_post(client, tmp_path):
             image_router.STAGED_UPLOADS.pop(stage_id, None)
 
 
+def test_publish_sets_visibility_and_defaults_to_public(client, tmp_path):
+    user = _register(client, "vis_pub")
+    stage_ids = [_stage(tmp_path, user, f"vis-pub-{index}", (index, 6, 7)) for index in range(2)]
+    try:
+        private = _publish(client, {"kind": "image", "title": "Hidden", "stage_id": stage_ids[0], "visibility": "private"})
+        assert private.status_code == 200, private.text
+        default = _publish(client, {"kind": "image", "title": "Open", "stage_id": stage_ids[1]})
+        assert default.status_code == 200, default.text
+        with client.testing_session() as db:
+            assert {post.title: post.visibility for post in db.query(Post).all()} == {"Hidden": "private", "Open": "public"}
+    finally:
+        for stage_id in stage_ids:
+            image_router.STAGED_UPLOADS.pop(stage_id, None)
+
+
 def test_publish_rejects_mixed_or_oversized_posts(client, tmp_path):
     user = _register(client, "slide_reject")
     stage_ids = [_stage(tmp_path, user, f"slide-reject-{index}", (index, 4, 5)) for index in range(MAX_POST_IMAGES + 1)]

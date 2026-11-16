@@ -899,7 +899,10 @@ def create_or_update_post(
     stable_legacy_id: bool = False,
     slide_paths: list[str] | None = None,
     stereo_layout: str | None = None,
+    visibility: str | None = None,
 ) -> Post:
+    if visibility is not None and visibility not in POST_VISIBILITIES:
+        raise ValueError(f"Unknown post visibility: {visibility!r}")
     normalized_path = normalize_media_path(media_path)
     post = db.query(Post).filter(Post.media_path == normalized_path).first()
     created = created_at or utcnow()
@@ -925,6 +928,8 @@ def create_or_update_post(
     post.source = str(source or "upload")[:32]
     post.status = "published"
     post.deleted_at = None
+    if visibility is not None:
+        post.visibility = visibility
     if stereo_layout is not None:
         post.stereo_layout = stereo_layout if stereo_layout in {"mono", "sbs", "tb"} else "mono"
     elif not post.stereo_layout:

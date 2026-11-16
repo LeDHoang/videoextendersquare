@@ -83,6 +83,7 @@ class PublishRequest(BaseModel):
     # "sbsd"): none, or one per stored file in order (cover, then extras).
     # Each is stored beside its file as <stem>-depth for the VR player.
     spatial_job_ids: list[str] = []
+    visibility: Literal["public", "private"] = "public"
 
     def extras(self) -> list[SlideSource]:
         return self.extra_items or [SlideSource(stage_id=stage_id) for stage_id in self.extra_stage_ids if stage_id]
@@ -916,6 +917,7 @@ def _publish_upload(
             source="converted" if _converted_layout(req, context) else "extended" if req.job_id else "upload",
             slide_paths=[target.resolve().relative_to(root).as_posix() for target in extra_dests] if req.kind == "image" else None,
             stereo_layout=req.stereo_layout,
+            visibility=req.visibility,
         )
         db.commit()
         db.refresh(post)
