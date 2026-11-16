@@ -91,7 +91,7 @@ services:
   # Sends anonymous GETs of the read routes to app-read and everything else
   # to app (deploy/Caddyfile). The Tunnel's public hostname points here.
   proxy:
-    image: caddy:2
+    image: caddy:2.11.9@sha256:ce773ec7a742ce15ee6bf2bb5f65882b9e2a4487b10733e6f1484f86e6b5d8bc
     restart: unless-stopped
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -103,7 +103,7 @@ services:
     logging: *default-logging
 
   postgres:
-    image: postgres:16
+    image: postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-echo}
@@ -121,7 +121,7 @@ services:
     logging: *default-logging
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.5@sha256:1b1d34d0a9c0bfca9de72db8460d328db3f19edd2b96169114e3e893a97bbe53
     profiles: [tunnel]
     restart: unless-stopped
     command: tunnel --no-autoupdate run
