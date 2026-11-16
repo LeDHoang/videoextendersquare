@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { GatedReason, Mono } from '../ui/primitives.jsx';
-import { Button } from '../ui/controls.jsx';
+import { Button, ToggleRow } from '../ui/controls.jsx';
 import LocationField from '../ui/LocationField.jsx';
 import { LocationIcon } from '../icons/index.jsx';
 import { CAPTION_MAX, TAGS_MAX, TITLE_MAX } from './mediaItems.js';
 
-// Title, caption, tags and location of one post. `draft` is
-// { title, caption, tags, location }; onChange receives the next draft.
+// Title, caption, tags, location and visibility of one post. `draft` is
+// { title, caption, tags, location, visibility }; onChange receives the next draft.
 export default function PostForm({ draft, onChange }) {
   const [tagDraft, setTagDraft] = useState('');
   const [tagError, setTagError] = useState('');
@@ -100,6 +100,14 @@ export default function PostForm({ draft, onChange }) {
         ) : location?.city ? (
           <Mono><LocationIcon className="sx-location-inline" /> {location.city}{location.country ? `, ${location.country}` : ''} (CUSTOM)</Mono>
         ) : null}
+      </div>
+      <div className="sx-studio-field">
+        <ToggleRow
+          label="PRIVATE POST"
+          checked={draft.visibility === 'private'}
+          onChange={(on) => set({ visibility: on ? 'private' : 'public' })}
+        />
+        {draft.visibility === 'private' ? <Mono>Only you and anyone with the link can see it.</Mono> : null}
       </div>
     </div>
   );

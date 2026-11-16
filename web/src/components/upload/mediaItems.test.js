@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  formatLeft, groupProblem, mergeServerRenders, postSource, publishBody, restoredItem, shelfOf, sortItems,
+  emptyDraft, formatLeft, groupProblem, mergeServerRenders, postSource, publishBody, restoredItem, shelfOf, sortItems,
   spatialOf, stagedItem, stereoOf, storedItem, timeLeft,
 } from './mediaItems.js';
 
@@ -69,6 +69,13 @@ describe('publishBody', () => {
     expect(flat.job_id).toBe('j1');
     expect(flat.stereo_layout).toBeUndefined();
     expect(flat.spatial_job_ids).toBeUndefined();
+  });
+
+  it('sends the visibility, public unless the draft is private', () => {
+    const a = item('a.png', 400, 400);
+    expect(publishBody([a], draft, null).visibility).toBe('public');
+    expect(publishBody([a], { ...draft, visibility: 'private' }, null).visibility).toBe('private');
+    expect(emptyDraft('t').visibility).toBe('public');
   });
 });
 
