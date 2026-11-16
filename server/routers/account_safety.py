@@ -9,7 +9,7 @@ import uuid
 from datetime import timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, EmailStr
@@ -293,8 +293,20 @@ def serialize_report(db: Session, report: Report) -> dict:
     }
 
 
+def _deliver_password_reset_email(recipient: str, raw_token: str) -> None:
+    try:
+        send_password_reset_email(recipient, raw_token)
+    except Exception:
+        logger.exception("Password reset email delivery failed")
+
+
 @router.post("/api/auth/password-reset/request")
-def request_password_reset(req: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
+def request_password_reset(
+    req: PasswordResetRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     validate_origin(request)
     identity = request_identity(request)
     email = normalize_email(str(req.email))
@@ -324,10 +336,8 @@ def request_password_reset(req: PasswordResetRequest, request: Request, db: Sess
             )
         )
         db.commit()
-        try:
-            send_password_reset_email(user.email or email, raw_token)
-        except Exception:
-            logger.exception("Password reset email delivery failed")
+        # After the response, so a real account answers as fast as an unknown one.
+        background_tasks.add_task(_deliver_password_reset_email, user.email or email, raw_token)
         if os.environ.get("SX_PASSWORD_RESET_EXPOSE_TOKEN", "0").lower() in {"1", "true", "yes"}:
             debug_token = raw_token
 

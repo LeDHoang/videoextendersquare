@@ -256,6 +256,26 @@ def test_reporting_and_moderation_suspend(app, monkeypatch):
             assert db.get(Report, report_id).moderator_id == admin["id"]
 
 
+def test_password_reset_mail_leaves_after_the_response(app, monkeypatch):
+    # Sending inside the request made a real account answer slower than an unknown one.
+    from fastapi import BackgroundTasks
+    from starlette.requests import Request
+
+    sent = []
+    monkeypatch.setattr(account_safety, "send_password_reset_email", lambda to, token: sent.append(to))
+    with TestClient(app) as client:
+        register(client, "late_mail", "late@example.com")
+    tasks = BackgroundTasks()
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": [], "client": ("1.2.3.4", 1)})
+    with app.state.testing_session() as db:
+        answer = account_safety.request_password_reset(
+            account_safety.PasswordResetRequest(email="late@example.com"), request, tasks, db
+        )
+    assert answer["ok"] is True
+    assert sent == []
+    assert len(tasks.tasks) == 1
+
+
 def test_password_reset_then_account_deletion(app, monkeypatch):
     monkeypatch.setenv("SX_PASSWORD_RESET_EXPOSE_TOKEN", "1")
     with TestClient(app) as client:

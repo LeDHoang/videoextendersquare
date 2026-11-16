@@ -56,7 +56,7 @@ from server.social.auth import (
     verify_password,
 )
 from server.social.database import get_db
-from server.social.email import send_verification_email, verification_ttl_minutes
+from server.social.email import send_account_exists_email, send_verification_email, verification_ttl_minutes
 from server.social.models import (
     AuthSession,
     Comment,
@@ -509,6 +509,41 @@ def _verification_accepted(raw_token: str | None = None) -> JSONResponse:
     return JSONResponse(payload, status_code=202)
 
 
+REGISTER_EXISTING_EMAILS_PER_DAY = 3
+
+
+def _deliver_account_exists_email(recipient: str) -> None:
+    try:
+        send_account_exists_email(recipient)
+    except Exception:
+        logger.exception("Account-exists email delivery failed")
+
+
+def _notify_existing_owner(db: Session, existing: User, background_tasks: BackgroundTasks) -> None:
+    """Sign-up named an address that already has an account. The response stays the
+    same as for a new address; the owner hears about it by email instead. The cap is
+    silent, so it cannot be used to tell the two cases apart either."""
+    key = f"register-existing:{existing.email_norm}"
+    if rate_limiter.count(key, 24 * 60 * 60) >= REGISTER_EXISTING_EMAILS_PER_DAY:
+        return
+    rate_limiter.record(key, 24 * 60 * 60)
+    if existing.account_type != "real":
+        return
+    recipient = existing.email or existing.email_norm
+    if existing.status == "pending":
+        # The owner never confirmed: a new link is the useful answer.
+        background_tasks.add_task(_deliver_verification_email, recipient, _issue_verification_token(db, existing))
+    else:
+        background_tasks.add_task(_deliver_account_exists_email, recipient)
+
+
+def _signup_accepted(raw_token: str | None, device_raw: str, device_minted: bool) -> JSONResponse:
+    response = _verification_accepted(raw_token)
+    if device_minted:
+        set_device_cookie(response, device_raw)
+    return response
+
+
 def _clear_expired_pending(db: Session, email: str, username: str) -> None:
     """Drop pending users holding this email/username whose verification lapsed."""
     rows = db.query(User).filter(
@@ -559,16 +594,21 @@ def register(
     password = validate_password(req.password)
     rate_limiter.check(db, f"register-account:{email}:{username}", 3, 60 * 60)
     _clear_expired_pending(db, email, username)
-    if db.query(User.id).filter(User.email_norm == email).first():
-        error(409, "EMAIL_TAKEN", "An account already uses this email.", "email")
+    # Usernames are public, so a taken one may say so. A taken email may not: that
+    # answer is the same 202 as a new sign-up, after the same password hash.
     if db.query(User.id).filter(User.username_norm == username).first():
         error(409, "USERNAME_TAKEN", "This username is already taken.", "username")
+    password_hash = hash_password(password)
+    existing = db.query(User).filter(User.email_norm == email).first()
+    if existing:
+        _notify_existing_owner(db, existing, background_tasks)
+        return _signup_accepted(None, device_raw, device_minted)
     user = User(
         email=email,
         email_norm=email,
         username=username,
         username_norm=username,
-        password_hash=hash_password(password),
+        password_hash=password_hash,
         display_name=(req.display_name.strip() or username)[:60],
         account_type="real",
         role=configured_role(email),
@@ -581,18 +621,17 @@ def register(
         db.commit()
     except IntegrityError:
         db.rollback()
-        if db.query(User.id).filter(User.email_norm == email).first():
-            error(409, "EMAIL_TAKEN", "An account already uses this email.", "email")
         if db.query(User.id).filter(User.username_norm == username).first():
             error(409, "USERNAME_TAKEN", "This username is already taken.", "username")
+        existing = db.query(User).filter(User.email_norm == email).first()
+        if existing:
+            _notify_existing_owner(db, existing, background_tasks)
+            return _signup_accepted(None, device_raw, device_minted)
         error(409, "ACCOUNT_CONFLICT", "The account details are already in use.")
     db.refresh(user)
     raw_token = _issue_verification_token(db, user)
     background_tasks.add_task(_deliver_verification_email, email, raw_token)
-    response = _verification_accepted(raw_token)
-    if device_minted:
-        set_device_cookie(response, device_raw)
-    return response
+    return _signup_accepted(raw_token, device_raw, device_minted)
 
 
 @router.post("/api/auth/verify-email")

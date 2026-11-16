@@ -59,6 +59,22 @@ def send_verification_email(recipient: str, token: str) -> bool:
     return _deliver(message)
 
 
+def send_account_exists_email(recipient: str) -> bool:
+    """Sign-up with an address that already has an active account: tell the owner,
+    so the sign-up form itself never says whether the address is registered."""
+    message = EmailMessage()
+    message["Subject"] = "You already have an ECHO account"
+    message["To"] = recipient
+    message.set_content(
+        "Someone tried to create an ECHO account with this email address, "
+        "but it already belongs to an account.\n\n"
+        "Sign in: " + _public_base() + "/login\n"
+        "Forgot your password? " + _public_base() + "/forgot-password\n\n"
+        "If this was not you, ignore this email. Nothing has changed on your account.\n"
+    )
+    return _deliver(message)
+
+
 def support_inbox_link() -> str:
     base = os.environ.get("SX_PUBLIC_URL", "http://localhost:5173").rstrip("/")
     return base + "/moderation?" + urlencode({"tab": "support"})
