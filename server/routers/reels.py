@@ -1236,6 +1236,22 @@ def _admin_refresh(refresh: bool, viewer: AuthContext | None) -> bool:
     return bool(refresh) and isinstance(viewer, AuthContext) and viewer.user.role == "admin"
 
 
+def _hidden_paths(
+    db: Session,
+    viewer: AuthContext | None,
+    *,
+    post: str | None = None,
+    author: str | None = None,
+) -> set[str]:
+    """Paths this viewer may not list. A direct link reveals its one private
+    post; a creator's own author scope reveals all of their private posts."""
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    own_scope = bool(viewer_id and author and str(author).strip().casefold() == viewer.user.username_norm)
+    return unavailable_media_paths_for_viewer(
+        viewer_id, db=db, reveal_post_id=post, reveal_owner_id=viewer_id if own_scope else None,
+    )
+
+
 # ─── Pydantic Models for Comments API ────────────────────────────────────
 
 class CommentCreate(BaseModel):
@@ -1851,7 +1867,7 @@ def _recommendation_feed_data(
             detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."},
         )
 
-    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    hidden_paths = _hidden_paths(db, viewer, post=post, author=author)
     raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     activity_days = _bounded_activity_window(window_days)
     recent_activity = _recent_activity_by_path(db, raw, activity_days) if sort == "recent_trending" else None
@@ -2218,7 +2234,7 @@ def list_reels(
     if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
-    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    hidden_paths = _hidden_paths(db, viewer, post=post, author=author)
     raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
 
@@ -2770,7 +2786,7 @@ def generate_explore_previews(
     failed = []
     rels = list(paths)
     if is_production():
-        hidden = unavailable_media_paths_for_viewer(context.user.id, db)
+        hidden = unavailable_media_paths_for_viewer(context.user.id, db, reveal_owner_id=context.user.id)
         live = published_media_paths(db) - hidden
         failed.extend({"path": rel, "error": "not found"} for rel in rels if rel not in live)
         rels = [rel for rel in rels if rel in live]
@@ -3468,7 +3484,9 @@ def reels_player_inline(
         play_idx = next((index for index, item in enumerate(payload) if item.get("path") == play), None)
         if play_idx is None:
             viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
-            hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+            # Only the path in ``play`` is looked up, so this opens the
+            # creator's own private reel and nobody else's.
+            hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db, reveal_owner_id=viewer_id)
             video = next(
                 (item for item in _scan_cached(db) if item["rel_path"] == play and play not in hidden_paths),
                 None,

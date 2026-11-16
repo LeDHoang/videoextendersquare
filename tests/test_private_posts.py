@@ -377,3 +377,157 @@ def test_recommender_catalog_skips_private_items_it_was_not_given(world):
 
         assert set(catalog(None)) == {world.pub.id}
         assert set(catalog({world.pub.id, world.priv.id})) == {world.pub.id, world.priv.id}
+
+
+# --- Task 4: the link opens it; the creator sees it in their own scope --------
+
+def test_anyone_opens_a_private_post_by_link(world):
+    priv = world.priv
+    for client in (world.anon, world.bob, world.alice):
+        assert client.get(f"/api/posts/{priv.id}").json()["post"]["visibility"] == "private"
+        r = client.get(f"/api/reels?post={priv.id}")
+        assert r.status_code == 200, r.text
+        assert r.json()["count"] == 1 and len(r.json()["videos"]) == 1
+        feed = client.get(f"/api/reels/feed?surface=related&post={priv.id}&limit=5")
+        assert feed.status_code == 200, feed.text
+        assert feed.json()["items"][0]["post_id"] == priv.id
+        # What the SPA requests for /reels?post=<id> (ReelsPlayer.jsx) and what the DM card links to.
+        assert priv.media_path in client.get(f"/api/reels/player-inline?post={priv.id}").text
+        share = client.get(f"/api/posts/{priv.id}/share").json()
+        assert share["canonical_url"].endswith(f"/reels?post={priv.id}")
+
+
+def test_interactions_stay_available_on_a_private_post(world):
+    bob, post_id = world.bob, world.priv.id
+    assert bob.put(f"/api/posts/{post_id}/like", headers=csrf_headers(bob)).status_code == 200
+    comment = bob.post(f"/api/posts/{post_id}/comments", json={"text": "nice"}, headers=csrf_headers(bob))
+    assert comment.status_code in (200, 201), comment.text
+    assert bob.put(f"/api/posts/{post_id}/save", headers=csrf_headers(bob)).status_code == 200
+    view = bob.post(f"/api/posts/{post_id}/view", json={"watch_ms": 1000}, headers=csrf_headers(bob))
+    assert view.status_code == 200, view.text
+    report = bob.post(
+        "/api/reports",
+        json={"target_type": "post", "target_id": post_id, "reason": "spam"},
+        headers=csrf_headers(bob),
+    )
+    assert report.status_code == 200, report.text
+    assert report.json()["report"]["id"]
+
+
+def test_link_with_an_author_scope_matches_a_public_post(world):
+    def open_link(post: Post):
+        return world.anon.get(f"/api/reels/feed?surface=related&post={post.id}&author=alice&limit=5")
+
+    public, private = open_link(world.pub), open_link(world.priv)
+    assert public.status_code == private.status_code == 200, private.text
+    assert public.json()["items"][0]["post_id"] == world.pub.id
+    assert private.json()["items"][0]["post_id"] == world.priv.id
+
+
+def bob_messages(world, conversation_id: str) -> list[dict]:
+    r = world.bob.get(f"/api/messages/conversations/{conversation_id}/messages")
+    assert r.status_code == 200, r.text
+    return r.json()["messages"]
+
+
+def share_to_bob(world, post: Post, client_id: str) -> str:
+    r = world.alice.post(
+        "/api/messages/share-reel",
+        json={"post_id": post.id, "usernames": ["bob"], "client_id": client_id},
+        headers=csrf_headers(world.alice),
+    )
+    assert r.status_code == 200 and r.json()["succeeded"] == 1, r.text
+    return r.json()["results"][0]["conversation_id"]
+
+
+def test_a_private_post_shared_in_a_dm_opens(world):
+    conversation_id = share_to_bob(world, world.priv, "share-private-0001")
+    message = bob_messages(world, conversation_id)[-1]
+    assert message["post"]["id"] == world.priv.id
+    assert message["attachment_unavailable"] is False
+
+    share_to_bob(world, world.pub, "share-public-0001")
+    r = world.alice.patch(f"/api/posts/{world.pub.id}", json={"visibility": "private"}, headers=csrf_headers(world.alice))
+    assert r.status_code == 200
+    message = bob_messages(world, conversation_id)[-1]
+    assert message["post"]["id"] == world.pub.id
+    assert message["attachment_unavailable"] is False
+
+
+def test_owner_plays_own_private_post_from_profile(world):
+    path = world.priv.media_path
+    assert path in world.alice.get("/api/reels?author=alice&limit=50").text
+    for client in (world.bob, world.anon):
+        r = client.get("/api/reels?author=alice&limit=50")
+        assert r.status_code == 200 and world.pub.media_path in r.text
+        assert path not in r.text
+    assert path in world.alice.get("/api/reels/feed?author=alice&limit=50").text
+    # The profile tile link.
+    assert path in world.alice.get("/api/reels/player-inline", params={"play": path, "author": "alice"}).text
+    # The PLAY IN REELS button after publishing (MediaDialog.jsx): no author in the link.
+    r = world.alice.get(
+        "/api/reels/player-inline",
+        params={"folder": "uploads", "codec": "all", "sort": "newest", "play": path},
+    )
+    assert path in r.text
+
+
+def test_the_reveal_does_not_reach_other_viewers(world):
+    assert world.alice.get(f"/api/reels?post={world.priv.id}").status_code == 200
+    assert world.alice.get(f"/api/reels/feed?surface=related&post={world.priv.id}&limit=5").status_code == 200
+    assert world.alice.get("/api/reels?author=alice&limit=50").status_code == 200
+    assert world.alice.get("/api/reels/feed?author=alice&limit=50").status_code == 200
+    for client in (world.anon, world.bob):
+        for path in ("/api/reels?limit=50", "/api/reels/feed?limit=50"):
+            r = client.get(path)
+            assert r.status_code == 200, r.text
+            assert world.pub.media_path in r.text
+            assert world.priv.media_path not in r.text
+    # The ranked grid caches its order; the creator's own request must not seed it for others.
+    ranked = "/api/reels?author=alice&sort=for_you&limit=50"
+    assert world.priv.media_path in world.alice.get(ranked).text
+    for client in (world.anon, world.bob):
+        r = client.get(ranked)
+        assert r.status_code == 200 and world.pub.media_path in r.text
+        assert world.priv.media_path not in r.text
+
+
+def test_scope_ids_and_play_cannot_reveal(world):
+    r = world.bob.get(
+        "/api/reels/feed",
+        params={"surface": "related", "post": world.pub.id, "scope_ids": f"{world.pub.id},{world.priv.id}"},
+    )
+    assert r.status_code == 200, r.text
+    assert world.priv.id not in r.text and world.priv.media_path not in r.text
+    for client in (world.bob, world.anon):
+        for params in ({"play": world.priv.media_path}, {"play": world.priv.media_path, "author": "alice"}):
+            r = client.get("/api/reels/player-inline", params=params)
+            assert r.status_code == 200, r.text
+            assert world.priv.media_path not in r.text
+
+
+def test_the_link_still_404s_for_blocked_and_suspended(world):
+    assert world.alice.put("/api/users/bob/block", headers=csrf_headers(world.alice)).status_code == 200
+    assert world.bob.get(f"/api/posts/{world.priv.id}").status_code == 404
+    assert world.bob.get(f"/api/reels?post={world.priv.id}").status_code == 404
+    with world.app.state.testing_session() as db:
+        db.get(User, world.alice_id).status = "suspended"
+        db.commit()
+    assert world.anon.get(f"/api/reels?post={world.priv.id}").status_code == 404
+
+
+def test_explore_preview_serves_only_the_creators_own_private_tiles(world, monkeypatch):
+    monkeypatch.setenv("SX_ENV", "production")
+    monkeypatch.setenv("SX_SECURITY_SECRET", "test-only-security-secret")
+    monkeypatch.setattr(
+        reels, "_gen_explore_assets",
+        lambda rel, layout="mono", files=None: (rel, f"/media/{rel}-preview", f"/media/{rel}-poster", None),
+    )
+    paths = [world.pub.media_path, world.priv.media_path]
+    mine = world.alice.post("/api/reels/explore-preview", json=paths, headers=csrf_headers(world.alice))
+    assert mine.status_code == 200, mine.text
+    assert set(mine.json()["generated"]) == set(paths) and mine.json()["failed"] == []
+    theirs = world.bob.post("/api/reels/explore-preview", json=paths, headers=csrf_headers(world.bob))
+    assert theirs.status_code == 200, theirs.text
+    assert list(theirs.json()["generated"]) == [world.pub.media_path]
+    assert theirs.json()["failed"] == [{"path": world.priv.media_path, "error": "not found"}]
