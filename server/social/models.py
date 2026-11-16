@@ -129,6 +129,7 @@ class Post(Base):
     location = Column(JSON, nullable=False, default=dict)
     source = Column(String(32), nullable=False, default="upload")
     status = Column(String(16), nullable=False, default="published", index=True)
+    visibility = Column(String(16), nullable=False, default="public", server_default="public")
     legacy_like_count = Column(Integer, nullable=False, default=0)
     legacy_view_count = Column(Integer, nullable=False, default=0)
     like_count = Column(Integer, nullable=False, default=0)

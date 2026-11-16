@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 IMAGE_POST_DWELL_MS = 15_000
 # A multi-image post carries at most this many images (cover included).
 MAX_POST_IMAGES = 10
+# Who can see a post: everyone, or only its owner.
+POST_VISIBILITIES = ("public", "private")
 
 
 def normalize_media_path(value: str) -> str:
@@ -1037,6 +1039,7 @@ def post_card(
         "tags": post_tags(post),
         "location": post.location or {},
         "source": post.source,
+        "visibility": post.visibility or "public",
         "likes": post.like_count,
         "views": post.view_count,
         "comments_count": post.comment_count,
