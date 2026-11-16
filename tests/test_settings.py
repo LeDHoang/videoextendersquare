@@ -19,7 +19,7 @@ GOOD_ENV = {
 
 
 def _apply(monkeypatch, env):
-    for name in list(GOOD_ENV) + ["SX_DEV_ORIGINS", "SX_LOGIN_RATE_LIMIT"]:
+    for name in list(GOOD_ENV) + ["SX_DEV_ORIGINS", "SX_LOGIN_RATE_LIMIT", "SX_PASSWORD_RESET_EXPOSE_TOKEN"]:
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -76,6 +76,14 @@ def test_rejects_local_dev_origins(monkeypatch):
     _apply(monkeypatch, {**GOOD_ENV, "SX_DEV_ORIGINS": "https://app.example.com,http://localhost:5173"})
     errors = settings.production_config_errors()
     assert len(errors) == 1 and "localhost" in errors[0]
+
+
+def test_rejects_tokens_exposed_in_responses(monkeypatch):
+    _apply(monkeypatch, {**GOOD_ENV, "SX_PASSWORD_RESET_EXPOSE_TOKEN": "1"})
+    errors = settings.production_config_errors()
+    assert len(errors) == 1 and "SX_PASSWORD_RESET_EXPOSE_TOKEN" in errors[0]
+    monkeypatch.setenv("SX_PASSWORD_RESET_EXPOSE_TOKEN", "0")
+    assert settings.production_config_errors() == []
 
 
 def test_login_rate_limit_can_be_lifted_only_for_a_localhost_stack(monkeypatch):

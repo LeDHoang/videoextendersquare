@@ -105,6 +105,8 @@ def production_config_errors() -> list[str]:
         host = (urlparse(origin.strip()).hostname or "").casefold()
         if host in _LOCAL_HOSTS or host.endswith(".localhost"):
             errors.append(f"SX_DEV_ORIGINS must not include local origin {origin.strip()}")
+    if env_flag("SX_PASSWORD_RESET_EXPOSE_TOKEN"):
+        errors.append("SX_PASSWORD_RESET_EXPOSE_TOKEN must be 0 (it returns reset and verification tokens in responses)")
     if not login_rate_limit_enabled() and not _local_url(os.environ.get("SX_PUBLIC_URL", "")):
         errors.append("SX_LOGIN_RATE_LIMIT=0 is only allowed when SX_PUBLIC_URL is a localhost URL")
     return errors
