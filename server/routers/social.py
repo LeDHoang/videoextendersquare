@@ -359,13 +359,18 @@ def media_card(
     return card
 
 
-def post_query(db: Session):
+def post_query(db: Session, *, include_private_of: str | None = None):
+    """Published posts that may be listed: public ones, plus the private posts
+    of ``include_private_of`` (the owner looking at their own posts)."""
     from server.social.models import PostTag
 
+    listed = Post.visibility == "public"
+    if include_private_of:
+        listed = or_(listed, and_(Post.visibility == "private", Post.owner_id == include_private_of))
     return db.query(Post).options(
         joinedload(Post.owner),
         selectinload(Post.tags).selectinload(PostTag.tag),
-    ).filter(Post.status == "published", Post.deleted_at.is_(None))
+    ).filter(Post.status == "published", Post.deleted_at.is_(None), listed)
 
 
 class RegisterRequest(BaseModel):
@@ -734,11 +739,12 @@ PROFILE_POST_SORTS = {"newest", "views", "likes"}
 
 def profile_stats(db: Session, owner_id: str) -> dict:
     """Public aggregates for a profile header: total likes received.
-    Counts only published, non-deleted posts."""
+    Counts only published, non-deleted, public posts."""
     published = and_(
         Post.owner_id == owner_id,
         Post.status == "published",
         Post.deleted_at.is_(None),
+        Post.visibility == "public",
     )
     like_total = db.query(func.coalesce(func.sum(Post.like_count), 0)).filter(published).scalar()
     return {
@@ -899,7 +905,7 @@ def get_profile_posts(
         error(404, "USER_NOT_FOUND", "Profile not found.")
     limit = max(1, min(int(limit), 50))
     sort = sort if sort in PROFILE_POST_SORTS else "newest"
-    query = post_query(db).filter(Post.owner_id == user.id)
+    query = post_query(db, include_private_of=viewer_id if viewer_id == user.id else None).filter(Post.owner_id == user.id)
     if media in {"video", "image"}:
         query = query.filter(Post.media_type == media)
     if sort == "newest":

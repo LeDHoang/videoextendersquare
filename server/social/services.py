@@ -1301,6 +1301,14 @@ def scoped_media_paths(
         )
         if author:
             query = query.filter(User.username_norm == str(author).strip().casefold())
+        # Private rows only on the owner's own creator feed.
+        if author and viewer_id:
+            query = query.filter(or_(
+                Post.visibility == "public",
+                and_(Post.visibility == "private", Post.owner_id == viewer_id),
+            ))
+        else:
+            query = query.filter(Post.visibility == "public")
         if feed == "following":
             if not viewer_id:
                 return []

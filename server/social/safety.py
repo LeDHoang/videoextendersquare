@@ -53,8 +53,18 @@ def recompute_follow_counts(db: Session, user_ids: set[str]) -> None:
         user.following_count = db.query(Follow.id).filter(Follow.follower_id == user_id).count()
 
 
-def unavailable_media_paths_for_viewer(viewer_id: str | None, db: Session | None = None) -> set[str]:
-    """Paths hidden because content is deleted, its owner is inactive, or users blocked each other.
+def unavailable_media_paths_for_viewer(
+    viewer_id: str | None,
+    db: Session | None = None,
+    *,
+    reveal_post_id: str | None = None,
+    reveal_owner_id: str | None = None,
+) -> set[str]:
+    """Paths hidden because content is deleted, its owner is inactive, users blocked each other,
+    or the post is private.
+
+    ``reveal_post_id`` and ``reveal_owner_id`` lift only the private rule, for
+    that one post and for that owner's posts; every other reason still hides.
 
     Routes pass their request ``db``: opening a second session while the
     request session holds a connection is a hold-and-wait on the pool.
@@ -66,4 +76,10 @@ def unavailable_media_paths_for_viewer(viewer_id: str | None, db: Session | None
         hidden = blocked_user_ids(db, viewer_id)
         if hidden:
             query = query.union(db.query(Post.media_path).filter(Post.owner_id.in_(hidden)))
+        private = db.query(Post.media_path).filter(Post.visibility == "private")
+        if reveal_post_id:
+            private = private.filter(Post.id != reveal_post_id)
+        if reveal_owner_id:
+            private = private.filter(Post.owner_id != reveal_owner_id)
+        query = query.union(private)
         return {row[0] for row in query.all()}
