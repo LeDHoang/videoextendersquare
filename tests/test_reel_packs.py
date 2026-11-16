@@ -985,3 +985,102 @@ def test_player_endpoints_inline_every_script_placeholder(app):
             names = [s.split("?")[0].rsplit("/", 1)[-1] for s in srcs]
             order = ["vr_ui_canvas.js", "vr_shell_canvas.js", "vr_shell.js", "webxr_vr.js"]
             assert [n for n in names if n in order] == order
+
+
+def set_private(client: TestClient, post_id: str, visibility: str = "private") -> None:
+    response = mutate(client, "PATCH", f"/api/posts/{post_id}", {"visibility": visibility})
+    assert response.status_code == 200, response.text
+
+
+def publish_pack(client: TestClient, post_ids: list[str], visibility: str) -> dict:
+    created = mutate(
+        client,
+        "POST",
+        "/api/packs",
+        {"title": f"{visibility} pack", "visibility": visibility, "post_ids": post_ids, "cover_post_id": post_ids[0]},
+    )
+    assert created.status_code == 200, created.text
+    pack = created.json()["pack"]
+    published = mutate(client, "POST", f"/api/packs/{pack['id']}/publish", {"expected_revision": pack["revision"]})
+    assert published.status_code == 200, published.text
+    return published.json()["pack"]
+
+
+def test_private_member_is_unavailable_in_a_public_pack(app):
+    with TestClient(app) as alice, TestClient(app) as bob, TestClient(app) as anon:
+        owner = register(alice, "alice", "alice@example.com")
+        register(bob, "bob", "bob@example.com")
+        post_ids = create_posts(app, owner["id"], 4)
+        pack = publish_pack(alice, post_ids, "public")
+        set_private(alice, post_ids[0])
+        for viewer in (anon, bob):
+            body = viewer.get(f"/api/packs/{pack['id']}").json()["pack"]
+            hidden = next(row for row in body["items"] if row["post"] is None)
+            assert hidden["available"] is False
+            assert post_ids[0] not in {card["id"] for card in body["cover_items"]}
+            assert body["playable_count"] == 3
+
+
+def test_unlisted_pack_link_shows_its_owners_private_posts(app):
+    with TestClient(app) as alice, TestClient(app) as anon:
+        owner = register(alice, "alice", "alice@example.com")
+        post_ids = create_posts(app, owner["id"], 3)
+        for post_id in post_ids:
+            set_private(alice, post_id)
+        pack = publish_pack(alice, post_ids, "unlisted")
+        body = anon.get(f"/api/packs/{pack['id']}").json()["pack"]
+        assert all(row["available"] for row in body["items"])
+        assert body["playable_count"] == 3
+        response = anon.get("/api/reels/player-inline", params={"pack_id": pack["id"]})
+        assert response.status_code == 200
+        for index in range(3):
+            assert f"tests/pack-{owner['id'][:5]}-{index}.mp4" in response.text
+
+
+def test_other_creators_private_post_stays_hidden_in_an_unlisted_pack(app):
+    with TestClient(app) as alice, TestClient(app) as bob, TestClient(app) as anon:
+        a = register(alice, "alice", "alice@example.com")
+        b = register(bob, "bob", "bob@example.com")
+        own = create_posts(app, b["id"], 3)
+        shared = create_posts(app, a["id"], 1)[0]
+        pack = publish_pack(bob, own + [shared], "unlisted")
+        set_private(alice, shared)
+        for viewer in (anon, bob):
+            body = viewer.get(f"/api/packs/{pack['id']}").json()["pack"]
+            by_position = sorted(body["items"], key=lambda row: row["position"])
+            assert by_position[-1]["available"] is False and by_position[-1]["post"] is None
+            assert body["playable_count"] == 3
+
+
+def test_only_the_owner_adds_a_private_post_to_a_pack(app):
+    with TestClient(app) as alice, TestClient(app) as bob:
+        a = register(alice, "alice", "alice@example.com")
+        b = register(bob, "bob", "bob@example.com")
+        alice_ids = create_posts(app, a["id"], 4)
+        secret = alice_ids[0]
+        set_private(alice, secret)
+        bob_pack = create_pack(bob, create_posts(app, b["id"], 3))
+        refused = mutate(bob, "POST", f"/api/packs/{bob_pack['id']}/items", {"post_id": secret})
+        assert refused.status_code == 422
+        assert refused.json()["detail"]["code"] == "INVALID_PACK_ITEM"
+        alice_pack = create_pack(alice, alice_ids[1:], "Alice pack")
+        added = mutate(alice, "POST", f"/api/packs/{alice_pack['id']}/items", {"post_id": secret})
+        assert added.status_code == 200, added.text
+
+
+def test_unlisted_pack_made_public_drops_private_members(app):
+    with TestClient(app) as alice, TestClient(app) as anon:
+        owner = register(alice, "alice", "alice@example.com")
+        post_ids = create_posts(app, owner["id"], 4)
+        set_private(alice, post_ids[2])
+        set_private(alice, post_ids[3])
+        pack = publish_pack(alice, post_ids, "unlisted")
+        assert pack["playable_count"] == 4
+        patched = mutate(
+            alice, "PATCH", f"/api/packs/{pack['id']}", {"visibility": "public", "expected_revision": pack["revision"]}
+        )
+        assert patched.status_code == 200, patched.text
+        body = patched.json()["pack"]
+        assert body["playable_count"] == 2 and body["needs_repair"] is True
+        listed = anon.get("/api/packs").json()["items"]
+        assert pack["id"] not in {row["id"] for row in listed}

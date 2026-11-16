@@ -102,6 +102,10 @@ def active_item(item: ReelPackItem) -> bool:
         and post.status == "published"
         and post.owner
         and post.owner.status == "active"
+        and (
+            post.visibility != "private"
+            or (item.pack.visibility == "unlisted" and post.owner_id == item.pack.owner_id)
+        )
     )
 
 
@@ -222,6 +226,7 @@ def validate_posts(db: Session, owner_id: str, post_ids: list[str]) -> list[Post
         or by_id[post_id].status != "published"
         or not by_id[post_id].owner
         or by_id[post_id].owner.status != "active"
+        or (by_id[post_id].visibility == "private" and by_id[post_id].owner_id != owner_id)
         or users_blocked(db, owner_id, by_id[post_id].owner_id)
     ]
     if invalid:
