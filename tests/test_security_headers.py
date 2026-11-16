@@ -153,6 +153,11 @@ def test_policy_contents(client, monkeypatch):
     assert "'strict-dynamic'" in directives["script-src"]
     assert "'unsafe-inline'" not in directives["script-src"]
     assert "https://fonts.googleapis.com" in directives["style-src"]
+    # <style> elements need the nonce; style="" attributes stay allowed.
+    assert "'unsafe-inline'" not in directives["style-src-elem"]
+    assert any(v.startswith("'nonce-") for v in directives["style-src-elem"])
+    assert "https://fonts.googleapis.com" in directives["style-src-elem"]
+    assert directives["style-src-attr"] == ["'unsafe-inline'"]
     assert "https://fonts.gstatic.com" in directives["font-src"]
     for name in ("img-src", "media-src", "connect-src"):
         assert "https://media.example.com" in directives[name]
@@ -236,6 +241,13 @@ def test_vendored_player_scripts_are_linked_and_long_cached(client):
     assert client.get("/api/reels/player-script/reels.html").status_code == 404
 
 
+def test_reels_player_style_is_nonced(client, monkeypatch):
+    monkeypatch.setenv("SX_CSP_MODE", "report")
+    response = client.get("/api/reels/player")
+    nonce = _header_nonce(response)
+    assert response.text.count("<style") == response.text.count(f'<style nonce="{nonce}"') >= 1
+
+
 def test_compare_player_may_be_framed_same_origin(client, monkeypatch):
     monkeypatch.setenv("SX_CSP_MODE", "report")
     response = client.get("/api/compare/player", params={"pair": "missing"})
@@ -249,6 +261,8 @@ def test_nonce_html_skips_already_nonced_tags():
     assert '<script nonce="keep">' in out
     assert '<script nonce="n1" src="a.js">' in out
     assert out.count('nonce="n1"') == 2  # the uppercase tag + the meta tag
+    styled = security_headers.nonce_html('<style>a{}</style><style nonce="keep">b{}</style>', "n1")
+    assert styled == '<style nonce="n1">a{}</style><style nonce="keep">b{}</style>'
     assert security_headers.nonce_html(html, None) == html
 
 

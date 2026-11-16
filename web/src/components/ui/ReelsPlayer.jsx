@@ -142,6 +142,11 @@ export default function ReelsPlayer({
 
     mount.innerHTML = '';
     const style = document.createElement('style');
+    // style-src-elem applies a <style> only with the page nonce. Read it the way
+    // Vite's preload helper does: browsers hide the attribute, keep the property.
+    const nonceMeta = document.querySelector('meta[property="csp-nonce"]');
+    const nonce = nonceMeta?.nonce || nonceMeta?.getAttribute('nonce');
+    if (nonce) style.setAttribute('nonce', nonce);
     style.textContent = data.css;
     mount.appendChild(style);
 
