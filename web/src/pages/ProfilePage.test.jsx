@@ -109,3 +109,53 @@ describe('ProfilePage followers dialog', () => {
     expect(stat).toHaveFocus();
   });
 });
+
+describe('ProfilePage private posts', () => {
+  const post = {
+    id: 'post-1', path: 'a.mp4', url: '/media/a.mp4', media_type: 'video', title: 'Reel A',
+    caption: '', tags: [], visibility: 'public', viewer_state: { can_edit: true },
+  };
+
+  function mockOwnProfile(items) {
+    mocks.api.get.mockImplementation(async (url) => {
+      if (url === '/api/users/maker') return { user: { ...profile, is_me: true, post_count: items.length } };
+      if (url === '/api/users/maker/posts') return { items, next_cursor: null };
+      return { items: [], next_cursor: null };
+    });
+  }
+
+  beforeEach(() => {
+    Object.values(mocks.api).forEach((fn) => fn.mockReset());
+    mocks.auth.user = { id: 'user-9', username: 'maker' };
+    vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('makes a public post private from EDIT POST and badges the tile', async () => {
+    mockOwnProfile([post]);
+    mocks.api.patch.mockResolvedValue({ post: { ...post, visibility: 'private' } });
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Reel A' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit post' });
+    const toggle = within(dialog).getByLabelText('PRIVATE POST');
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    expect(within(dialog).getByText('Only you and anyone with the link can see it.')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'SAVE POST' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mocks.api.patch).toHaveBeenCalledWith('/api/posts/post-1', expect.objectContaining({ visibility: 'private' }));
+    expect(document.querySelector('.sx-explore-kind')).toHaveTextContent('PRIVATE');
+  });
+
+  it('opens EDIT on a private post with the toggle ticked and the help line shown', async () => {
+    mockOwnProfile([{ ...post, visibility: 'private' }]);
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Reel A' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit post' });
+    expect(within(dialog).getByLabelText('PRIVATE POST').checked).toBe(true);
+    expect(within(dialog).getByText('Only you and anyone with the link can see it.')).toBeInTheDocument();
+  });
+});
