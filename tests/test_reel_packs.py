@@ -1013,12 +1013,27 @@ def test_private_member_is_unavailable_in_a_public_pack(app):
         post_ids = create_posts(app, owner["id"], 4)
         pack = publish_pack(alice, post_ids, "public")
         set_private(alice, post_ids[0])
-        for viewer in (anon, bob):
+        for viewer in (anon, bob, alice):
             body = viewer.get(f"/api/packs/{pack['id']}").json()["pack"]
             hidden = next(row for row in body["items"] if row["post"] is None)
             assert hidden["available"] is False
             assert post_ids[0] not in {card["id"] for card in body["cover_items"]}
             assert body["playable_count"] == 3
+
+
+def test_pack_player_leaves_out_a_private_members_post_id(app):
+    with TestClient(app) as alice, TestClient(app) as bob, TestClient(app) as anon:
+        owner = register(alice, "alice", "alice@example.com")
+        register(bob, "bob", "bob@example.com")
+        post_ids = create_posts(app, owner["id"], 4)
+        pack = publish_pack(alice, post_ids, "public")
+        set_private(alice, post_ids[0])
+        for viewer in (anon, bob):
+            for route in ("/api/reels/player-inline", "/api/reels/player"):
+                response = viewer.get(route, params={"pack_id": pack["id"]})
+                assert response.status_code == 200, response.text
+                assert post_ids[1] in response.text
+                assert post_ids[0] not in response.text
 
 
 def test_unlisted_pack_link_shows_its_owners_private_posts(app):
@@ -1063,6 +1078,7 @@ def test_only_the_owner_adds_a_private_post_to_a_pack(app):
         refused = mutate(bob, "POST", f"/api/packs/{bob_pack['id']}/items", {"post_id": secret})
         assert refused.status_code == 422
         assert refused.json()["detail"]["code"] == "INVALID_PACK_ITEM"
+        assert refused.json()["detail"]["message"] == "Packs may only contain reels that are currently available to you."
         alice_pack = create_pack(alice, alice_ids[1:], "Alice pack")
         added = mutate(alice, "POST", f"/api/packs/{alice_pack['id']}/items", {"post_id": secret})
         assert added.status_code == 200, added.text

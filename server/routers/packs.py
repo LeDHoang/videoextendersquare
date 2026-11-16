@@ -233,7 +233,7 @@ def validate_posts(db: Session, owner_id: str, post_ids: list[str]) -> list[Post
         fail(
             422,
             "INVALID_PACK_ITEM",
-            "Packs may only contain public reels that are currently available.",
+            "Packs may only contain reels that are currently available to you.",
             "post_ids",
         )
     return [by_id[post_id] for post_id in normalized]
