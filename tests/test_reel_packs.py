@@ -1084,3 +1084,20 @@ def test_unlisted_pack_made_public_drops_private_members(app):
         assert body["playable_count"] == 2 and body["needs_repair"] is True
         listed = anon.get("/api/packs").json()["items"]
         assert pack["id"] not in {row["id"] for row in listed}
+
+
+def test_private_cover_id_stays_hidden_except_from_its_owner(app):
+    with TestClient(app) as alice, TestClient(app) as bob, TestClient(app) as anon:
+        owner = register(alice, "alice", "alice@example.com")
+        register(bob, "bob", "bob@example.com")
+        post_ids = create_posts(app, owner["id"], 7)
+        pack = publish_pack(alice, post_ids[:4], "public")
+        set_private(alice, post_ids[0])
+        assert anon.get(f"/api/packs/{pack['id']}").json()["pack"]["cover_post_id"] is None
+        listed = anon.get("/api/packs").json()["items"]
+        assert next(row for row in listed if row["id"] == pack["id"])["cover_post_id"] is None
+        assert bob.get(f"/api/packs/{pack['id']}").json()["pack"]["cover_post_id"] is None
+        assert alice.get(f"/api/packs/{pack['id']}").json()["pack"]["cover_post_id"] == post_ids[0]
+        set_private(alice, post_ids[4])
+        unlisted = publish_pack(alice, post_ids[4:7], "unlisted")
+        assert anon.get(f"/api/packs/{unlisted['id']}").json()["pack"]["cover_post_id"] == post_ids[4]
