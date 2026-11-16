@@ -3103,9 +3103,32 @@ def spatialize_status(
     }
 
 
+# Characters that can end or confuse an inline script when they sit in data:
+# "<" (a closing tag or an HTML comment), ">" and "&". json.dumps already
+# escapes everything outside ASCII, the two line separators included.
+_SCRIPT_UNSAFE = str.maketrans({"<": "\\u003c", ">": "\\u003e", "&": "\\u0026"})
+
+
 def _json_for_script(payload) -> str:
     """JSON-serialize *payload* for embedding inside an inline <script> tag."""
-    return json.dumps(payload).replace("</", "<\\/")
+    return json.dumps(payload).translate(_SCRIPT_UNSAFE)
+
+
+_PLAYER_DATA_SLOTS = re.compile(r"__VIDEO_DATA_JSON__|__FEED_STATE_JSON__|loadVideo\(0\);")
+
+
+def _fill_player_data(text: str, payload, feed_data, start_idx: int) -> str:
+    """Put the feed data and the start index into player script text.
+
+    One pass, so text inside the data is never substituted again: a title
+    that holds a placeholder name stays a title.
+    """
+    values = {
+        "__VIDEO_DATA_JSON__": _json_for_script(payload),
+        "__FEED_STATE_JSON__": _json_for_script(feed_data),
+        "loadVideo(0);": f"loadVideo({start_idx});",
+    }
+    return _PLAYER_DATA_SLOTS.sub(lambda match: values[match.group(0)], text)
 
 
 _player_template_cache: dict = {"key": None, "html": None}
@@ -3204,10 +3227,7 @@ def reels_player(
     # CSP nonce on every <script> tag (server/security_headers.py).
     html = nonce_request_html(request, html)
 
-    html = html.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
-    html = html.replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
-    html = html.replace("loadVideo(0);", f"loadVideo(__SX_START_INDEX__);")
-    html = html.replace("__SX_START_INDEX__", str(start_idx))
+    html = _fill_player_data(html, payload, feed_data, start_idx)
     headers = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Vary": "Accept-Encoding"}
     content = html.encode("utf-8")
     # ~400 KB of HTML crosses the tunnel to Cloudflare; gzip sends about a fifth of it.
@@ -3524,16 +3544,12 @@ def reels_player_inline(
             if url:
                 scripts.append({"src": url, "lazy": True} if name in LAZY_PLAYER_SCRIPTS else {"src": url})
         else:
-            scripts.append(
-                tag.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
-                .replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
-            )
+            # Also sets the deep-link start index (Explore → Reels): the
+            # hard-coded initial loadVideo(0) becomes the clamped start offset.
+            scripts.append(_fill_player_data(tag, payload, feed_data, start_idx))
 
     if scripts:
         init = scripts[-1]
-        # Deep-link start index (Explore → Reels): replace the hard-coded
-        # initial loadVideo(0) with the clamped start offset.
-        init = init.replace("loadVideo(0);", f"loadVideo({start_idx});")
         init += (
             "\nwindow.__sxReelsDomCleanup = window.__sxReelsCleanup;\n"
             "window.__sxReelsCleanup = function () {\n"
