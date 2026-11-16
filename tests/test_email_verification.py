@@ -206,6 +206,32 @@ def test_login_rate_limit_switch(env, monkeypatch):
     assert _login(client, "nobody", "wrong").status_code == 401
 
 
+def _login_from(client, ip, password="wrong"):
+    return client.post(
+        "/api/auth/login",
+        json={"identifier": "newbie", "password": password},
+        headers={"CF-Connecting-IP": ip},
+    )
+
+
+def test_failed_logins_from_one_ip_do_not_lock_out_the_owner(env, monkeypatch):
+    client, _Session, _sent = env
+    monkeypatch.setattr(auth, "TRUST_PROXY_HEADERS", True)
+    assert _verify(client, _register(client).json()["debug_token"]).status_code == 200
+    client.cookies.clear()
+    codes = [_login_from(client, "203.0.113.7").status_code for _ in range(11)]
+    assert codes == [401] * 10 + [429]
+    assert _login_from(client, "198.51.100.2", PASSWORD).status_code == 200
+
+
+def test_account_limit_still_holds_across_many_ips(env, monkeypatch):
+    client, _Session, _sent = env
+    monkeypatch.setattr(auth, "TRUST_PROXY_HEADERS", True)
+    for n in range(5):
+        assert [_login_from(client, f"203.0.113.{n}").status_code for _ in range(10)] == [401] * 10
+    assert _login_from(client, "203.0.113.99").status_code == 429
+
+
 def test_resend_answers_the_same_for_unknown_email(env):
     client, _Session, sent = env
     _register(client)

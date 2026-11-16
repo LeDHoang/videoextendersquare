@@ -697,6 +697,7 @@ def resend_verification(
 
 LOGIN_FAILURES_BEFORE_BOT_CHECK = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+LOGIN_ACCOUNT_LIMIT_ALL_IPS = 50
 
 
 @router.post("/api/auth/login")
@@ -713,7 +714,11 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         # Before the per-account limit, so tokenless bots cannot lock someone out.
         verify_turnstile(req.turnstile_token, identity, "login")
     if settings.login_rate_limit_enabled():
-        rate_limiter.check(db, f"login-account:{identifier}", 10, 15 * 60)
+        # Per account and IP, so one address cannot lock the owner out. The looser
+        # account-wide limit still caps guessing spread over many IPs. Pair first:
+        # a request it refuses never counts toward the account-wide one.
+        rate_limiter.check(db, f"login-account-ip:{identifier}:{identity}", 10, 15 * 60)
+        rate_limiter.check(db, f"login-account:{identifier}", LOGIN_ACCOUNT_LIMIT_ALL_IPS, 15 * 60)
     user = db.query(User).filter(
         User.status.in_(("active", "suspended")),
         User.account_type == "real",
