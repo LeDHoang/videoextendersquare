@@ -20,7 +20,7 @@ Ranked view of what is still open in this file; the items themselves, with detai
   - [x] In Resend, check click and open tracking are off on `mail.echomultiverse.com` (tracking rewrites the reset and verification links), and turn on 2FA for the Resend account. Done 2026-11-14, by the operator (not checked by me).
   - [ ] After the first DMARC reports (24-48 h) show SPF and DKIM passing for Resend and Workspace, optionally move `p=none` to `p=quarantine`.
 - Takedown path on production: delete through the deployed app on real R2; moderation removal and account deletion making objects 404; one purge-by-URL takedown rehearsal (CDN copies can be served up to 1 day after delete); the moderation drill repeated on the production stack.
-- Private posts (new 2026-11-16, high priority; tracked in `docs/todolist.md` → "Still open"): a creator can publish a post as private or turn a published post private. A private post is visible to its creator and through its direct link only. Posts have no visibility field today; only Reel Packs have public and unlisted.
+- Private posts (new 2026-11-16, high priority): **done 2026-11-17** on branch `private-posts`, schema `20261116_0027`, not yet deployed. Details and what was not checked (the migration on Postgres among them) are in `docs/todolist.md` → "Done".
 
 **2. Not yet verified on production:**
 - The two-browser pass with two accounts, the logged-out share link, and the full smoke list (Functional section; `docs/manual-beta-checks.md`).
@@ -499,7 +499,7 @@ Do not use this procedure for a blank database.
 - [ ] Confirm the old social tables exist and `alembic_version` does not.
 - [ ] Back up `data/echo.db`.
 - [ ] Run `.venv/bin/python -m alembic stamp 20260910_0001`.
-- [ ] Run `make migrate` and confirm the final revision is **`20261101_0020`**.
+- [ ] Run `make migrate` and confirm the final revision is **`20261116_0027`**.
 
 ## Suggested production environment
 
@@ -742,7 +742,7 @@ Keep `SX_REGISTRATION_ENABLED=0` for an invite-only deployment. Email verificati
 - Recommendation concurrency regression tests: **passing** — `test_concurrent_page_materialization_replays_winner` + `test_concurrent_affinity_upsert_dedupes` (4 passed, ~1.5s, SQLite fixtures; Postgres re-run is a listed gate above). The 2026-09-12 "failed with HTTP 500s" record below is **historical** — the fix (winner-replay on `uq_recommendation_request_session_page`) landed and is dual-dialect.
 - Staged-upload/job ownership tests: **passing** (`tests/test_cloud_routes.py` — owner-private staging, owned job status/download). Publication-path ownership was open at audit time — **fixed 2026-09-20** (see verification entry above).
 - `.venv` recreated (CPython 3.14.6); the 2026-09-12 ".venv absent" note is resolved.
-- Current schema head: `20261101_0020` (`EXPECTED_SCHEMA_REVISION`, `server/social/database.py:14`).
+- Current schema head: `20261116_0027` (`EXPECTED_SCHEMA_REVISION`, `server/social/database.py:14`).
 - Build fixes landed 2026-09-19: `.dockerignore` rewritten (`.venv/` typo fixed; `data/` + `logs/` + model caches excluded — previously baked the dev DB into the image); `vapoursynth==78` scoped off Linux (no manylinux wheel — previously broke `docker build`).
 - WebXR engine: 43/43 node tests, vite build clean (see `docs/threejs-vr-implementation-plan.md` §7).
 
