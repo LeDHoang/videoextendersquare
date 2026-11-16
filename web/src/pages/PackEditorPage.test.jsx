@@ -94,4 +94,39 @@ describe('PackEditorPage', () => {
     expect(screen.getAllByRole('button').filter((button) => button.textContent.includes('Still 3'))).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'LOAD MORE' })).toBeNull();
   });
+
+  it('drops a cover that is not among the loaded members before saving', async () => {
+    // The cover post went private: the owner still gets cover_post_id, but its member row has no post.
+    const detail = {
+      pack: {
+        id: 'pack-5',
+        revision: 3,
+        title: 'Old pack',
+        visibility: 'public',
+        cover_post_id: 'post-1',
+        viewer_state: { can_edit: true },
+        items: [
+          { id: 'item-1', post: null, available: false },
+          { id: 'item-2', post: { id: 'post-2', title: 'Reel 2' } },
+          { id: 'item-3', post: { id: 'post-3', title: 'Reel 3' } },
+        ],
+      },
+    };
+    mocks.api.get.mockImplementation(async (path) => (path === '/api/packs/pack-5' ? detail : { videos: [] }));
+    mocks.api.patch.mockResolvedValue({ pack: { ...detail.pack, revision: 4 } });
+    render(
+      <MemoryRouter initialEntries={['/packs/pack-5/edit']}>
+        <Routes>
+          <Route path="/packs/:packId/edit" element={<PackEditorPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByRole('textbox')[0]).toHaveValue('Old pack'));
+    fireEvent.click(screen.getByRole('button', { name: 'SAVE DRAFT' }));
+    await waitFor(() => expect(mocks.api.patch).toHaveBeenCalled());
+    const [path, body] = mocks.api.patch.mock.calls[0];
+    expect(path).toBe('/api/packs/pack-5');
+    expect(body.post_ids).toEqual(['post-2', 'post-3']);
+    expect(body.cover_post_id).toBeNull();
+  });
 });

@@ -67,7 +67,8 @@ export default function PackEditorPage() {
       if (!value) throw new Error('This Reel Pack is unavailable.');
       if (!value.viewer_state?.can_edit) throw new Error('Only the creator can edit this Reel Pack.');
       setPack(value);
-      setSelected(value.items.filter((item) => item.post).map((item) => item.post));
+      const members = value.items.filter((item) => item.post).map((item) => item.post);
+      setSelected(members);
       setForm({
         title: value.title || '',
         description: value.description || '',
@@ -75,7 +76,8 @@ export default function PackEditorPage() {
         tags: (value.tags || []).join(', '),
         city: value.location?.city || '',
         country: value.location?.country || '',
-        coverPostId: value.cover_post_id || '',
+        // A cover whose post is no longer available (e.g. switched private) is not a loaded member; drop it.
+        coverPostId: members.some((post) => post.id === value.cover_post_id) ? value.cover_post_id : '',
       });
     }).catch((requestError) => {
       if (alive) setError(requestError.message || 'Could not load the Reel Pack editor.');
