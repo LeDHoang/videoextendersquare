@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { BlockingBanner, Hero } from '../components/ui/primitives.jsx';
+import { BlockingBanner, Hero, probeLine } from '../components/ui/primitives.jsx';
 import { Button, Segmented, Tabs } from '../components/ui/controls.jsx';
 import Dialog from '../components/ui/Dialog.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
@@ -420,7 +420,7 @@ export default function UploadPage() {
       </div>
 
       {blocked.length ? (
-        <BlockingBanner title="ENVIRONMENT NOT READY" lines={blocked.map((p) => `${p.label}: ${p.detail}. ${p.fix}`)} />
+        <BlockingBanner title="ENVIRONMENT NOT READY" lines={blocked.map(probeLine)} />
       ) : null}
       {pickError ? (
         <div className="sx-error-box" role="alert">

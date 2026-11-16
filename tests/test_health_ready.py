@@ -141,7 +141,37 @@ def test_fal_key_suffix_hidden_in_production(tmp_path, stub_probes, monkeypatch)
     client = TestClient(application)
     assert "1234" in client.get("/api/health").json()["fal_key"]["detail"]
     monkeypatch.setenv("SX_ENV", "production")
-    assert client.get("/api/health").json()["fal_key"]["detail"] == "set"
+    assert "1234" not in client.get("/api/health").text
+    engine.dispose()
+
+
+def test_production_health_returns_probe_status_only(tmp_path, stub_probes, monkeypatch):
+    stub = SimpleNamespace(id="ffmpeg", label="ffmpeg", ok=False, severity="error", detail="/usr/bin/ffmpeg 6.1", fix="apt install ffmpeg")
+    monkeypatch.setattr(health._probes, "build_probes", lambda: {"ffmpeg": stub})
+    monkeypatch.setenv("SX_ENV", "production")
+    application, engine = _make_app(tmp_path, revision=EXPECTED_SCHEMA_REVISION)
+    body = TestClient(application).get("/api/health").json()
+    assert body == {"probes": {"ffmpeg": {"id": "ffmpeg", "label": "ffmpeg", "ok": False, "severity": "error"}}}
+    engine.dispose()
+
+
+def test_production_readyz_returns_status_only(tmp_path, stub_probes, monkeypatch, caplog):
+    monkeypatch.setenv("SX_ENV", "production")
+    application, engine = _make_app(tmp_path, revision="20200101_0001")
+    with caplog.at_level("WARNING"):
+        response = TestClient(application).get("/api/readyz")
+    assert response.status_code == 503
+    assert response.json() == {"ok": False}
+    assert "schema" in caplog.text
+    engine.dispose()
+
+
+def test_production_readyz_ok_body(tmp_path, stub_probes, monkeypatch):
+    monkeypatch.setenv("SX_ENV", "production")
+    application, engine = _make_app(tmp_path, revision=EXPECTED_SCHEMA_REVISION)
+    response = TestClient(application).get("/api/readyz")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
     engine.dispose()
 
 

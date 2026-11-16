@@ -5,6 +5,7 @@ of truth with the Streamlit fallback) but returns structured JSON instead of
 Streamlit widgets.
 """
 
+import logging
 import os
 import shutil
 import tempfile
@@ -25,6 +26,7 @@ from server.social.auth import AuthContext, require_admin
 from server.social.database import EXPECTED_SCHEMA_REVISION, get_db
 
 router = APIRouter(tags=["health"])
+logger = logging.getLogger(__name__)
 
 # Cache probes in-process (same idea as st.cache_resource) but with a TTL.
 # Probes spawn ffmpeg smoke-tests (up to seconds each), so re-probing on every
@@ -116,10 +118,17 @@ def get_health(request: Request, refresh: bool = False, db: Session = Depends(ge
     with _cache_lock:
         cached_probes, cached_at = _cached_probes, _cached_at
 
-    fal = _probe_to_dict(_probes.fal_key_probe())
     if is_production():
-        # Never echo any part of the platform key from a public endpoint.
-        fal["detail"] = "set" if fal["ok"] else "not set"
+        # Public endpoint: status only. Paths, versions, fixes, the platform key and
+        # host memory stay off it; admins read the server through /api/ops/*.
+        return {
+            "probes": {
+                key: {field: probe[field] for field in ("id", "label", "ok", "severity")}
+                for key, probe in (cached_probes or {}).items()
+            }
+        }
+
+    fal = _probe_to_dict(_probes.fal_key_probe())
 
     return {
         "probes": cached_probes,
@@ -185,7 +194,13 @@ def readyz(db: Session = Depends(get_db)):
     disks = disk_status()
     checks["disk"] = {"ok": all(d["ok"] for d in disks), "volumes": disks}
     ok = all(c["ok"] for c in checks.values())
-    return JSONResponse({"ok": ok, "checks": checks}, status_code=200 if ok else 503)
+    status_code = 200 if ok else 503
+    if is_production():
+        # Public endpoint: status only. The failing checks go to the server log.
+        if not ok:
+            logger.warning("readyz failing: %s", {name: check for name, check in checks.items() if not check["ok"]})
+        return JSONResponse({"ok": ok}, status_code=status_code)
+    return JSONResponse({"ok": ok, "checks": checks}, status_code=status_code)
 
 
 @router.get("/api/ops/metrics")

@@ -342,6 +342,15 @@ describe('UploadPage — video extender parity', () => {
     expect(renderButton()).toHaveAccessibleDescription('STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI');
   });
 
+  it('names a missing tool without detail when production sends status only', async () => {
+    mocks.probes = { ...ALL_PROBES, ffmpeg: { id: 'ffmpeg', label: 'ffmpeg', ok: false, severity: 'error' } };
+    renderPage();
+    await pick(['portrait.mp4']);
+    const banner = await screen.findByRole('alert');
+    expect(banner).toHaveTextContent('ffmpeg is not available on this server.');
+    expect(banner).not.toHaveTextContent('undefined');
+  });
+
   it('gates STUDIO when the ffms2 source plugin does not load', async () => {
     mocks.probes = { ...ALL_PROBES, ffms2: { ok: false } };
     renderPage();

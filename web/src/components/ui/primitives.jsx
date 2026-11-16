@@ -102,6 +102,11 @@ export function EmptyState({ title, text, hint = '', children }) {
   );
 }
 
+// Production /api/health sends each probe's status only, without detail or fix.
+export function probeLine(p) {
+  return p.detail ? `${p.label}: ${p.detail}. ${p.fix}` : `${p.label} is not available on this server.`;
+}
+
 export function BlockingBanner({ title, lines = [] }) {
   return (
     <div className="sx-blocking-banner" role="alert">

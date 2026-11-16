@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader } from '../components/ui/primitives.jsx';
+import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, probeLine } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
@@ -208,7 +208,7 @@ export default function ImagePage() {
       {blocked.length ? (
         <BlockingBanner
           title="ENVIRONMENT NOT READY"
-          lines={blocked.map((p) => `${p.label}: ${p.detail}. ${p.fix}`)}
+          lines={blocked.map(probeLine)}
         />
       ) : null}
 
