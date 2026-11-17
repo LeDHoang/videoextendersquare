@@ -67,6 +67,7 @@ def test_sit_env_pins_spec_values():
         "SX_DISK_MIN_FREE_GB": "10",
         "SX_SMTP_HOST": "mailpit",
         "SX_SMTP_PORT": "1025",
+        "SX_REGISTRATION_ENABLED": "1",
     }
     for key, value in expected.items():
         assert env.get(key) == value, key

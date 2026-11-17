@@ -278,4 +278,5 @@ jobs:
         run: |
           node scripts/verify_staging.cjs \
             --app https://sit.echomultiverse.com --media https://sit-media.echomultiverse.com \
-            --email "$SIT_PROBE_EMAIL" --peer "$SIT_PROBE_PEER" --password "$SIT_PROBE_PASSWORD"
+            --email "$SIT_PROBE_EMAIL" --peer "$SIT_PROBE_PEER" --password "$SIT_PROBE_PASSWORD" \
+            --open-signup

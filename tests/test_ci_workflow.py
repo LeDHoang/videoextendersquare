@@ -73,7 +73,7 @@ def test_sit_deploy_streams_deploy_sh_as_echosit_on_dev_and_probes():
     for needed in ("DEPLOY_BRANCH=dev", "docker.sock", "StrictHostKeyChecking=yes", "deploy/deploy.sh",
                    "grep -q '^deployed ' deploy.log", "scripts/verify_staging.cjs",
                    "https://sit.echomultiverse.com", "https://sit-media.echomultiverse.com",
-                   "SIT_PROBE_PASSWORD"):
+                   "SIT_PROBE_PASSWORD", "--open-signup"):
         assert needed in text, needed
 
 

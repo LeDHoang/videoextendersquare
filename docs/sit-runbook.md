@@ -236,7 +236,7 @@ ssh -L 8025:127.0.0.1:8025 echosit@<vps>     # leave it open
 node scripts/verify_staging.cjs \
   --app https://sit.echomultiverse.com --media https://sit-media.echomultiverse.com \
   --email <probe-email> --peer <probe-peer-email> --password <probe-password> \
-  --mailpit http://127.0.0.1:8025
+  --mailpit http://127.0.0.1:8025 --open-signup
 ```
 
 Both addresses must be in `SX_REGISTRATION_ALLOWLIST`. Store them, and the password, as `SIT_PROBE_EMAIL`, `SIT_PROBE_PEER` and `SIT_PROBE_PASSWORD` in the `sit` environment. From then on, CI runs only log in.

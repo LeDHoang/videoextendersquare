@@ -7,6 +7,9 @@
 //   node scripts/verify_staging.cjs
 //   node scripts/verify_staging.cjs --app https://localhost:8443 --media https://localhost:9443
 //
+// --open-signup: the stack runs with registration open (SIT, as production
+// does), so the sign-up check expects the invite gate not to refuse.
+//
 // Backup/restore drill (docs/local-staging.md): seed before the backup, check
 // after the restore that the DM still decrypts and the post media still serves.
 //
@@ -36,6 +39,7 @@ const PASSWORD = flag('--password', 'staging-only-password-1');
 const PEER = flag('--peer', 'bob@example.com');
 const DRILL = flag('--drill', '');
 const TIME_PUBLISH = flag('--time-publish', '');
+const OPEN_SIGNUP = args.includes('--open-signup');
 // Inline publish must finish well inside Cloudflare's 100 s origin timeout;
 // above this, move the preview encode to a background job (docs/to-beta.md).
 const PUBLISH_BUDGET_S = 60;
@@ -276,13 +280,20 @@ async function main() {
   anonForm.append('file', new Blob([tinyPng()], { type: 'image/png' }), 'anon.png');
   check('anonymous upload refused (401)', (await call('/api/image/upload', { method: 'POST', form: anonForm })).status === 401);
 
-  // ── Invite-only sign-up ──
+  // ── Sign-up gate ──
   jar.clear();
   const stranger = await call('/api/auth/register', {
     method: 'POST',
     json: { email: 'stranger@example.com', username: 'stranger', password: PASSWORD, accept_terms: true, display_name: 'stranger' },
   });
-  check('uninvited sign-up refused', stranger.status >= 400 && stranger.status < 500, `HTTP ${stranger.status}`);
+  if (OPEN_SIGNUP) {
+    // 202 is a new sign-up. A repeat run meets its own earlier one: 409 (name taken) or 429 (limit).
+    const code = ((await stranger.json().catch(() => ({}))).detail || {}).code;
+    check('open sign-up passes the invite gate', stranger.status < 500 && code !== 'REGISTRATION_DISABLED',
+      `HTTP ${stranger.status}`);
+  } else {
+    check('uninvited sign-up refused', stranger.status >= 400 && stranger.status < 500, `HTTP ${stranger.status}`);
+  }
   jar.clear();
 
   const auth = await signIn(EMAIL);
