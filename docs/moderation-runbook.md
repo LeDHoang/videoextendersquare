@@ -277,6 +277,12 @@ Gaps found:
 - **Open:** no staff email for the appeal. The app logged `SX_SUPPORT_EMAIL is unset`
   (`docs/to-beta.md` group 1).
 - **Open (owner request):** the requester gets no automatic receipt (`docs/to-beta.md`
-  group 1).
-- Not checked: `reinstate_user` from a report (the admin reinstate was used), the alert
-  watchdog, and the log-bucket source copy.
+  group 1). Built on `dev` the same day, not deployed.
+
+Checked later the same day:
+
+| Step | Result |
+|---|---|
+| `reinstate_user` from a report | echodev reported test22, claimed it and chose `suspend_user` (profile API 404), then `reinstate_user` on the same report (profile API 200). The report is `resolved`, its resolution lists both notes, and the audit has `user.suspend` and `user.reinstate` with the report id. The suspension signed test22 out everywhere. |
+| Log-bucket source copy | Both test24 posts still have a trace (`GET /api/admin/upload-logs/<post_id>` 200) and a full-size `files/<trace_id>/source.png` (staff link 206), after PURGE MEDIA and account deletion. The trace keeps the user id and the filename. Left in place; `docs/to-beta.md` group 1. |
+| Alert watchdog | Runs every 60 s; quiet today because nothing crossed a limit (0 open reports, 0 open support requests). It did fire on production before: 8 `ALERT db_pool` events reached Sentry (last 2026-11-12). **Gap:** all alert keys share one Sentry issue and the email rule fires only on a new issue, so no alert has emailed anyone since 2026-11-01 (`docs/to-beta.md` group 1). No alert was forced. |

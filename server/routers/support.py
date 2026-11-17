@@ -12,7 +12,7 @@ import uuid
 from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
@@ -31,7 +31,7 @@ from server.social.auth import (
     validate_origin,
 )
 from server.social.database import get_db
-from server.social.email import send_support_notification
+from server.social.email import send_support_notification, send_support_receipt
 from server.social.models import Post, ReelPack, Report, SupportRequest, User, utcnow
 from server.social.staff import record_action
 from server.social.turnstile import verify_turnstile
@@ -42,6 +42,8 @@ SUPPORT_CATEGORIES = ("appeal", "copyright", "privacy", "account", "bug", "repor
 SUPPORT_STATUSES = ("open", "in_progress", "closed")
 IP_LIMIT_PER_HOUR = 5
 USER_LIMIT_PER_HOUR = 10
+# Receipts to one address, from any number of requests: caps mail to a stranger's inbox.
+RECEIPT_LIMIT_PER_HOUR = 3
 
 
 class SupportCreateRequest(BaseModel):
@@ -87,6 +89,15 @@ def parse_target_link(db: Session, link: str) -> tuple[str, str] | None:
         if user:
             return "user", user.id
     return None
+
+
+def receipt_allowed(db: Session, recipient: str) -> bool:
+    """A receipt over the per-address limit is skipped; the request itself still succeeds."""
+    try:
+        rate_limiter.check(db, f"support-receipt:{keyed_hash(recipient)}", RECEIPT_LIMIT_PER_HOUR, 60 * 60)
+    except HTTPException:
+        return False
+    return True
 
 
 def report_reason(value: str) -> str:
@@ -181,6 +192,9 @@ def create_support_request(
     db.add(row)
     db.commit()
     background_tasks.add_task(send_support_notification, row.id, row.category, row.subject)
+    recipient = email or (normalize_email(context.user.email) if context and context.user.email else None)
+    if recipient and receipt_allowed(db, recipient):
+        background_tasks.add_task(send_support_receipt, recipient, row.id, row.category)
     return {"id": row.id, "status": row.status, "report_id": report_id}
 
 

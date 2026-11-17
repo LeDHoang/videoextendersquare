@@ -40,6 +40,8 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SX_MODERATOR_USERS", "mod_user@example.com")
     sent: list[tuple] = []
     monkeypatch.setattr(support, "send_support_notification", lambda *args: sent.append(args))
+    receipts: list[tuple] = []
+    monkeypatch.setattr(support, "send_support_receipt", lambda *args: receipts.append(args))
     engine = sa.create_engine(
         "sqlite:///" + str(tmp_path / "support.db"), connect_args={"check_same_thread": False}
     )
@@ -57,6 +59,7 @@ def app(tmp_path, monkeypatch):
     application.dependency_overrides[get_db] = override_get_db
     application.state.Session = Session
     application.state.sent = sent
+    application.state.receipts = receipts
     yield application
     engine.dispose()
 
@@ -332,6 +335,60 @@ def test_support_notification_failure_is_logged_not_raised(monkeypatch, caplog):
     monkeypatch.setenv("SX_SUPPORT_EMAIL", "support@echo.example")
     assert email_module.send_support_notification("req-2", "bug", "x") is False
     assert "req-2" in caplog.text
+
+
+def test_receipt_goes_to_the_given_address_or_the_account(app):
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/support", json={"category": "appeal", "email": "Out@Example.com", "body": "please"}
+        )
+        assert response.status_code == 202
+        assert app.state.receipts == [("out@example.com", response.json()["id"], "appeal")]
+
+        register(client, "receipt_user")
+        signed_in = mutate(client, "POST", "/api/support", {"category": "bug", "body": "broken"})
+        assert signed_in.status_code == 202, signed_in.text
+    assert app.state.receipts[1] == ("receipt_user@example.com", signed_in.json()["id"], "bug")
+
+
+def test_honeypot_sends_no_receipt(app):
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/support", json={"category": "other", "email": "bot@example.com", "body": "x", "website": "spam"}
+        )
+        assert response.status_code == 202
+    assert app.state.receipts == []
+
+
+def test_receipts_per_address_are_capped_without_failing_the_request(app, monkeypatch):
+    monkeypatch.setattr(support, "IP_LIMIT_PER_HOUR", 100)
+    with TestClient(app) as client:
+        for _ in range(support.RECEIPT_LIMIT_PER_HOUR + 2):
+            response = client.post(
+                "/api/support", json={"category": "other", "email": "victim@example.com", "body": "x"}
+            )
+            assert response.status_code == 202
+    assert len(app.state.receipts) == support.RECEIPT_LIMIT_PER_HOUR
+
+
+def test_support_receipt_echoes_no_user_text(monkeypatch):
+    delivered = []
+    monkeypatch.setattr(email_module, "_deliver", lambda message: delivered.append(message) or True)
+    assert email_module.send_support_receipt("me@example.com", "req-9", "appeal") is True
+    message = delivered[0]
+    assert message["To"] == "me@example.com"
+    assert "support request" in message["Subject"]
+    content = message.get_content()
+    assert "req-9" in content and "Appeal a moderation decision" in content
+
+
+def test_support_receipt_failure_is_logged_not_raised(monkeypatch, caplog):
+    def boom(message):
+        raise OSError("smtp down")
+
+    monkeypatch.setattr(email_module, "_deliver", boom)
+    assert email_module.send_support_receipt("me@example.com", "req-8", "bug") is False
+    assert "req-8" in caplog.text
 
 
 def _suspend_via_report(app, admin_client, reporter_client, target_id) -> str:

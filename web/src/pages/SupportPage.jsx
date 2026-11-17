@@ -108,7 +108,7 @@ export default function SupportPage() {
           <h2>Request received</h2>
           <p>Our team reads every request. Keep this reference in case you need to follow up:</p>
           <p className="sx-support-ref"><code data-testid="support-request-id">{sentId}</code></p>
-          <p>We reply to the email address you gave{user ? ' or to your account' : ''}. No automatic receipt is sent.</p>
+          <p>We reply to the email address you gave{user ? ' or to your account' : ''}. We also email you a receipt with this reference.</p>
           <p><Link to="/reels">Back to ECHO</Link></p>
         </section>
       ) : (

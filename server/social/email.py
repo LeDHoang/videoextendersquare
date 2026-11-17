@@ -108,6 +108,42 @@ def send_support_notification(request_id: str, category: str, subject: str) -> b
         return False
 
 
+SUPPORT_TOPICS = {
+    "appeal": "Appeal a moderation decision",
+    "report_content": "Report a post, Reel Pack or profile",
+    "copyright": "Copyright complaint",
+    "privacy": "Privacy or data request",
+    "account": "Account help",
+    "bug": "Bug report",
+    "other": "Something else",
+}
+
+
+def send_support_receipt(recipient: str, request_id: str, category: str) -> bool:
+    """Confirm a support request to the person who sent it. Runs as a background task.
+
+    A signed-out request can name any address, so nothing the requester typed is
+    echoed back: only the reference and the topic. That keeps the form from
+    being used to send arbitrary text to someone else.
+    """
+    message = EmailMessage()
+    message["Subject"] = "We received your ECHO support request"
+    message["To"] = recipient
+    message.set_content(
+        "We received your support request.\n\n"
+        f"Reference: {request_id}\n"
+        f"Topic: {SUPPORT_TOPICS.get(category, category)}\n\n"
+        "Our team reads every request and replies to this address. "
+        "Quote the reference if you need to follow up.\n\n"
+        "If you did not contact ECHO support, ignore this email.\n"
+    )
+    try:
+        return _deliver(message)
+    except Exception:
+        logger.exception("Support receipt delivery failed for request %s", request_id)
+        return False
+
+
 def _deliver(message: EmailMessage) -> bool:
     host = os.environ.get("SX_SMTP_HOST", "").strip()
     sender = os.environ.get("SX_SMTP_FROM", "").strip()
