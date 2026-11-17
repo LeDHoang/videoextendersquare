@@ -10,6 +10,8 @@ database still monkeypatches ``SessionLocal`` itself (the later patch wins).
 from __future__ import annotations
 
 import sqlite3
+import sys
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -51,6 +53,42 @@ def _fallback_session_factory(tmp_path_factory):
 def _isolate_global_session_local(monkeypatch, _fallback_session_factory):
     monkeypatch.setattr(database, "SessionLocal", _fallback_session_factory)
     monkeypatch.setattr(safety, "SessionLocal", _fallback_session_factory)
+
+
+@pytest.fixture(autouse=True)
+def _own_background_workers(monkeypatch):
+    """Each test gets its own derived-asset and captions workers.
+
+    A test that publishes leaves encodes and captions on these one-thread
+    pools; shared across tests, a later test's job queued behind them and
+    ran under that test's patches (with pytest-xdist the order changes per
+    run, so this failed now and then). At teardown, while this test's
+    patches still apply, queued jobs are dropped and the running one gets
+    up to 30 s to finish.
+    """
+    from server.routers import uploads
+
+    monkeypatch.setattr(uploads, "_derived_pool", ThreadPoolExecutor(max_workers=1, thread_name_prefix="derived-assets"))
+    monkeypatch.setattr(uploads, "_captions_pool", ThreadPoolExecutor(max_workers=1, thread_name_prefix="captions"))
+    yield
+    # Read the globals again: start_derived_pool may have replaced them.
+    for pool in (uploads._derived_pool, uploads._captions_pool):
+        pool.shutdown(wait=False, cancel_futures=True)
+    with uploads._derived_lock:
+        pending = list(uploads._derived_futures)
+    wait(pending, timeout=30)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_speech_model(monkeypatch):
+    """Keep tests off the real faster-whisper model, as on CI (no captions extra).
+
+    Where requirements-captions.txt is installed, a publish in a test that
+    does not stub captions loaded the model and fetched its weights from
+    Hugging Face; offline that read could hang the captions worker, and the
+    test with it. tests/test_captions.py puts its own fake module here.
+    """
+    monkeypatch.setitem(sys.modules, "faster_whisper", None)
 
 
 @pytest.fixture(autouse=True)

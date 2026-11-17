@@ -36,9 +36,9 @@ install-dev: install
 migrate:
 	$(PY) -m alembic upgrade head
 
-## test: run backend integration and frontend regression tests
+## test: run backend integration and frontend regression tests (one pytest worker per CPU)
 test:
-	$(PY) -m pytest -q tests
+	$(PY) -m pytest -q -n auto tests
 	cd web && npm test
 
 ## streamlit: legacy fallback on 8501 (app.py is untouched). Needs
