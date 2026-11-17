@@ -233,7 +233,7 @@ def validate_posts(db: Session, owner_id: str, post_ids: list[str]) -> list[Post
         fail(
             422,
             "INVALID_PACK_ITEM",
-            "Packs may only contain public reels that are currently available.",
+            "Packs may only contain reels that are currently available to you.",
             "post_ids",
         )
     return [by_id[post_id] for post_id in normalized]
@@ -416,6 +416,18 @@ def serialize_pack(
         cover_url = cover.get("poster_url")
         if not cover_url and cover.get("media_type") == "image":
             cover_url = cover.get("preview_url") or cover.get("url")
+    # A cover the viewer cannot see keeps its id hidden too: the id alone
+    # opens a private post. The owner keeps it so the editor saves it back.
+    cover_post_id = None
+    if pack.cover_post_id and (
+        user_id == pack.owner_id
+        or any(
+            item.post_id == pack.cover_post_id
+            and member_available_for_viewer(db, item, user_id, hidden_owners)
+            for item in pack.items
+        )
+    ):
+        cover_post_id = pack.cover_post_id
     payload = {
         "id": pack.id,
         "kind": "pack",
@@ -424,7 +436,7 @@ def serialize_pack(
         "status": pack.status,
         "visibility": pack.visibility,
         "creator": public_user(pack.owner, viewer_id=user_id, is_following=following),
-        "cover_post_id": pack.cover_post_id,
+        "cover_post_id": cover_post_id,
         "cover_url": cover_url,
         "cover_items": covers,
         "location": pack.location or {},

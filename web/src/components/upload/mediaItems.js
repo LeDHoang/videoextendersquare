@@ -33,7 +33,7 @@ export const metaStereoCandidate = (meta) => meta?.stereo?.candidate || stereoCa
 export const metaStereoDetected = (meta) => !!(meta?.stereo?.detected && metaStereoCandidate(meta));
 export const titleFromName = (name) => (name || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, TITLE_MAX);
 
-export const emptyDraft = (title = '') => ({ title, caption: '', tags: [], location: { city: '', country: '', display_name: '' } });
+export const emptyDraft = (title = '') => ({ title, caption: '', tags: [], location: { city: '', country: '', display_name: '' }, visibility: 'public' });
 
 export function stagedItem(file, meta, kind, now) {
   return {
@@ -116,6 +116,7 @@ export function publishBody(items, draft, spatialJobIds) {
       lon: location?.lon ?? null,
       osm_id: location?.osm_id ?? null,
     },
+    visibility: draft.visibility || 'public',
     ...source,
     ...(!extras.length ? {}
       : extras.every((extra) => extra.stage_id)

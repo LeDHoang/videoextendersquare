@@ -189,7 +189,7 @@ def post_preview(post: Post) -> dict:
     return preview
 
 
-def serialize_report(db: Session, report: Report) -> dict:
+def serialize_report(db: Session, report: Report, *, reporter_copy: bool = False) -> dict:
     reporter = db.get(User, report.reporter_id) if report.reporter_id else None
     moderator = db.get(User, report.moderator_id) if report.moderator_id else None
     holder_id = claim_holder(report)
@@ -227,6 +227,14 @@ def serialize_report(db: Session, report: Report) -> dict:
                 .order_by(ReelPackItem.position)
                 .all()
             ]
+            if reporter_copy:
+                # A private post opens for anyone holding its id, so the reply
+                # to the reporter names public members only. Staff see them all.
+                private_ids = {
+                    row[0]
+                    for row in db.query(Post.id).filter(Post.id.in_(member_ids), Post.visibility == "private")
+                }
+                member_ids = [post_id for post_id in member_ids if post_id not in private_ids]
             # Cover first, then pack order: the reels a viewer meets first.
             if pack.cover_post_id in member_ids:
                 member_ids.remove(pack.cover_post_id)
@@ -558,7 +566,7 @@ def create_report(
 ):
     rate_limiter.check(db, f"report:{context.user.id}", 20, 60 * 60)
     report, duplicate = file_report(db, context.user, req.target_type, req.target_id, req.reason, req.details)
-    return {"report": serialize_report(db, report), "duplicate": duplicate}
+    return {"report": serialize_report(db, report, reporter_copy=True), "duplicate": duplicate}
 
 
 @router.get("/api/moderation/reports")

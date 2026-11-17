@@ -1762,7 +1762,7 @@ def _pack_feed_data(
                 entry = fallback
             else:
                 entry = {
-                "post_id": item.post_id,
+                "post_id": None,
                 "pack_item_id": item.id,
                 "pack_id": pack.id,
                 "pack_position": item.position,
