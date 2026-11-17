@@ -246,3 +246,37 @@ Gaps found:
 
 - **Known:** cancelling a running job is cooperative, like a user cancel. The job stops, and
   its queue slot frees, at the worker's next checkpoint, not at once.
+
+### 2026-11-17 — production (`echomultiverse.com`)
+
+Scope: the deployed app on the VPS, real R2 and Cloudflare. `test24` was the offender,
+with two image posts and a comment; `echodev` (admin) was both reporter and moderator.
+The API steps ran from the browser as echodev; the operator signed in as test24, tried the
+suspended sign-in, sent the appeal and ran the Cloudflare purge. Media was checked with
+`curl -sI`, with a `?nocache=` query for the origin.
+
+| Step | Result |
+|---|---|
+| Owner delete of post 1 | Post API 404; its R2 objects still 200 (by design) |
+| Report post 2, its comment and test24 | All three in the queue |
+| Block | `PUT /api/users/test24/block` 200; post 2 then 404 for echodev only |
+| Claim and `remove_content` post 2 and the comment | Both resolved; post API 404; media still 200 at the origin (by design) |
+| RESTORE post 2 | Back to `published`; signed-out API 200 |
+| PURGE MEDIA on post 1 | `deleted: 16` (every derived name is tried, only 3 existed); origin 404, edge still 200 `HIT` |
+| Cloudflare Custom Purge of the listed URLs | Edge 404 `MISS` |
+| `jobs/` copy | None: the post's `source` is `upload` (direct image upload, no job) |
+| `suspend_user` on the user report | Account suspended, 0 sessions; sign-in refused with "This account is suspended. You can appeal on the Support page." |
+| Signed-out appeal on `/support` | 202 after Turnstile; listed in the Support tab; closed with a note |
+| Reinstate (admin Users tab) | Account active |
+| Admin delete of test24 | Account erased (`deleted_95b0f973765a`, no email); post 2 and the profile 404; post 2 media still 200 until purged |
+| PURGE MEDIA on post 2 | `deleted: 16` |
+| Audit | Every claim, removal, restore, purge, suspension, reinstatement and support update is in `staff_actions`, by echodev |
+
+Gaps found:
+
+- **Open:** no staff email for the appeal. The app logged `SX_SUPPORT_EMAIL is unset`
+  (`docs/to-beta.md` group 1).
+- **Open (owner request):** the requester gets no automatic receipt (`docs/to-beta.md`
+  group 1).
+- Not checked: `reinstate_user` from a report (the admin reinstate was used), the alert
+  watchdog, and the log-bucket source copy.
