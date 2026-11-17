@@ -32,7 +32,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - `SX_PUBLIC_URL`, `SX_PUBLIC_BASE_URL` and `SX_MEDIA_BASE_URL` in the VPS `.env`, app restarted.
   - Checked with curl: HTTP→HTTPS 301; `/api/*` always `cf-cache-status: DYNAMIC` (until the anonymous list rule below is applied); media returns 206 with ACAO, `Vary: Origin` and `Content-Range`, and `MISS` then `HIT`.
 - Origin traffic is restricted to the Tunnel (checked 2026-11-07): ufw allows only 22/tcp, the app listens on loopback only, and a forged `CF-Connecting-IP` is rejected by Cloudflare.
-- HSTS is on (2026-11-07): `max-age=2592000`, 1 month, the lowest the dashboard offers; no includeSubDomains, no preload.
+- HSTS is on (2026-11-07), raised 2026-11-17 to `max-age=15552000` (6 months) with includeSubDomains; no preload. Checked with curl on `echomultiverse.com`, `sit` and `media`.
 - Still open: SMTP. The restore drill and the nightly backup to the private bucket are done (2026-11-01).
 
 ### Cloudflare
@@ -118,7 +118,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
 - [x] **SSL/TLS:**
   - Set the mode to Full.
   - Turn on **Always Use HTTPS**.
-  - **HSTS: done (2026-11-07).** Turned on after HTTPS was verified on both hosts, at 1 month (the dashboard has no shorter value). includeSubDomains and preload are off, and preload stays off for the beta.
+  - **HSTS: done (2026-11-07).** Turned on after HTTPS was verified on both hosts, at 1 month (the dashboard has no shorter value). **Raised 2026-11-17** to 6 months with includeSubDomains on, after checking that every web host in DNS (`echomultiverse.com`, `sit`, `media`, `sit-media`) redirects HTTP to HTTPS. Preload stays off for the beta. Any new subdomain must serve HTTPS from day one: browsers that saw the header refuse plain HTTP on every `*.echomultiverse.com` name for 6 months.
 
 ### OVHcloud VPS
 
