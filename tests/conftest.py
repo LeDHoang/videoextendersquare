@@ -9,11 +9,31 @@ database still monkeypatches ``SessionLocal`` itself (the later patch wins).
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from server.social import database, safety, turnstile
+
+
+@event.listens_for(Engine, "connect")
+def _no_fsync_for_test_sqlite(dbapi_connection, _connection_record):
+    """Test databases are throwaway: skip the disk syncs on each commit.
+
+    Most fixtures build a fresh file database with ``create_all``, one commit
+    per table and index; with the syncs that took about 0.14 s a database and
+    118 s of a 287 s run. A rollback journal in memory keeps the same locking
+    as the default journal; a database a test put in WAL mode stays in WAL.
+    """
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+    dbapi_connection.execute("PRAGMA synchronous=OFF")
+    mode = dbapi_connection.execute("PRAGMA journal_mode").fetchone()[0]
+    if mode == "delete":
+        dbapi_connection.execute("PRAGMA journal_mode=MEMORY")
 
 
 @pytest.fixture(scope="session")
