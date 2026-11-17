@@ -3,6 +3,9 @@
 #
 #   ssh deploy@vps 'bash -s -- <sha>' < deploy/deploy.sh
 #
+# On production the CI key's forced command (deploy/ci-ssh-gate.sh) ignores the
+# streamed copy and runs this file from the commit itself.
+#
 # It runs the routine deploy from docs/deploy-runbook.md section 3: fast-forward
 # the checkout to the tested commit, take a pre-deploy dump when migrations
 # changed, build, tag the image for rollback, restart, and wait for /api/readyz.

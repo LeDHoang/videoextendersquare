@@ -189,7 +189,7 @@ A push to `main` runs the CI checks, and when all four pass the `deploy` job in 
 
 One-time setup:
 
-1. Use the VPS user that owns `/opt/echo` and is in the `docker` group (the deploy writes to the checkout and reads `.env`). Add the public half of a new SSH key, used only by CI, to its `~/.ssh/authorized_keys`. Password auth is already off. Check that `git fetch origin main` works for that user in `/opt/echo`.
+1. Use the VPS user that owns `/opt/echo` and is in the `docker` group (the deploy writes to the checkout and reads `.env`). Add the public half of a new SSH key, used only by CI, to its `~/.ssh/authorized_keys`. Password auth is already off. Check that `git fetch origin main` works for that user in `/opt/echo`. Then bind the key to a forced command: install `deploy/ci-ssh-gate.sh` as `/usr/local/bin/echo-ci-deploy` (owner root, mode 0755) and start the key's line with `restrict,command="/usr/local/bin/echo-ci-deploy" `. The key can then only deploy a commit that is already on `origin/main`, with that commit's own `deploy/deploy.sh`.
 2. In GitHub, create an environment named `production`. Optionally add a required reviewer there to gate each deploy.
 3. Add these Actions secrets (to the `production` environment): `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` (the private key) and `VPS_KNOWN_HOSTS` (the output of `ssh-keyscan -t ed25519 <host>`, run from a machine you trust).
 
