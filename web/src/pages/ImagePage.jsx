@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
-import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader } from '../components/ui/primitives.jsx';
+import { Hero, Section, SpecRow, Eyebrow, EmptyState, BlockingBanner, GatedReason, ResultHeader, probeLine } from '../components/ui/primitives.jsx';
 import { Segmented, Button, Field } from '../components/ui/controls.jsx';
 import UploadZone from '../components/ui/UploadZone.jsx';
 import JobRunner from '../components/ui/JobRunner.jsx';
@@ -203,12 +203,12 @@ export default function ImagePage() {
 
   return (
     <div>
-      <Hero title="IMAGE EXTENDER" kicker="ECHO · 1:1 SQUARE · 3840×3840 · OUTPAINT + UPSCALE PIPELINE" />
+      <Hero title="IMAGE EXTENDER" kicker="ECHO · 1:1 SQUARE · 2048×2048 · OUTPAINT + UPSCALE PIPELINE" />
 
       {blocked.length ? (
         <BlockingBanner
           title="ENVIRONMENT NOT READY"
-          lines={blocked.map((p) => `${p.label}: ${p.detail}. ${p.fix}`)}
+          lines={blocked.map(probeLine)}
         />
       ) : null}
 
@@ -224,7 +224,7 @@ export default function ImagePage() {
             <SpecRow
               cells={[
                 ['SOURCE', `${items[0].width}×${items[0].height}`, `${items[0].orientation} · ${(items[0].size_bytes / 1024).toFixed(1)} KB`],
-                ['TARGET', '3840×3840', '1:1 SQUARE MASTER'],
+                ['TARGET', '2048×2048', '1:1 SQUARE MASTER'],
                 ['OUTPAINT PAD', `L: ${items[0].padding.left}px  R: ${items[0].padding.right}px`, `T: ${items[0].padding.top}px  B: ${items[0].padding.bottom}px`],
               ]}
             />
@@ -242,7 +242,7 @@ export default function ImagePage() {
             <SpecRow
               cells={[
                 ['BATCH SIZE', `${items.length} IMAGES`, `${(items.reduce((a, b) => a + b.size_bytes, 0) / 1024).toFixed(1)} KB TOTAL`],
-                ['TARGET RESOLUTION', '3840×3840 EACH', '1:1 SQUARE'],
+                ['TARGET RESOLUTION', '2048×2048 EACH', '1:1 SQUARE'],
                 ['PROCESSING', 'CPU CONCURRENT', 'AUTO-SCALED QUEUE'],
               ]}
             />
@@ -344,7 +344,7 @@ export default function ImagePage() {
                 loading={busy}
                 onClick={render}
               >
-                {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}IMAGE(S) 4K SQUARE`}
+                {quoteStale ? '↻ RETRY QUOTE & RENDER' : `▶ RENDER ${items.length ? `${items.length} ` : ''}IMAGE(S) 2K SQUARE`}
               </Button>
             </div>
 
@@ -365,7 +365,7 @@ export default function ImagePage() {
           ))}
           {hasJobs ? (
             <>
-              <ResultHeader title="RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 3840×3840 · PNG MASTER`} />
+              <ResultHeader title="RESULTS" meta={`${jobs.length} ITEM(S) PROCESSED · 2048×2048 · PNG MASTER`} />
             </>
           ) : null}
         </Section>

@@ -100,12 +100,17 @@ def build_policy(nonce: str, mode: str | None = None) -> str:
     directives = [
         ("default-src", ["'self'"]),
         ("script-src", [f"'nonce-{nonce}'", "'strict-dynamic'", TURNSTILE]),
+        # Browsers without the -elem/-attr split fall back to style-src.
         ("style-src", ["'self'", "'unsafe-inline'", GOOGLE_FONTS_CSS]),
+        # An injected <style> can read the page through attribute selectors, so
+        # elements need the nonce. Attributes stay open: the player sets many.
+        ("style-src-elem", ["'self'", f"'nonce-{nonce}'", GOOGLE_FONTS_CSS]),
+        ("style-src-attr", ["'unsafe-inline'"]),
         ("font-src", ["'self'", "data:", GOOGLE_FONTS_FILES]),
         ("img-src", ["'self'", "data:", "blob:", *media, *gif_origins()]),
         ("media-src", ["'self'", "blob:", *media]),
         ("connect-src", ["'self'", *media, NOMINATIM]),
-        ("frame-src", [TURNSTILE]),
+        ("frame-src", ["'self'", TURNSTILE]),
         ("frame-ancestors", ["'none'"]),
         ("object-src", ["'none'"]),
         ("base-uri", ["'none'"]),
@@ -128,19 +133,22 @@ def request_nonce(request: Request) -> str | None:
 # `<script` not already carrying a nonce. Applied to templates before any
 # vendored JS (three.min.js etc.) is substituted in, so only real tags match.
 _SCRIPT_OPEN = re.compile(r"<script\b(?![^>]*\snonce=)", re.IGNORECASE)
+_STYLE_OPEN = re.compile(r"<style\b(?![^>]*\snonce=)", re.IGNORECASE)
 _MODULEPRELOAD_OPEN = re.compile(r"<link\b(?=[^>]*\brel=[\"']?modulepreload)(?![^>]*\snonce=)", re.IGNORECASE)
 _HEAD_OPEN = re.compile(r"<head\b[^>]*>", re.IGNORECASE)
 
 
 def nonce_html(html: str, nonce: str | None) -> str:
-    """Stamp ``nonce`` on every ``<script>`` and ``<link rel=modulepreload>`` tag.
+    """Stamp ``nonce`` on every ``<script>``, ``<style>`` and ``<link rel=modulepreload>`` tag.
 
     Also adds ``<meta property="csp-nonce">`` to ``<head>``: Vite's preload
-    helper reads it for the modulepreload links it creates at runtime.
+    helper reads it for the modulepreload links it creates at runtime, and
+    the SPA reads it for the player <style> it mounts.
     """
     if not nonce:
         return html
     html = _SCRIPT_OPEN.sub(f'<script nonce="{nonce}"', html)
+    html = _STYLE_OPEN.sub(f'<style nonce="{nonce}"', html)
     html = _MODULEPRELOAD_OPEN.sub(f'<link nonce="{nonce}"', html)
     return _HEAD_OPEN.sub(lambda m: f'{m.group(0)}\n<meta property="csp-nonce" nonce="{nonce}">', html, count=1)
 

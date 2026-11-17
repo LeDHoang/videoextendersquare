@@ -397,7 +397,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </IconButton>
-            <NavLink to="/reels" className="sx-top-brand" title="ECHO 4K Engine">
+            <NavLink to="/reels" className="sx-top-brand" title="ECHO 2K Engine">
               <AnimatedEchoLogo className="sx-top-logo" title="ECHO Logo" />
               <span className="sx-wordmark" data-echo="ECHO">ECHO</span>
             </NavLink>

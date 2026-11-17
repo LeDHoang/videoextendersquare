@@ -62,14 +62,28 @@ def _r2_prefix(job_id: str) -> str:
     return f"jobs/{keyed_hash('job-result:' + job_id)[:32]}/"
 
 
-def keep(record: JobRecord) -> None:
+def _thumbnail(record: JobRecord, source: Path) -> Path | None:
+    """A small JPEG of the result for gallery tiles, beside it in the job dir. Best effort."""
+    from server import media as SM
+
+    try:
+        made = SM.make_image_poster(str(source)) if record.kind == "image" else SM.make_explore_poster(str(source))
+    except Exception:
+        logger.exception("Could not build the thumbnail of job %s", record.job_id)
+        return None
+    return Path(made) if made else None
+
+
+def keep(record: JobRecord) -> dict | None:
     """Copy a completed job's result files to R2. Never raises; no-op without R2.
 
-    ``job.json`` goes last, so a job is restorable only once its files are stored.
+    Returns the stored file names (``path``, ``preview``, ``thumb``) once the job is
+    restorable, else None. ``job.json`` goes last, so a job is restorable only once
+    its files are stored.
     """
     result = record.result
     if not (media_store.enabled() and isinstance(result, dict)):
-        return
+        return None
     root = (jobs_root() / record.job_id).resolve()
     files = {}
     for key in _FILE_KEYS:
@@ -77,11 +91,15 @@ def keep(record: JobRecord) -> None:
         if value and Path(value).resolve().parent == root and Path(value).is_file():
             files[key] = Path(value).name
     if "path" not in files:
-        return
+        return None
     prefix = _r2_prefix(record.job_id)
+    # The H.264 preview decodes anywhere; an HEVC master may not.
+    thumb = _thumbnail(record, root / files.get("preview", files["path"]))
     try:
         for name in sorted(set(files.values())):
             media_store.store_file(root / name, prefix + name)
+        if thumb is not None:
+            media_store.store_file(thumb, prefix + thumb.name)
         media_store.put_json(prefix + "job.json", {
             "kind": record.kind,
             "owner_id": record.owner_id,
@@ -91,6 +109,8 @@ def keep(record: JobRecord) -> None:
         })
     except Exception:
         logger.exception("Could not keep the result of job %s in R2", record.job_id)
+        return None
+    return {**files, "thumb": thumb.name if thumb is not None else None}
 
 
 def restore(job_id: str) -> JobRecord | None:

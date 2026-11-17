@@ -24,7 +24,7 @@ import { useAuth } from '../hooks/AuthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { FORMAT_FILTER_LABELS } from '../utils/mediaFormat.js';
 
-const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
+const CODEC_DEFAULT = 'HEVC 2K (Raw Master)';
 const CODEC_OPTS = [
   { label: FORMAT_FILTER_LABELS.hevc, value: CODEC_DEFAULT },
   { label: FORMAT_FILTER_LABELS.h264, value: 'H264 (Browser/VR)' },
@@ -40,7 +40,6 @@ const PACK_PAGE_SIZE = 24;
 const REEL_PAGE_SIZE = 48;
 const TRENDING_TAGS = 8;
 const TRENDING_PLACES = 4;
-const PACK_ALL_LIMIT = 12;
 
 function shuffled(items) {
   const next = [...items];
@@ -120,15 +119,17 @@ export default function ExplorePage() {
         folder,
         codec: codecParam,
         search: debouncedSearch,
-        sort: 'shuffle',
+        sort: 'for_you',
         refresh: refreshKey > 0,
         limit: REEL_PAGE_SIZE,
+        packs: packDiscoveryEnabled,
       }).catch(() => ({ total: 0, count: 0, folders: [], videos: [], next_cursor: null })),
       packDiscoveryEnabled
         ? api.get('/api/packs', {
             search: debouncedSearch,
             offset: 0,
-            limit: contentType === 'packs' ? PACK_PAGE_SIZE : PACK_ALL_LIMIT,
+            // ALL takes its packs from /api/reels; there this call only gives the total.
+            limit: contentType === 'packs' ? PACK_PAGE_SIZE : 1,
           }).catch((requestError) => {
             if (alive) setPackError(String(requestError.message || requestError));
             return { total: 0, items: [], next_offset: null };
@@ -213,7 +214,7 @@ export default function ExplorePage() {
     const query = new URLSearchParams({
       folder,
       codec: codecParam,
-      sort: 'shuffle',
+      sort: 'for_you',
       play: video.path,
     });
     if (debouncedSearch) query.set('search', debouncedSearch);
@@ -224,6 +225,10 @@ export default function ExplorePage() {
     setPackData((current) => ({
       ...(current || {}),
       items: (current?.items || []).map((pack) => pack.id === updated.id ? updated : pack),
+    }));
+    setData((current) => current && ({
+      ...current,
+      packs: (current.packs || []).map((pack) => pack.id === updated.id ? { ...updated, slot: pack.slot } : pack),
     }));
   };
 
@@ -236,8 +241,9 @@ export default function ExplorePage() {
         folder,
         codec: codecParam,
         search: debouncedSearch,
-        sort: 'shuffle',
+        sort: 'for_you',
         limit: REEL_PAGE_SIZE,
+        packs: packDiscoveryEnabled,
         cursor,
       });
       setData((current) => {
@@ -247,6 +253,7 @@ export default function ExplorePage() {
           ...current,
           next_cursor: next.next_cursor,
           videos: [...current.videos, ...(next.videos || []).filter((video) => !seen.has(video.path))],
+          packs: [...(current.packs || []), ...(next.packs || []).filter((pack) => !(current.packs || []).some((row) => row.id === pack.id))],
         };
       });
     } catch {
@@ -278,11 +285,23 @@ export default function ExplorePage() {
     }
   };
 
-  const packs = packData?.items || [];
+  // PACKS lists packs alone; ALL places each ranked pack before the reel at its slot.
+  const packs = contentType === 'packs' ? packData?.items || [] : data?.packs || [];
   const reelsVisible = contentType !== 'packs';
   const packsVisible = packDiscoveryEnabled && contentType !== 'reels';
   const loading = data === null || (packDiscoveryEnabled && packData === null);
   const empty = (!reelsVisible || !order.length) && (!packsVisible || !packs.length);
+  const tiles = [];
+  if (packsVisible && reelsVisible) {
+    let next = 0;
+    order.forEach((video, index) => {
+      while (next < packs.length && packs[next].slot <= index) tiles.push(packs[next++]);
+      tiles.push(video);
+    });
+    tiles.push(...packs.slice(next));
+  } else {
+    tiles.push(...(packsVisible ? packs : order));
+  }
   const reelCount = data ? data.count ?? order.length : null;
 
   return (
@@ -398,19 +417,18 @@ export default function ExplorePage() {
         <>
           {packsVisible || reelsVisible ? (
             <div className={gridClassName(density)} aria-label="Explore results">
-              {packsVisible ? packs.map((pack) => (
+              {tiles.map((tile) => (tile.path ? (
+                <ExploreTile key={tile.path} video={tile} onOpen={openReel} onShare={(item) => messaging.openShare({ ...item, kind: 'reel' })} />
+              ) : (
                 <PackTile
-                  key={pack.id}
-                  pack={pack}
+                  key={tile.id}
+                  pack={tile}
                   onOpen={(item) => navigate('/packs/' + encodeURIComponent(item.id) + '?play=1')}
                   onShare={(target) => messaging.openShare(target)}
                   onChanged={updatePack}
                   source="explore"
                 />
-              )) : null}
-              {reelsVisible ? order.map((video) => (
-                <ExploreTile key={video.path} video={video} onOpen={openReel} onShare={(item) => messaging.openShare({ ...item, kind: 'reel' })} />
-              )) : null}
+              )))}
             </div>
           ) : null}
           {reelsVisible && data?.next_cursor ? (

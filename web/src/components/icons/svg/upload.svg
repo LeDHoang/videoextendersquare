@@ -2,5 +2,5 @@
   <!-- Chamfered tray, chevron head, accent stem -->
   <path d="M4 15V19L6 21H18L20 19V15" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel"/>
   <path d="M7 9.5L12 4.5L17 9.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel"/>
-  <path d="M12 6V16" stroke="var(--sx-accent, #ff3b1f)" stroke-width="1.8"/>
+  <path d="M12 6V16" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8"/>
 </svg>

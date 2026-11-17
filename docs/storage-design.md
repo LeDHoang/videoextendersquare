@@ -134,6 +134,16 @@ A job (outpaint, upscale, MAKE 3D) writes its result into its job dir under cont
 - `JobManager.get_job` rebuilds the record from `job.json` when a well-formed job id is not in memory: after a restart, or after the retention sweep (`SX_JOB_RETENTION_S`, 6 h). Owner checks apply as before.
 - Downloads and publishing from a job call `output.fetch`, which downloads a missing file back into the job dir.
 - An R2 lifecycle rule deletes `jobs/` objects after 30 days. It is set in the Cloudflare dashboard (`docs/deploy-runbook.md`).
+- `output.keep` also stores a small JPEG of the result (`<stem>-poster.jpg`) under the same prefix, for gallery tiles. It is best effort: a result without one is still kept.
+
+#### The user's list of results
+
+The Upload page lists a person's results on any device (`GET /api/uploads/mine`). The list comes from the `user_renders` table (`server/render_index.py`), one row per job a signed-in user started: its kind, role (`square`, `3d`, `spatial`), what it was made from, how it ended, the post it became, and whether R2 holds it (`kept`).
+
+- A row is written when the job is queued and updated when it ends. Indexing never fails a job.
+- A `ready` row is listed while its files can be read: 30 days when `kept`, else only while this process holds the job (`SX_JOB_RETENTION_S`).
+- A row still `working` after a restart is listed, and saved, as `failed`.
+- The same route returns the caller's staged uploads that are still alive (6 h, this container only). Staged files are not synced.
 
 Failed and cancelled jobs are not kept. Their job dirs go with the retention sweep.
 

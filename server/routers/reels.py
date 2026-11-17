@@ -1236,6 +1236,22 @@ def _admin_refresh(refresh: bool, viewer: AuthContext | None) -> bool:
     return bool(refresh) and isinstance(viewer, AuthContext) and viewer.user.role == "admin"
 
 
+def _hidden_paths(
+    db: Session,
+    viewer: AuthContext | None,
+    *,
+    post: str | None = None,
+    author: str | None = None,
+) -> set[str]:
+    """Paths this viewer may not list. A direct link reveals its one private
+    post; a creator's own author scope reveals all of their private posts."""
+    viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
+    own_scope = bool(viewer_id and author and str(author).strip().casefold() == viewer.user.username_norm)
+    return unavailable_media_paths_for_viewer(
+        viewer_id, db=db, reveal_post_id=post, reveal_owner_id=viewer_id if own_scope else None,
+    )
+
+
 # ─── Pydantic Models for Comments API ────────────────────────────────────
 
 class CommentCreate(BaseModel):
@@ -1746,7 +1762,7 @@ def _pack_feed_data(
                 entry = fallback
             else:
                 entry = {
-                "post_id": item.post_id,
+                "post_id": None,
                 "pack_item_id": item.id,
                 "pack_id": pack.id,
                 "pack_position": item.position,
@@ -1851,7 +1867,7 @@ def _recommendation_feed_data(
             detail={"code": "AUTH_REQUIRED", "message": "Sign in to view your Following feed."},
         )
 
-    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    hidden_paths = _hidden_paths(db, viewer, post=post, author=author)
     raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     activity_days = _bounded_activity_window(window_days)
     recent_activity = _recent_activity_by_path(db, raw, activity_days) if sort == "recent_trending" else None
@@ -2085,6 +2101,49 @@ def _grid_ranks(videos: list[dict], filters: str, seed: int, viewer_id: str | No
     return {post_id: index for index, post_id in enumerate(ids)}, path_to_post_id
 
 
+# A pack's place in the grid: the mean rank of its best few member reels, with
+# at least this many tiles between two packs.
+_PACK_TOP_MEMBERS = 3
+_PACK_GAP = 8
+
+
+def _title_matches(title: str, search: str) -> bool:
+    text = search.strip().casefold().lstrip("#")
+    key = _search_key(text)
+    return bool(text) and (text in str(title or "").casefold() or bool(key) and key in _search_key(title))
+
+
+def _pack_slots(db: Session, viewer_id: str | None, videos: list[dict], path_to_post_id: dict[str, str],
+                search: str, tag: str | None, location: str | None, titled: int = 0) -> list[tuple[int, object]]:
+    """Each discoverable pack with the index in `videos` (ranked) it goes before.
+
+    Members that are not in `videos` count as ranked last. `titled` is how
+    many reels lead `videos` because their title matches the search; a pack
+    whose title matches comes no later than the end of them.
+    """
+    from server.routers.packs import list_visible_packs
+
+    last = len(videos)
+    index_of = {
+        path_to_post_id[video["rel_path"]]: index
+        for index, video in enumerate(videos)
+        if video["rel_path"] in path_to_post_id
+    }
+    scored = []
+    for pack in list_visible_packs(db, viewer_id, search=search, tag=tag or "", location=location or ""):
+        best = sorted(index_of.get(item.post_id, last) for item in pack.items)[:_PACK_TOP_MEMBERS]
+        score = sum(best) // len(best) if best else last
+        if _title_matches(pack.title, search):
+            score = min(score, titled)
+        scored.append((score, pack.id, pack))
+    slots, free = [], 0
+    for score, _, pack in sorted(scored, key=lambda row: row[:2]):
+        slot = max(score, free)
+        slots.append((slot, pack))
+        free = slot + _PACK_GAP
+    return slots
+
+
 def _list_page_key(sort: str, scoped: bool, seed: int | None, videos: list[dict],
                    recent_activity: dict[str, dict] | None, db: Session,
                    ranks: dict[str, int] | None = None, path_to_post_id: dict[str, str] | None = None):
@@ -2152,6 +2211,7 @@ def list_reels(
     post: str | None = None,
     limit: int | None = None,
     cursor: str | None = None,
+    packs: bool = False,
     viewer: AuthContext | None = Depends(get_optional_auth),
     db: Session = Depends(get_db),
 ):
@@ -2166,11 +2226,15 @@ def list_reels(
     filtered count, and ``next_cursor`` (null on the last page) fetches the
     next page with the same filters. Without ``limit`` the whole list comes
     with comments, as before; that form is deprecated.
+
+    ``packs`` (paged ``sort=for_you`` only) adds ``packs``: the Reel Packs that
+    belong on this page, each with ``slot``, the index in the whole ranked list
+    of the reel it goes before. The last page also carries every later pack.
     """
     if _admin_refresh(refresh, viewer):
         _scan_cache["at"] = 0.0
     viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
-    hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+    hidden_paths = _hidden_paths(db, viewer, post=post, author=author)
     raw = [item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths]
     recent_activity = _recent_activity_by_path(db, raw, window_days) if sort == "recent_trending" else None
 
@@ -2205,6 +2269,7 @@ def list_reels(
         videos.sort(key=lambda video: positions[video["rel_path"]])
     count = len(videos)
     next_cursor = None
+    pack_page = None
     filters = hashlib.blake2b(
         json.dumps([folder, search, sort, window_days, media, tag, location, feed, author]).encode("utf-8"),
         digest_size=8,
@@ -2227,15 +2292,42 @@ def list_reels(
                     raise _invalid_cursor()
                 ranks, path_to_post_id = _grid_ranks(videos, filters, seed, viewer_id, db)
             key = _list_page_key(sort, scoped_paths is not None, seed, videos, recent_activity, db, ranks, path_to_post_id)
+            titled = set()
+            if grid and search.strip():
+                # A search lists the reels with the query in their title first.
+                metadata = _metadata_snapshot(videos, db)
+                titled = {
+                    video["rel_path"] for video in videos
+                    if _title_matches(_item_meta(video, metadata).get("title", ""), search)
+                }
+                if titled:
+                    rank_key = key
+                    key = lambda item: (item["rel_path"] not in titled, *rank_key(item))
             videos.sort(key=key)
+            pack_slots = None
+            if packs and grid:
+                from server.features import reel_pack_features
+
+                if reel_pack_features()["discovery"]:
+                    pack_slots = _pack_slots(db, viewer_id, videos, path_to_post_id, search, tag, location, len(titled))
+            ranked_count = len(videos)
             if anchor is not None:
                 try:
                     videos = [video for video in videos if key(video) > anchor]
                 except TypeError:
                     raise _invalid_cursor()
+            page_start = ranked_count - len(videos)
             if len(videos) > limit:
                 videos = videos[:limit]
                 next_cursor = _encode_list_cursor(filters, key(videos[-1]), seed)
+            if pack_slots is not None:
+                from server.routers.packs import serialize_pack
+
+                pack_page = [
+                    {**serialize_pack(db, pack, viewer_id), "slot": slot}
+                    for slot, pack in pack_slots
+                    if slot >= page_start and (next_cursor is None or slot < page_start + limit)
+                ]
         payload = _build_payload(videos, codec, viewer_id=viewer_id, db=db)
         for entry in payload:
             entry["comments_count"] = len(entry.pop("comments", None) or [])
@@ -2251,6 +2343,7 @@ def list_reels(
         "active_tag": _tag_slug(tag) if tag else None,
         "videos": payload,
         "next_cursor": next_cursor,
+        **({"packs": pack_page} if pack_page is not None else {}),
     }
 
 
@@ -2693,7 +2786,7 @@ def generate_explore_previews(
     failed = []
     rels = list(paths)
     if is_production():
-        hidden = unavailable_media_paths_for_viewer(context.user.id, db)
+        hidden = unavailable_media_paths_for_viewer(context.user.id, db, reveal_owner_id=context.user.id)
         live = published_media_paths(db) - hidden
         failed.extend({"path": rel, "error": "not found"} for rel in rels if rel not in live)
         rels = [rel for rel in rels if rel in live]
@@ -3010,9 +3103,32 @@ def spatialize_status(
     }
 
 
+# Characters that can end or confuse an inline script when they sit in data:
+# "<" (a closing tag or an HTML comment), ">" and "&". json.dumps already
+# escapes everything outside ASCII, the two line separators included.
+_SCRIPT_UNSAFE = str.maketrans({"<": "\\u003c", ">": "\\u003e", "&": "\\u0026"})
+
+
 def _json_for_script(payload) -> str:
     """JSON-serialize *payload* for embedding inside an inline <script> tag."""
-    return json.dumps(payload).replace("</", "<\\/")
+    return json.dumps(payload).translate(_SCRIPT_UNSAFE)
+
+
+_PLAYER_DATA_SLOTS = re.compile(r"__VIDEO_DATA_JSON__|__FEED_STATE_JSON__|loadVideo\(0\);")
+
+
+def _fill_player_data(text: str, payload, feed_data, start_idx: int) -> str:
+    """Put the feed data and the start index into player script text.
+
+    One pass, so text inside the data is never substituted again: a title
+    that holds a placeholder name stays a title.
+    """
+    values = {
+        "__VIDEO_DATA_JSON__": _json_for_script(payload),
+        "__FEED_STATE_JSON__": _json_for_script(feed_data),
+        "loadVideo(0);": f"loadVideo({start_idx});",
+    }
+    return _PLAYER_DATA_SLOTS.sub(lambda match: values[match.group(0)], text)
 
 
 _player_template_cache: dict = {"key": None, "html": None}
@@ -3111,10 +3227,7 @@ def reels_player(
     # CSP nonce on every <script> tag (server/security_headers.py).
     html = nonce_request_html(request, html)
 
-    html = html.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
-    html = html.replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
-    html = html.replace("loadVideo(0);", f"loadVideo(__SX_START_INDEX__);")
-    html = html.replace("__SX_START_INDEX__", str(start_idx))
+    html = _fill_player_data(html, payload, feed_data, start_idx)
     headers = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Vary": "Accept-Encoding"}
     content = html.encode("utf-8")
     # ~400 KB of HTML crosses the tunnel to Cloudflare; gzip sends about a fifth of it.
@@ -3391,7 +3504,9 @@ def reels_player_inline(
         play_idx = next((index for index, item in enumerate(payload) if item.get("path") == play), None)
         if play_idx is None:
             viewer_id = viewer.user.id if isinstance(viewer, AuthContext) else None
-            hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db)
+            # Only the path in ``play`` is looked up, so this opens the
+            # creator's own private reel and nobody else's.
+            hidden_paths = unavailable_media_paths_for_viewer(viewer_id, db=db, reveal_owner_id=viewer_id)
             video = next(
                 (item for item in _scan_cached(db) if item["rel_path"] == play and play not in hidden_paths),
                 None,
@@ -3429,16 +3544,12 @@ def reels_player_inline(
             if url:
                 scripts.append({"src": url, "lazy": True} if name in LAZY_PLAYER_SCRIPTS else {"src": url})
         else:
-            scripts.append(
-                tag.replace("__VIDEO_DATA_JSON__", _json_for_script(payload))
-                .replace("__FEED_STATE_JSON__", _json_for_script(feed_data))
-            )
+            # Also sets the deep-link start index (Explore → Reels): the
+            # hard-coded initial loadVideo(0) becomes the clamped start offset.
+            scripts.append(_fill_player_data(tag, payload, feed_data, start_idx))
 
     if scripts:
         init = scripts[-1]
-        # Deep-link start index (Explore → Reels): replace the hard-coded
-        # initial loadVideo(0) with the clamped start offset.
-        init = init.replace("loadVideo(0);", f"loadVideo({start_idx});")
         init += (
             "\nwindow.__sxReelsDomCleanup = window.__sxReelsCleanup;\n"
             "window.__sxReelsCleanup = function () {\n"

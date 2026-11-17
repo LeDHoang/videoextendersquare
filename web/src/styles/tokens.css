@@ -1,4 +1,4 @@
-/* Square Extender 4K — Design Tokens
+/* Square Extender 2K — Design Tokens
    Bold editorial precision theme: Archivo Black, JetBrains Mono, matte-black surfaces, vivid vermilion accents.
 */
 :root {
@@ -202,6 +202,12 @@
   /* Paper-white type and scrims that sit on photographs and video. */
   --sx-on-media: #ffffff;
   --sx-media-scrim: rgba(12, 10, 8, 0.72);
+  /* Carbon that stays carbon in both modes, for a tile that frames a file like a
+     screen, and the paper type on it. */
+  --sx-carbon: #0c0b09;
+  --sx-on-carbon: #f5f1e8;
+  /* White type on the danger colour, in both modes. */
+  --sx-on-danger: #ffffff;
 
   --sx-success: #146638;
   --sx-success-hi: #11592f;

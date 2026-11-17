@@ -1,1 +1,1 @@
-"""Square Extender 4K — FastAPI routers package."""
+"""Square Extender 2K — FastAPI routers package."""

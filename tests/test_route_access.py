@@ -181,6 +181,7 @@ user      GET    /api/rewards/reels/status
 public    GET    /api/search/suggestions
 user      POST   /api/stereo/convert
 public    POST   /api/support
+user      GET    /api/uploads/mine
 user      POST   /api/uploads/publish
 user      PATCH  /api/users/me
 user      DELETE /api/users/me

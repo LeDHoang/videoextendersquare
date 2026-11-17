@@ -1,4 +1,4 @@
-"""Square Extender 4K — FastAPI application factory.
+"""Square Extender 2K — FastAPI application factory.
 
 Serves:
   /api/*        — REST + SSE endpoints (image/video pipelines, reels, compare)
@@ -374,7 +374,7 @@ def create_app() -> FastAPI:
     # Production serves no API docs: /docs, /redoc and /openapi.json would
     # list every route and schema to anyone.
     docs_off = {"docs_url": None, "redoc_url": None, "openapi_url": None} if is_production() else {}
-    app = FastAPI(title="Square Extender 4K", version="2.0", lifespan=lifespan, **docs_off)
+    app = FastAPI(title="Square Extender 2K", version="2.0", lifespan=lifespan, **docs_off)
 
     # CORS for the Vite dev server (port 5173). Credentials are on, so keep
     # the surface tight: only the methods/headers the frontend actually sends

@@ -37,8 +37,8 @@ def app(tmp_path, monkeypatch):
     session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(engine)
     # Login re-derives the role from these lists.
-    monkeypatch.setenv("SX_ADMIN_USERS", "the_admin")
-    monkeypatch.setenv("SX_MODERATOR_USERS", "the_mod")
+    monkeypatch.setenv("SX_ADMIN_USERS", "the_admin@example.com")
+    monkeypatch.setenv("SX_MODERATOR_USERS", "the_mod@example.com")
     monkeypatch.setattr(database, "SessionLocal", session)
     application = FastAPI()
     application.include_router(health.router)

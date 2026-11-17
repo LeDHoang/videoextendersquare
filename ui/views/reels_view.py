@@ -108,8 +108,8 @@ def render(ctx: dict) -> None:
 
     codec_mode = st.segmented_control(
         "Codec",
-        ["HEVC 4K (Raw Master)", "H.264 4K (Web & VR)", "ALL CODECS"],
-        default="HEVC 4K (Raw Master)",
+        ["HEVC 2K (Raw Master)", "H.264 4K (Web & VR)", "ALL CODECS"],
+        default="HEVC 2K (Raw Master)",
         key="sx.reels.codec",
         label_visibility="collapsed",
         help="Meta Quest 3 Browser features native 4K HEVC hardware decoding for zero-lag playback.",
@@ -171,7 +171,7 @@ def render(ctx: dict) -> None:
         codec = M.get_video_codec(src_path)
 
         play_path = src_path
-        if codec_mode == "HEVC 4K (Raw Master)":
+        if codec_mode == "HEVC 2K (Raw Master)":
             play_path = src_path
         else:
             # H.264 (Web & VR) or ALL CODECS

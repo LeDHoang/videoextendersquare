@@ -1,0 +1,5 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel">
+  <!-- Paper dart, accent fold -->
+  <path d="M3 11L21 3L14 21L11 13L3 11Z"/>
+  <path d="M11 13L21 3" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))"/>
+</svg>

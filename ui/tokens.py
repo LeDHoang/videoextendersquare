@@ -1,4 +1,4 @@
-"""Design tokens for Square Extender 4K, read from web/src/styles/tokens.css.
+"""Design tokens for Square Extender 2K, read from web/src/styles/tokens.css.
 
 tokens.css is the single source of truth. This module parses its :root block at
 import, so the names below always hold the web app's current values; add a name

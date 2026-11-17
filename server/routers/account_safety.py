@@ -9,7 +9,7 @@ import uuid
 from datetime import timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from cryptography.exceptions import InvalidTag
 from pydantic import BaseModel, EmailStr
@@ -189,7 +189,7 @@ def post_preview(post: Post) -> dict:
     return preview
 
 
-def serialize_report(db: Session, report: Report) -> dict:
+def serialize_report(db: Session, report: Report, *, reporter_copy: bool = False) -> dict:
     reporter = db.get(User, report.reporter_id) if report.reporter_id else None
     moderator = db.get(User, report.moderator_id) if report.moderator_id else None
     holder_id = claim_holder(report)
@@ -227,6 +227,14 @@ def serialize_report(db: Session, report: Report) -> dict:
                 .order_by(ReelPackItem.position)
                 .all()
             ]
+            if reporter_copy:
+                # A private post opens for anyone holding its id, so the reply
+                # to the reporter names public members only. Staff see them all.
+                private_ids = {
+                    row[0]
+                    for row in db.query(Post.id).filter(Post.id.in_(member_ids), Post.visibility == "private")
+                }
+                member_ids = [post_id for post_id in member_ids if post_id not in private_ids]
             # Cover first, then pack order: the reels a viewer meets first.
             if pack.cover_post_id in member_ids:
                 member_ids.remove(pack.cover_post_id)
@@ -293,8 +301,20 @@ def serialize_report(db: Session, report: Report) -> dict:
     }
 
 
+def _deliver_password_reset_email(recipient: str, raw_token: str) -> None:
+    try:
+        send_password_reset_email(recipient, raw_token)
+    except Exception:
+        logger.exception("Password reset email delivery failed")
+
+
 @router.post("/api/auth/password-reset/request")
-def request_password_reset(req: PasswordResetRequest, request: Request, db: Session = Depends(get_db)):
+def request_password_reset(
+    req: PasswordResetRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     validate_origin(request)
     identity = request_identity(request)
     email = normalize_email(str(req.email))
@@ -324,10 +344,8 @@ def request_password_reset(req: PasswordResetRequest, request: Request, db: Sess
             )
         )
         db.commit()
-        try:
-            send_password_reset_email(user.email or email, raw_token)
-        except Exception:
-            logger.exception("Password reset email delivery failed")
+        # After the response, so a real account answers as fast as an unknown one.
+        background_tasks.add_task(_deliver_password_reset_email, user.email or email, raw_token)
         if os.environ.get("SX_PASSWORD_RESET_EXPOSE_TOKEN", "0").lower() in {"1", "true", "yes"}:
             debug_token = raw_token
 
@@ -548,7 +566,7 @@ def create_report(
 ):
     rate_limiter.check(db, f"report:{context.user.id}", 20, 60 * 60)
     report, duplicate = file_report(db, context.user, req.target_type, req.target_id, req.reason, req.details)
-    return {"report": serialize_report(db, report), "duplicate": duplicate}
+    return {"report": serialize_report(db, report, reporter_copy=True), "duplicate": duplicate}
 
 
 @router.get("/api/moderation/reports")

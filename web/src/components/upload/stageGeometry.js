@@ -1,7 +1,7 @@
 // Pure layout math for the Upload Studio stage: where the source sits inside
 // the 1:1 master and which bands the outpaint model has to generate.
 
-export const MASTER_SIDE = 3840;
+export const MASTER_SIDE = 2048;
 
 // Mirrors pipeline/utils.py calculate_square_padding (symmetric, floor first).
 export function squarePadding(width, height) {

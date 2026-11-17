@@ -16,7 +16,7 @@ from server.routers.reels import LOCATION_POOL  # noqa: E402
 
 OUT = Path("reports/city_photos")
 API = "https://commons.wikimedia.org/w/api.php"
-HEADERS = {"User-Agent": "EchoReelsDev/1.0 (leduchoang011@gmail.com) python-requests"}
+HEADERS = {"User-Agent": "EchoReelsDev/1.0 (https://echomultiverse.com) python-requests"}
 PER_CITY = 3
 FREE = re.compile(r"^(cc0|cc[- ]by|cc[- ]by[- ]sa|public domain|pd)", re.I)
 

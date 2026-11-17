@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 IMAGE_POST_DWELL_MS = 15_000
 # A multi-image post carries at most this many images (cover included).
 MAX_POST_IMAGES = 10
+# Who can see a post: everyone, or only its owner.
+POST_VISIBILITIES = ("public", "private")
 
 
 def normalize_media_path(value: str) -> str:
@@ -897,7 +899,10 @@ def create_or_update_post(
     stable_legacy_id: bool = False,
     slide_paths: list[str] | None = None,
     stereo_layout: str | None = None,
+    visibility: str | None = None,
 ) -> Post:
+    if visibility is not None and visibility not in POST_VISIBILITIES:
+        raise ValueError(f"Unknown post visibility: {visibility!r}")
     normalized_path = normalize_media_path(media_path)
     post = db.query(Post).filter(Post.media_path == normalized_path).first()
     created = created_at or utcnow()
@@ -923,6 +928,8 @@ def create_or_update_post(
     post.source = str(source or "upload")[:32]
     post.status = "published"
     post.deleted_at = None
+    if visibility is not None:
+        post.visibility = visibility
     if stereo_layout is not None:
         post.stereo_layout = stereo_layout if stereo_layout in {"mono", "sbs", "tb"} else "mono"
     elif not post.stereo_layout:
@@ -1037,6 +1044,7 @@ def post_card(
         "tags": post_tags(post),
         "location": post.location or {},
         "source": post.source,
+        "visibility": post.visibility or "public",
         "likes": post.like_count,
         "views": post.view_count,
         "comments_count": post.comment_count,
@@ -1293,6 +1301,14 @@ def scoped_media_paths(
         )
         if author:
             query = query.filter(User.username_norm == str(author).strip().casefold())
+        # Private rows only on the owner's own creator feed.
+        if author and viewer_id:
+            query = query.filter(or_(
+                Post.visibility == "public",
+                and_(Post.visibility == "private", Post.owner_id == viewer_id),
+            ))
+        else:
+            query = query.filter(Post.visibility == "public")
         if feed == "following":
             if not viewer_id:
                 return []

@@ -1,0 +1,5 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel">
+  <!-- Chamfered square, accent ticks pushing outward -->
+  <path d="M7 5H17L19 7V17L17 19H7L5 17V7L7 5Z"/>
+  <path d="M1.5 12H5M19 12H22.5" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8"/>
+</svg>

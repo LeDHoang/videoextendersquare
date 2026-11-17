@@ -142,7 +142,7 @@ def staff_user(user: User) -> dict:
         **public_user(user),
         "email": user.email,
         "role": user.role,
-        "env_role": configured_role(user.email or "", user.username),
+        "env_role": configured_role(user.email or ""),
         "status": user.status,
         "last_seen_at": iso(user.last_seen_at),
     }
@@ -359,7 +359,7 @@ def set_role(
         fail(422, "SELF_ROLE_CHANGE", "You cannot change your own role.")
     if user.status == "deleted":
         fail(409, "ACCOUNT_DELETED", "Deleted accounts cannot be given a role.")
-    env_role = configured_role(user.email or "", user.username)
+    env_role = configured_role(user.email or "")
     if role_rank(req.role) < role_rank(env_role):
         fail(
             409,

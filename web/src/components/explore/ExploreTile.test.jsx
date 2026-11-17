@@ -298,3 +298,24 @@ describe('ExploreTile video loading', () => {
     expect(sources(container)).toEqual([null]);
   });
 });
+
+describe('ExploreTile private posts', () => {
+  beforeEach(() => {
+    vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('badges a private post as PRIVATE', () => {
+    const { container } = renderTile({ video: video({ visibility: 'private' }) });
+    expect(container.querySelector('.sx-explore-kind')).toHaveTextContent('PRIVATE');
+  });
+
+  it('leaves a public post without the PRIVATE badge', () => {
+    const { container } = renderTile({ video: video({ visibility: 'public' }) });
+    expect(container).not.toHaveTextContent('PRIVATE');
+  });
+});

@@ -40,6 +40,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.delenv("SX_TURNSTILE_SECRET", raising=False)
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(social, "send_verification_email", lambda to, token: sent.append((to, token)) or True)
+    monkeypatch.setattr(social, "send_account_exists_email", lambda to: sent.append((to, "account-exists")) or True)
     engine = sa.create_engine(
         "sqlite:///" + str(tmp_path / "verify.db"), connect_args={"check_same_thread": False}
     )
@@ -205,6 +206,32 @@ def test_login_rate_limit_switch(env, monkeypatch):
     assert _login(client, "nobody", "wrong").status_code == 401
 
 
+def _login_from(client, ip, password="wrong"):
+    return client.post(
+        "/api/auth/login",
+        json={"identifier": "newbie", "password": password},
+        headers={"CF-Connecting-IP": ip},
+    )
+
+
+def test_failed_logins_from_one_ip_do_not_lock_out_the_owner(env, monkeypatch):
+    client, _Session, _sent = env
+    monkeypatch.setattr(auth, "TRUST_PROXY_HEADERS", True)
+    assert _verify(client, _register(client).json()["debug_token"]).status_code == 200
+    client.cookies.clear()
+    codes = [_login_from(client, "203.0.113.7").status_code for _ in range(11)]
+    assert codes == [401] * 10 + [429]
+    assert _login_from(client, "198.51.100.2", PASSWORD).status_code == 200
+
+
+def test_account_limit_still_holds_across_many_ips(env, monkeypatch):
+    client, _Session, _sent = env
+    monkeypatch.setattr(auth, "TRUST_PROXY_HEADERS", True)
+    for n in range(5):
+        assert [_login_from(client, f"203.0.113.{n}").status_code for _ in range(10)] == [401] * 10
+    assert _login_from(client, "203.0.113.99").status_code == 429
+
+
 def test_resend_answers_the_same_for_unknown_email(env):
     client, _Session, sent = env
     _register(client)
@@ -249,7 +276,9 @@ def test_resend_is_rate_limited_per_account(env):
 def test_unexpired_pending_user_blocks_reregistration(env):
     client, _Session, _sent = env
     _register(client)
-    assert _register(client).status_code == 409
+    same = _register(client)
+    assert same.status_code == 409
+    assert same.json()["detail"]["code"] == "USERNAME_TAKEN"
     other_email = _register(client, "newbie", email="else@example.com")
     assert other_email.status_code == 409
     assert other_email.json()["detail"]["code"] == "USERNAME_TAKEN"
@@ -269,12 +298,52 @@ def test_expired_pending_user_is_replaced(env):
 
 
 def test_active_account_is_never_replaced(env):
-    client, _Session, _sent = env
+    client, Session, _sent = env
     assert _verify(client, _register(client).json()["debug_token"]).status_code == 200
     client.cookies.clear()
     response = _register(client, "other", email="newbie@example.com")
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "EMAIL_TAKEN"
+    assert response.status_code == 202
+    with Session() as db:
+        assert [(u.username_norm, u.status) for u in db.query(User).all()] == [("newbie", "active")]
+
+
+def test_taken_email_answers_like_a_new_signup(env, monkeypatch):
+    client, _Session, sent = env
+    assert _verify(client, _register(client).json()["debug_token"]).status_code == 200
+    monkeypatch.setenv("SX_PASSWORD_RESET_EXPOSE_TOKEN", "0")
+    sent.clear()
+    answers = []
+    for username, email in (("other", "newbie@example.com"), ("fresh", "fresh@example.com")):
+        client.cookies.clear()
+        response = _register(client, username, email=email)
+        answers.append((response.status_code, response.json(), auth.DEVICE_COOKIE in response.cookies))
+    assert answers[0] == answers[1] == (202, {"verification_sent": True}, True)
+    # The owner hears that someone tried their address; the new address gets its link.
+    assert sent[0] == ("newbie@example.com", "account-exists")
+    assert [to for to, _ in sent[1:]] == ["fresh@example.com"]
+
+
+def test_taken_email_notice_is_capped_per_address(env):
+    client, _Session, sent = env
+    assert _verify(client, _register(client).json()["debug_token"]).status_code == 200
+    sent.clear()
+    for n in range(4):
+        client.cookies.clear()
+        assert _register(client, f"other{n}", email="newbie@example.com").status_code == 202
+    assert sent == [("newbie@example.com", "account-exists")] * 3
+
+
+def test_taken_pending_email_gets_a_fresh_link(env):
+    client, _Session, sent = env
+    first = _register(client).json()["debug_token"]
+    client.cookies.clear()
+    again = _register(client, "other", email="newbie@example.com")
+    assert again.status_code == 202
+    assert [to for to, _ in sent] == ["newbie@example.com", "newbie@example.com"]
+    assert _verify(client, first).status_code == 400
+    assert _verify(client, sent[1][1]).status_code == 200
+    assert _status(_Session, "newbie") == "active"
+    assert _status(_Session, "other") is None
 
 
 def test_verification_ttl_comes_from_env(env, monkeypatch):

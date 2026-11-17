@@ -1,4 +1,4 @@
-/* Square Extender 4K — Editorial Precision CSS
+/* Square Extender 2K — Editorial Precision CSS
    ============================================================================
    Brutalist editorial aesthetic for high-end video extension & VR workflows.
    Built with pure Vanilla CSS, design tokens, WCAG AA accessibility, and snappy motion.
@@ -11337,36 +11337,8 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 }
 
 /* ─── Upload Studio ───────────────────────────────────────────────────
-   Two-column extender cockpit: the 1:1 master stage on the left (sticky on
-   desktop, sized to fit the window), the settings deck on the right. */
-.sx-main:has(> .sx-upload-studio) {
-  max-width: min(100%, 1880px);
-}
-
-.sx-shell:has(> .sx-main > .sx-upload-studio) > .sx-footer {
-  max-width: min(100%, 1880px);
-}
-
-.sx-upload-studio {
-  /* Sticky offset of the stage column (below the site header). */
-  --sx-studio-top: 76px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sx-4);
-  min-width: 0;
-}
-
-.sx-studio-banner-meta {
-  min-width: 0;
-  font: 500 var(--sx-t-eyebrow)/1.4 var(--sx-font-mono);
-  color: var(--sx-ink-3);
-  overflow-wrap: anywhere;
-}
-
-.sx-studio-banner-meta b {
-  color: var(--sx-ink);
-}
-
+   The 1:1 master stage and the settings controls of the Upload page. Its
+   shelves, tiles and dialog are in upload-media.css. */
 .sx-studio-dot {
   display: inline-block;
   width: 8px;
@@ -11392,14 +11364,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 
 @media (prefers-reduced-motion: reduce) {
   .sx-studio-dot.sx-pulse { animation: none; }
-}
-
-.sx-studio-grid {
-  display: grid;
-  /* Stage column always takes at least half the row; the deck gets the rest. */
-  grid-template-columns: minmax(50%, 1fr) minmax(360px, 1fr);
-  gap: var(--sx-5);
-  align-items: start;
 }
 
 /* ── Stage column ── */
@@ -11983,13 +11947,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 }
 
 /* ── Settings deck ── */
-.sx-studio-deck {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sx-4);
-  min-width: 0;
-}
-
 .sx-studio-card {
   display: flex;
   flex-direction: column;
@@ -11997,69 +11954,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   padding: var(--sx-4);
   background: var(--sx-surface);
   border: 1px solid var(--sx-rule-strong);
-}
-
-.sx-studio-card.sx-studio-execute,
-.sx-studio-card.sx-studio-share {
-  border: 2px solid color-mix(in srgb, var(--sx-accent) 40%, transparent);
-  box-shadow: var(--sx-shadow-card);
-}
-
-.sx-studio-card-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 8px;
-  margin-bottom: var(--sx-4);
-  border-bottom: 1px solid var(--sx-rule);
-}
-
-.sx-studio-card-num {
-  color: var(--sx-accent);
-  font-family: var(--sx-font-display);
-  font-size: 1.1rem;
-  line-height: 1;
-}
-
-.sx-studio-card-title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  color: var(--sx-ink);
-  font-family: var(--sx-font-display);
-  font-size: 0.86rem;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.sx-studio-badge {
-  padding: 3px 7px;
-  border: 1px solid color-mix(in srgb, var(--sx-accent) 30%, transparent);
-  background: color-mix(in srgb, var(--sx-accent) 10%, transparent);
-  color: var(--sx-accent);
-  font: 700 var(--sx-t-eyebrow)/1.2 var(--sx-font-mono);
-  letter-spacing: 0.04em;
-  text-align: right;
-}
-
-.sx-studio-badge.sx-muted {
-  border-color: var(--sx-rule);
-  background: var(--sx-surface-2);
-  color: var(--sx-ink-3);
-}
-
-.sx-studio-badge.sx-ok {
-  border-color: var(--sx-success-border);
-  background: var(--sx-success-dim);
-  color: var(--sx-success-hi);
-}
-
-.sx-studio-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sx-4);
-  min-width: 0;
 }
 
 .sx-studio-field {
@@ -12160,10 +12054,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   border: 2px solid var(--sx-accent);
   padding: 9px;
   color: var(--sx-ink);
-}
-
-.sx-studio-model.sx-static {
-  cursor: default;
 }
 
 .sx-studio-model-name {
@@ -12322,37 +12212,8 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   width: auto;
 }
 
-.sx-studio-results {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.sx-studio-results-head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 6px;
-  padding-bottom: 6px;
-  border-bottom: 2px solid var(--sx-accent);
-  color: var(--sx-ink-3);
-  font: 700 var(--sx-t-eyebrow)/1.3 var(--sx-font-mono);
-}
-
-.sx-studio-results-head span:first-child {
-  color: var(--sx-ink);
-}
-
-.sx-studio-deck .sx-mono {
-  overflow-wrap: anywhere;
-}
-
 /* One column: stage first, full width, scrolls with the page. */
 @media (max-width: 1100px) {
-  .sx-studio-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .sx-studio-stage-col {
     position: static;
     max-height: none;
@@ -12361,12 +12222,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 
   .sx-studio-stage-wrap {
     width: min(100%, 760px);
-  }
-}
-
-@media (max-width: 1100px) and (min-width: 0px) {
-  .sx-studio-grid > .sx-studio-stage-col {
-    width: 100%;
   }
 }
 

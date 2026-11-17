@@ -179,6 +179,7 @@ export default function StudioStage({
   extendPath,
   stereo,
   upscaleOnly,
+  targetLabel,
   trim,
   outpaintActive,
   onMoveGalleryItem,
@@ -210,7 +211,7 @@ export default function StudioStage({
   const showZones = !showExtended && !isSlideshow && !stereo && geometry && !geometry.square && extendPath && !upscaleOnly;
   const meta = selected?.meta || {};
   const stageLabel = showExtended
-    ? resultStereo ? `3D ${STEREO_LABELS[resultStereo]} · LEFT EYE` : `EXTENDED MASTER (${MASTER_SIDE}×${MASTER_SIDE})`
+    ? resultStereo ? `3D ${STEREO_LABELS[resultStereo]} · LEFT EYE` : `EXTENDED MASTER${result.width ? ` (${result.width}×${result.height})` : ''}`
     : stereoEye
       ? `LEFT EYE · 2D VIEW (${stereoEye.width}×${stereoEye.height})`
       : isSlideshow
@@ -248,7 +249,7 @@ export default function StudioStage({
               </>
             ) : geometry && !isSlideshow ? (
               <>
-                <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{geometry.width}×{geometry.height} ➔ {MASTER_SIDE}×{MASTER_SIDE}</span>
+                <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{[selected.sourceKnown === false ? null : `${geometry.width}×${geometry.height}`, result?.width ? `${result.width}×${result.height}` : targetLabel].filter(Boolean).join(' ➔ ') || '1:1 SQUARE'}</span>
               </>
             ) : (
               <span className="sx-studio-pill">{isSlideshow ? `${entries.length} IMAGES · AS-IS` : `TARGET ${MASTER_SIDE}×${MASTER_SIDE} · 1:1`}</span>
@@ -372,7 +373,7 @@ export default function StudioStage({
           </div>
         ) : null}
 
-        {layout !== 'batch' && kind === 'video' && Number(meta.duration) > 10 ? (
+        {layout !== 'batch' && kind === 'video' && outpaintActive && Number(meta.duration) > 10 ? (
           <AccentBlock
             tone="warn"
             title={`${meta.duration}s EXCEEDS THE 10s THRESHOLD`}
@@ -412,7 +413,7 @@ export default function StudioStage({
                   </button>
                   <span className={`sx-studio-chip sx-${tone}`}>{chip}</span>
                   {entry.result ? (
-                    <a className="sx-studio-queue-dl" href={entry.result.download_url} download aria-label={`Download 4K master of ${entry.name}`}>↓ 4K</a>
+                    <a className="sx-studio-queue-dl" href={entry.result.download_url} download aria-label={`Download 2K master of ${entry.name}`}>↓ 2K</a>
                   ) : null}
                   {!locked && !entry.status ? (
                     <button type="button" className="sx-studio-queue-x" onClick={() => onRemoveBatchItem(entry.key)} aria-label={`Remove ${entry.name}`}>×</button>

@@ -1,4 +1,4 @@
-"""Square Extender 4K — Streamlit entrypoint.
+"""Square Extender 2K — Streamlit entrypoint.
 
 Everything here is once-per-run global setup; the views live in ui/views/.
 
@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from ui import health
 
 st.set_page_config(
-    page_title="Square Extender 4K",
+    page_title="Square Extender 2K",
     page_icon="◼",
     layout="wide",
     initial_sidebar_state="expanded",

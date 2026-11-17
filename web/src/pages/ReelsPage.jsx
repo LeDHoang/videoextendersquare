@@ -22,7 +22,7 @@ const SORTS = [
 const VALID_SORTS = SORTS.map((option) => option.value);
 // /api/reels page size here: enough for the deep-link lookup and empty state.
 const REELS_PAGE_SIZE = 60;
-const CODEC_DEFAULT = 'HEVC 4K (Raw Master)';
+const CODEC_DEFAULT = 'HEVC 2K (Raw Master)';
 const CODEC_OPTS = [
   { label: FORMAT_FILTER_LABELS.hevc, value: CODEC_DEFAULT },
   { label: FORMAT_FILTER_LABELS.h264, value: 'H264 (Browser/VR)' },

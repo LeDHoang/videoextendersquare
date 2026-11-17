@@ -287,7 +287,7 @@ def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
     posts = (
         db.query(
             Post.id, Post.owner_id, Post.created_at, Post.like_count, Post.view_count,
-            Post.title, Post.caption, Post.location,
+            Post.title, Post.caption, Post.location, Post.visibility,
         )
         .join(User, User.id == Post.owner_id)
         .filter(Post.status == "published", Post.deleted_at.is_(None), User.status == "active")
@@ -310,6 +310,7 @@ def _catalog_base(db: Session) -> tuple[CatalogItem, ...]:
             view_count=int(post.view_count or 0),
             text_tokens=tokenize(f"{post.title} {post.caption}"),
             location=_post_location(post.location),
+            private=post.visibility == "private",
         )
         for post in posts
     )
@@ -463,6 +464,9 @@ def _catalog(
         if item.owner_id in excluded_creators or item.post_id in excluded:
             continue
         if allowed_post_ids is not None and item.post_id not in allowed_post_ids:
+            continue
+        # A private post comes in only when the caller's allowlist revealed it.
+        if item.private and (allowed_post_ids is None or item.post_id not in allowed_post_ids):
             continue
         if followed is not None and item.owner_id not in followed:
             continue
@@ -1287,6 +1291,7 @@ def _materialize_creator_page(
             Post.owner_id.in_(user_ids) if user_ids else False,
             Post.status == "published",
             Post.deleted_at.is_(None),
+            Post.visibility == "public",
         )
         .all()
     )

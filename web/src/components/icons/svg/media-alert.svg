@@ -1,0 +1,5 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel">
+  <!-- Chamfered warning plate, accent beam and node -->
+  <path d="M12 3L21 18L19 21H5L3 18L12 3Z"/>
+  <path d="M12 9V14M12 16.5V18" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8"/>
+</svg>

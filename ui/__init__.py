@@ -1,1 +1,1 @@
-# UI module for Square Extender 4K
+# UI module for Square Extender 2K

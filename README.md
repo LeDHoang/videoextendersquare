@@ -15,7 +15,7 @@
 The screenshots below showcase ECHO's end-to-end platform, from AI spatial outpainting and hardware-accelerated HEVC encoding to WebXR immersive playback, authored Reel Packs, social discovery, and encrypted direct messaging.
 
 ### 1. Image Extender & Multi-File Batch Mode
-Generatively extend canvas borders to 1:1 square (3840×3840) with instant padding metrics, multi-model cloud / offline upscalers, and live system probes.
+Generatively extend canvas borders to 1:1 square (2048×2048) with instant padding metrics, multi-model cloud / offline upscalers, and live system probes.
 ![Image Processing Interface](docs/images/image_extender.png)
 
 ### 2. Video Extender & Live Cost Breakdown

@@ -17,7 +17,7 @@ from server.billing.service import BillingError, create_billing_job, finalize_jo
 from pipeline.utils import calculate_square_padding, get_image_dimensions, shown_image_size
 from server import media as SM
 from server import output
-from server import kill_switch, quotas, trust, upload_log
+from server import kill_switch, quotas, render_index, trust, upload_log
 from server.jobs import JobStatus, QueueFull, job_manager, public_result
 from server.sse import job_progress_stream
 from server.social.auth import AuthContext, get_optional_auth, require_auth_csrf, stage_owner_identity, stage_owner_matches, validate_origin
@@ -28,7 +28,8 @@ from sqlalchemy.orm import Session
 router = APIRouter(prefix="/api/image", tags=["image"])
 
 # stage_id -> (path, staged_at). See video.py's identical pattern.
-STAGED_UPLOADS: dict[str, tuple[str, float, str]] = {}
+# stage_id -> (path, staged_at, owner, original filename)
+STAGED_UPLOADS: dict[str, tuple] = {}
 STAGE_TTL_S = 6 * 3600
 
 
@@ -76,7 +77,7 @@ def upload_image(
     except SM.StagingFull as ex:
         raise quotas.storage_full_error(str(ex)) from ex
 
-    STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context))
+    STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context), file.filename)
 
     try:
         w, h = get_image_dimensions(dest_path)
@@ -237,9 +238,17 @@ def start_image_process(
         rec = output.persist(worker_path, "image", job_id)
         rec["outpaint_url"] = outpaint_url
         rec["download_url"] = f"/api/image/jobs/{job_id}/download"
+        try:
+            rec["width"], rec["height"] = get_image_dimensions(rec["path"])
+        except Exception:
+            pass
         return rec
 
     upload_log.link_job(job_id, stage_id)
+    render_index.started(
+        job_id, user_id=owner_id, kind="image", stage_id=stage_id,
+        filename=staged[3] if len(staged) > 3 else None,
+    )
     upload_log.record(
         stage_id, "process_queued", kind="image", job_id=job_id, user_id=owner_id,
         payment_source=payment_source if cloud_required else "local", params=params,

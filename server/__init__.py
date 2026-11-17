@@ -1,1 +1,1 @@
-"""Square Extender 4K — FastAPI backend package."""
+"""Square Extender 2K — FastAPI backend package."""

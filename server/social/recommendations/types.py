@@ -31,6 +31,7 @@ class CatalogItem:
     view_count: int
     text_tokens: tuple[str, ...] = ()
     location: PostLocation | None = None
+    private: bool = False
 
 
 @dataclass(frozen=True, slots=True)

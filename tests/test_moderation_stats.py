@@ -27,7 +27,7 @@ def app(tmp_path, monkeypatch):
     session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(engine)
     # Login re-derives the role from these lists, so a role set on the row alone would be reset.
-    monkeypatch.setenv("SX_MODERATOR_USERS", "the_mod")
+    monkeypatch.setenv("SX_MODERATOR_USERS", "the_mod@example.com")
     monkeypatch.setenv("SX_ADMIN_USERS", "")
     application = FastAPI()
     application.include_router(account_safety.router)

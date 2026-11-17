@@ -12,6 +12,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
@@ -55,7 +56,7 @@ from server.social.auth import (
     verify_password,
 )
 from server.social.database import get_db
-from server.social.email import send_verification_email, verification_ttl_minutes
+from server.social.email import send_account_exists_email, send_verification_email, verification_ttl_minutes
 from server.social.models import (
     AuthSession,
     Comment,
@@ -80,6 +81,7 @@ from server.social.services import (
     encode_cursor,
     event_dict_is_valid,
     get_post_by_reference,
+    invalidate_reel_records,
     post_card,
     record_event,
     serialize_comment,
@@ -140,8 +142,10 @@ def _verify_dummy_password(password: str) -> None:
         pass
 
 
-def configured_role(email: str, username: str) -> str:
-    identities = {email.casefold(), username.casefold()}
+def configured_role(email: str) -> str:
+    """Role the env lists give this email. Usernames are not matched: anyone can
+    register a free one, while an email is proven by the sign-up link."""
+    email = email.casefold()
     admins = {
         value.strip().casefold()
         for value in os.environ.get("SX_ADMIN_USERS", "").split(",")
@@ -152,7 +156,7 @@ def configured_role(email: str, username: str) -> str:
         for value in os.environ.get("SX_MODERATOR_USERS", "").split(",")
         if value.strip()
     }
-    return "admin" if identities & admins else "moderator" if identities & moderators else "user"
+    return "admin" if email in admins else "moderator" if email in moderators else "user"
 
 
 ROLE_RANKS = {"user": 0, "moderator": 1, "admin": 2}
@@ -168,7 +172,7 @@ def bootstrap_role(user: User) -> None:
     The env lists only bootstrap staff. Roles granted or removed in the admin
     console live in the database and survive the next sign-in.
     """
-    assigned_role = configured_role(user.email or "", user.username)
+    assigned_role = configured_role(user.email or "")
     if role_rank(assigned_role) > role_rank(user.role):
         user.role = assigned_role
 
@@ -357,13 +361,18 @@ def media_card(
     return card
 
 
-def post_query(db: Session):
+def post_query(db: Session, *, include_private_of: str | None = None):
+    """Published posts that may be listed: public ones, plus the private posts
+    of ``include_private_of`` (the owner looking at their own posts)."""
     from server.social.models import PostTag
 
+    listed = Post.visibility == "public"
+    if include_private_of:
+        listed = or_(listed, and_(Post.visibility == "private", Post.owner_id == include_private_of))
     return db.query(Post).options(
         joinedload(Post.owner),
         selectinload(Post.tags).selectinload(PostTag.tag),
-    ).filter(Post.status == "published", Post.deleted_at.is_(None))
+    ).filter(Post.status == "published", Post.deleted_at.is_(None), listed)
 
 
 class RegisterRequest(BaseModel):
@@ -410,6 +419,7 @@ class PostUpdateRequest(BaseModel):
     caption: str | None = None
     tags: list[str] | None = None
     location: dict | None = None
+    visibility: Literal["public", "private"] | None = None
 
 
 class CommentRequest(BaseModel):
@@ -499,6 +509,41 @@ def _verification_accepted(raw_token: str | None = None) -> JSONResponse:
     return JSONResponse(payload, status_code=202)
 
 
+REGISTER_EXISTING_EMAILS_PER_DAY = 3
+
+
+def _deliver_account_exists_email(recipient: str) -> None:
+    try:
+        send_account_exists_email(recipient)
+    except Exception:
+        logger.exception("Account-exists email delivery failed")
+
+
+def _notify_existing_owner(db: Session, existing: User, background_tasks: BackgroundTasks) -> None:
+    """Sign-up named an address that already has an account. The response stays the
+    same as for a new address; the owner hears about it by email instead. The cap is
+    silent, so it cannot be used to tell the two cases apart either."""
+    key = f"register-existing:{existing.email_norm}"
+    if rate_limiter.count(key, 24 * 60 * 60) >= REGISTER_EXISTING_EMAILS_PER_DAY:
+        return
+    rate_limiter.record(key, 24 * 60 * 60)
+    if existing.account_type != "real":
+        return
+    recipient = existing.email or existing.email_norm
+    if existing.status == "pending":
+        # The owner never confirmed: a new link is the useful answer.
+        background_tasks.add_task(_deliver_verification_email, recipient, _issue_verification_token(db, existing))
+    else:
+        background_tasks.add_task(_deliver_account_exists_email, recipient)
+
+
+def _signup_accepted(raw_token: str | None, device_raw: str, device_minted: bool) -> JSONResponse:
+    response = _verification_accepted(raw_token)
+    if device_minted:
+        set_device_cookie(response, device_raw)
+    return response
+
+
 def _clear_expired_pending(db: Session, email: str, username: str) -> None:
     """Drop pending users holding this email/username whose verification lapsed."""
     rows = db.query(User).filter(
@@ -549,19 +594,24 @@ def register(
     password = validate_password(req.password)
     rate_limiter.check(db, f"register-account:{email}:{username}", 3, 60 * 60)
     _clear_expired_pending(db, email, username)
-    if db.query(User.id).filter(User.email_norm == email).first():
-        error(409, "EMAIL_TAKEN", "An account already uses this email.", "email")
+    # Usernames are public, so a taken one may say so. A taken email may not: that
+    # answer is the same 202 as a new sign-up, after the same password hash.
     if db.query(User.id).filter(User.username_norm == username).first():
         error(409, "USERNAME_TAKEN", "This username is already taken.", "username")
+    password_hash = hash_password(password)
+    existing = db.query(User).filter(User.email_norm == email).first()
+    if existing:
+        _notify_existing_owner(db, existing, background_tasks)
+        return _signup_accepted(None, device_raw, device_minted)
     user = User(
         email=email,
         email_norm=email,
         username=username,
         username_norm=username,
-        password_hash=hash_password(password),
+        password_hash=password_hash,
         display_name=(req.display_name.strip() or username)[:60],
         account_type="real",
-        role=configured_role(email, username),
+        role=configured_role(email),
         status="pending",
         terms_version=TERMS_VERSION,
         terms_accepted_at=utcnow(),
@@ -571,18 +621,17 @@ def register(
         db.commit()
     except IntegrityError:
         db.rollback()
-        if db.query(User.id).filter(User.email_norm == email).first():
-            error(409, "EMAIL_TAKEN", "An account already uses this email.", "email")
         if db.query(User.id).filter(User.username_norm == username).first():
             error(409, "USERNAME_TAKEN", "This username is already taken.", "username")
+        existing = db.query(User).filter(User.email_norm == email).first()
+        if existing:
+            _notify_existing_owner(db, existing, background_tasks)
+            return _signup_accepted(None, device_raw, device_minted)
         error(409, "ACCOUNT_CONFLICT", "The account details are already in use.")
     db.refresh(user)
     raw_token = _issue_verification_token(db, user)
     background_tasks.add_task(_deliver_verification_email, email, raw_token)
-    response = _verification_accepted(raw_token)
-    if device_minted:
-        set_device_cookie(response, device_raw)
-    return response
+    return _signup_accepted(raw_token, device_raw, device_minted)
 
 
 @router.post("/api/auth/verify-email")
@@ -648,6 +697,7 @@ def resend_verification(
 
 LOGIN_FAILURES_BEFORE_BOT_CHECK = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+LOGIN_ACCOUNT_LIMIT_ALL_IPS = 50
 
 
 @router.post("/api/auth/login")
@@ -664,7 +714,11 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         # Before the per-account limit, so tokenless bots cannot lock someone out.
         verify_turnstile(req.turnstile_token, identity, "login")
     if settings.login_rate_limit_enabled():
-        rate_limiter.check(db, f"login-account:{identifier}", 10, 15 * 60)
+        # Per account and IP, so one address cannot lock the owner out. The looser
+        # account-wide limit still caps guessing spread over many IPs. Pair first:
+        # a request it refuses never counts toward the account-wide one.
+        rate_limiter.check(db, f"login-account-ip:{identifier}:{identity}", 10, 15 * 60)
+        rate_limiter.check(db, f"login-account:{identifier}", LOGIN_ACCOUNT_LIMIT_ALL_IPS, 15 * 60)
     user = db.query(User).filter(
         User.status.in_(("active", "suspended")),
         User.account_type == "real",
@@ -731,11 +785,12 @@ PROFILE_POST_SORTS = {"newest", "views", "likes"}
 
 def profile_stats(db: Session, owner_id: str) -> dict:
     """Public aggregates for a profile header: total likes received.
-    Counts only published, non-deleted posts."""
+    Counts only published, non-deleted, public posts."""
     published = and_(
         Post.owner_id == owner_id,
         Post.status == "published",
         Post.deleted_at.is_(None),
+        Post.visibility == "public",
     )
     like_total = db.query(func.coalesce(func.sum(Post.like_count), 0)).filter(published).scalar()
     return {
@@ -896,7 +951,7 @@ def get_profile_posts(
         error(404, "USER_NOT_FOUND", "Profile not found.")
     limit = max(1, min(int(limit), 50))
     sort = sort if sort in PROFILE_POST_SORTS else "newest"
-    query = post_query(db).filter(Post.owner_id == user.id)
+    query = post_query(db, include_private_of=viewer_id if viewer_id == user.id else None).filter(Post.owner_id == user.id)
     if media in {"video", "image"}:
         query = query.filter(Post.media_type == media)
     if sort == "newest":
@@ -1114,7 +1169,12 @@ def update_post(
         post.location = dict(req.location)
     if req.tags is not None:
         sync_post_tags(db, post, req.tags)
+    visibility_changed = req.visibility is not None and req.visibility != post.visibility
+    if visibility_changed:
+        post.visibility = req.visibility
     db.commit()
+    if visibility_changed:
+        invalidate_reel_records()
     db.refresh(post)
     return {"post": media_card(post, db, context.user.id)}
 

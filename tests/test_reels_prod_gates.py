@@ -148,7 +148,7 @@ REFRESH_URLS = [
 
 @pytest.mark.parametrize("url", REFRESH_URLS)
 def test_refresh_rescans_for_admins_only(app, monkeypatch, url):
-    monkeypatch.setenv("SX_ADMIN_USERS", "scan_admin")
+    monkeypatch.setenv("SX_ADMIN_USERS", "scan_admin@example.com")
     monkeypatch.setitem(reels._scan_cache, "at", 0.0)
     monkeypatch.setitem(reels._scan_cache, "data", [])
     scans = []

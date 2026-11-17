@@ -40,8 +40,8 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SX_REGISTRATION_ENABLED", "1")
     monkeypatch.delenv("SX_REGISTRATION_ALLOWLIST", raising=False)
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    monkeypatch.setenv("SX_ADMIN_USERS", "admin_user")
-    monkeypatch.setenv("SX_MODERATOR_USERS", "mod_user")
+    monkeypatch.setenv("SX_ADMIN_USERS", "admin_user@example.com")
+    monkeypatch.setenv("SX_MODERATOR_USERS", "mod_user@example.com")
     monkeypatch.setattr(support, "send_support_notification", lambda *args: None)
     republished_media: list = []
     monkeypatch.setattr(admin.media_store, "republish_paths", lambda paths: republished_media.extend(paths) or 0)
@@ -496,6 +496,31 @@ def test_pack_reports_preview_the_cover_and_first_reels(app, staff):
     assert pack["owner"] == "target_user" and pack["item_count"] == 6
     assert [item["title"] for item in pack["items"]] == ["Stop 3", "Stop 0", "Stop 1", "Stop 2"]
     assert all(item["preview_url"] and item["link"] == f"/reels?post={item['id']}" for item in pack["items"])
+
+
+def test_pack_report_reply_leaves_out_private_members(app, staff):
+    mod_client, _ = staff["mod"]
+    _, target = staff["user"]
+    other_client, _ = staff["other"]
+    pack_id = create_pack(app, target["id"])
+    post_ids = [create_post(app, target["id"], title=title) for title in ("Hidden stop", "Stop 1", "Stop 2", "Stop 3")]
+    with app.state.Session() as db:
+        for position, post_id in enumerate(post_ids):
+            db.add(ReelPackItem(pack_id=pack_id, post_id=post_id, position=position))
+        db.get(ReelPack, pack_id).cover_post_id = post_ids[0]
+        db.get(Post, post_ids[0]).visibility = "private"
+        db.commit()
+    reported = mutate(other_client, "POST", "/api/reports", {"target_type": "pack", "target_id": pack_id, "reason": "spam"})
+    assert reported.status_code == 200, reported.text
+    # The reporter's copy: a private member's id opens the post, so it stays out.
+    assert post_ids[0] not in reported.text and "Hidden stop" not in reported.text
+    pack = reported.json()["report"]["target"]
+    assert pack["item_count"] == 3
+    assert [item["title"] for item in pack["items"]] == ["Stop 1", "Stop 2", "Stop 3"]
+    # Staff still see every member.
+    listed = {row["id"]: row for row in mod_client.get("/api/moderation/reports").json()["reports"]}
+    pack = listed[reported.json()["report"]["id"]]["target"]
+    assert pack["item_count"] == 4 and pack["items"][0]["id"] == post_ids[0]
 
 
 def test_report_and_support_actions_are_audited_with_report_ids(app, staff):

@@ -5,7 +5,7 @@ import ExploreTile, { formatCompactCount } from '../components/explore/ExploreTi
 import { DensityToggle, gridClassName, useGridDensity } from '../components/explore/ExploreChrome.jsx';
 import PackTile, { packCoverMembers } from '../components/packs/PackTile.jsx';
 import ReportDialog from '../components/ReportDialog.jsx';
-import { Button, Field, Tabs } from '../components/ui/controls.jsx';
+import { Button, Field, Tabs, ToggleRow } from '../components/ui/controls.jsx';
 import Dialog from '../components/ui/Dialog.jsx';
 import IconButton from '../components/ui/IconButton.jsx';
 import RichText from '../components/ui/RichText.jsx';
@@ -137,7 +137,7 @@ export default function ProfilePage() {
   const [followBusy, setFollowBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState('');
   const [editing, setEditing] = useState(null);
-  const [editForm, setEditForm] = useState({ title: '', caption: '', tags: '' });
+  const [editForm, setEditForm] = useState({ title: '', caption: '', tags: '', visibility: 'public' });
 
   // The active tab is derived from the URL. SAVED is private: it resolves to
   // a real tab only when the viewer is looking at their own profile, so a
@@ -306,6 +306,7 @@ export default function ProfilePage() {
       title: post.title || '',
       caption: post.caption || '',
       tags: (post.tags || []).join(', '),
+      visibility: post.visibility || 'public',
     });
   };
 
@@ -318,6 +319,7 @@ export default function ProfilePage() {
         title: editForm.title,
         caption: editForm.caption,
         tags: editForm.tags.split(',').map((tag) => tag.trim()).filter(Boolean).slice(0, 5),
+        visibility: editForm.visibility,
       });
       setItems((current) => current.map((item) => item.id === editing.id ? { ...item, ...result.post } : item));
       setEditing(null);
@@ -588,6 +590,14 @@ export default function ProfilePage() {
                   <Field label="TAGS (COMMA SEPARATED, MAX 5)">
                     <input className="sx-input" value={editForm.tags} onChange={(event) => setEditForm({ ...editForm, tags: event.target.value })} />
                   </Field>
+                  <div className="sx-studio-field">
+                    <ToggleRow
+                      label="PRIVATE POST"
+                      checked={editForm.visibility === 'private'}
+                      onChange={(on) => setEditForm({ ...editForm, visibility: on ? 'private' : 'public' })}
+                    />
+                    {editForm.visibility === 'private' ? <Mono>Only you and anyone with the link can see it.</Mono> : null}
+                  </div>
                   <div className="sx-profile-actions">
                     <Button onClick={() => setEditing(null)}>CANCEL</Button>
                     <Button variant="primary" loading={actionBusy === editing.id} disabled={actionBusy === editing.id} onClick={saveEditedPost}>SAVE POST</Button>

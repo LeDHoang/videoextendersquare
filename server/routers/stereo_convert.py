@@ -22,10 +22,10 @@ from sqlalchemy.orm import Session
 
 from pipeline import spatial_worker as sw
 from server import media as SM
-from server import kill_switch, output, quotas, trust, upload_log
+from server import kill_switch, output, quotas, render_index, trust, upload_log
 from server.features import feature_enabled, stereo_convert_installed
 from server.jobs import QueueFull, job_manager
-from server.routers.uploads import _resolve_source
+from server.routers.uploads import _resolve_source, staged_filename
 from server.social.auth import AuthContext, require_auth_csrf, validate_origin
 from server.social.database import get_db
 from server.social.services import MAX_POST_IMAGES
@@ -128,6 +128,10 @@ def convert_to_3d(
     # Its events are spatial_* / convert_*, so they never move the upload's status (upload_log.job_finished).
     events = "spatial" if req.depth_pack else "convert"
     upload_log.link_job(job_id, trace_id, events=events)
+    render_index.started(
+        job_id, user_id=context.user.id, kind=req.kind, role="spatial" if req.depth_pack else "3d",
+        stage_id=req.stage_id, source_job_id=req.job_id, filename=staged_filename(req.stage_id),
+    )
     upload_log.record(trace_id, f"{events}_queued", kind=req.kind, job_id=job_id, user_id=context.user.id,
                       source_stage_id=req.stage_id, source_job_id=req.job_id)
     try:

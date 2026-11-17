@@ -8,6 +8,7 @@ import { WalletProvider } from './hooks/WalletContext.jsx';
 import './styles/tokens.css';
 import './styles/global.css';
 import './styles/editorial.css';
+import './styles/upload-media.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

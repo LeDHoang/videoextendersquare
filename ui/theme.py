@@ -1,4 +1,4 @@
-"""Theme injection for Square Extender 4K.
+"""Theme injection for Square Extender 2K.
 
 Loads the editorial CSS and injects it into the Streamlit page.
 Called once from app.py before any view renders.

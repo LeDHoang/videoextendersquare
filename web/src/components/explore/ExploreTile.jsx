@@ -167,8 +167,8 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const placeKey = locationKey(video.location?.city, video.location?.country);
   const tagHint = (video.tags || []).map((tag) => '#' + tag).join(' ');
   const label = video.title || video.filename || video.path?.split('/').pop() || 'Untitled reel';
-  // 3D posts carry a "3D" tag next to the kind/context badge.
-  const badge = [contextTag ? '#' + contextTag : imagePostLabel(video), stereoLayout(video) !== 'mono' ? '3D' : '']
+  // 3D posts carry a "3D" tag next to the kind/context badge; private posts lead with "PRIVATE".
+  const badge = [video.visibility === 'private' ? 'PRIVATE' : '', contextTag ? '#' + contextTag : imagePostLabel(video), stereoLayout(video) !== 'mono' ? '3D' : '']
     .filter(Boolean)
     .join(' · ');
   const crop = stereoCropClass(video);

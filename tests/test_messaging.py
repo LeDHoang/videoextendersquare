@@ -223,7 +223,7 @@ def test_followed_recipient_gets_active_conversation_and_batch_share_is_idempote
 
 
 def test_message_report_preserves_encrypted_evidence_after_delete(app, monkeypatch):
-    monkeypatch.setenv("SX_ADMIN_USERS", "moderator_admin")
+    monkeypatch.setenv("SX_ADMIN_USERS", "admin@example.com")
     with TestClient(app) as sender_client, TestClient(app) as receiver_client, TestClient(app) as admin_client:
         register(sender_client, "report_sender", "sender@example.com")
         register(receiver_client, "report_receiver", "receiver@example.com")
@@ -480,7 +480,7 @@ def test_conversation_list_pages_with_a_cursor_without_gaps_or_repeats(app):
 
 
 def test_deleted_account_dms_are_hidden_from_the_other_participant_but_kept(app, monkeypatch):
-    monkeypatch.setenv("SX_ADMIN_USERS", "moderator_admin")
+    monkeypatch.setenv("SX_ADMIN_USERS", "admin@example.com")
     with TestClient(app) as alice_client, TestClient(app) as bob_client, TestClient(app) as admin_client:
         alice = register(alice_client, "alice_user", "alice@example.com")
         bob = register(bob_client, "bob_user", "bob@example.com")

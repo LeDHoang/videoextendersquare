@@ -57,7 +57,7 @@ def render(ctx: dict) -> None:
     probes = ctx["probes"]
     blocked = H.blockers(probes, need_video=False)
 
-    C.hero("Square Extender 4K", "1:1 · 3840×3840 · OUTPAINT + UPSCALE")
+    C.hero("Square Extender 2K", "1:1 · 3840×3840 · OUTPAINT + UPSCALE")
 
     if blocked:
         C.blocking_banner(
