@@ -117,6 +117,11 @@ export default function SupportPage() {
             Suspended accounts can file an appeal here without signing in. Read the{' '}
             <Link to="/rules">community rules</Link> first if you are unsure why content was removed.
           </p>
+          <p>
+            For questions about cookies, including the 1-year anonymous viewer cookie, or about your data,
+            choose &ldquo;Privacy or data request&rdquo;. The Privacy Policy lists{' '}
+            <Link to="/privacy#privacy-cookies">every cookie we set</Link>.
+          </p>
           <FormField label="TOPIC" id="support-category">
             <select className="sx-ps-input" value={form.category} onChange={set('category')}>
               {SUPPORT_CATEGORIES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}

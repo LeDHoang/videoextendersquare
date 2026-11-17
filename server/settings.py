@@ -109,4 +109,6 @@ def production_config_errors() -> list[str]:
         errors.append("SX_PASSWORD_RESET_EXPOSE_TOKEN must be 0 (it returns reset and verification tokens in responses)")
     if not login_rate_limit_enabled() and not _local_url(os.environ.get("SX_PUBLIC_URL", "")):
         errors.append("SX_LOGIN_RATE_LIMIT=0 is only allowed when SX_PUBLIC_URL is a localhost URL")
+    if not os.environ.get("SX_TURNSTILE_SECRET", "").strip() and not env_flag("SX_TURNSTILE_DISABLED"):
+        errors.append("SX_TURNSTILE_SECRET is not set (set SX_TURNSTILE_DISABLED=1 to run without the bot check)")
     return errors

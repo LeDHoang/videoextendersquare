@@ -104,6 +104,7 @@ class _FakeResponse:
 @pytest.fixture
 def turnstile_on(monkeypatch):
     monkeypatch.setenv("SX_TURNSTILE_SECRET", "test-secret")
+    monkeypatch.delenv("SX_TURNSTILE_DISABLED", raising=False)
     monkeypatch.setenv("SX_PUBLIC_URL", "https://echomultiverse.com")
     calls: list[dict] = []
 

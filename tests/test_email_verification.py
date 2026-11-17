@@ -413,6 +413,21 @@ def test_turnstile_outage_fails_closed(env, turnstile_on, monkeypatch):
     assert response.json()["detail"]["code"] == "BOT_CHECK_FAILED"
 
 
+def test_turnstile_kill_switch_skips_the_check_and_hides_the_site_key(env, turnstile_on, monkeypatch):
+    from server.routers import config
+
+    client, _Session, _sent = env
+    monkeypatch.setenv("SX_TURNSTILE_DISABLED", "1")
+    monkeypatch.setenv("SX_TURNSTILE_SITE_KEY", "0xSITE")
+    response = _register(client)
+    assert response.status_code == 202, response.text
+    assert turnstile_on == []
+    app = FastAPI()
+    app.include_router(config.router)
+    with TestClient(app) as config_client:
+        assert config_client.get("/api/config").json()["turnstile_site_key"] == ""
+
+
 def test_turnstile_token_for_another_form_is_refused(env, turnstile_on):
     client, _Session, _sent = env
     _verified_user(client)

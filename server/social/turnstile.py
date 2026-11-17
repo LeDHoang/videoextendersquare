@@ -2,7 +2,10 @@
 
 ``SX_TURNSTILE_SITE_KEY`` goes to the SPA through ``/api/config``;
 ``SX_TURNSTILE_SECRET`` stays server-side. With the secret unset the check is
-skipped (local dev, tests) and ``log_turnstile_status`` warns once at boot.
+skipped (local dev, tests) and ``log_turnstile_status`` warns once at boot;
+production refuses to boot that way (``server.settings``).
+``SX_TURNSTILE_DISABLED=1`` is the kill switch for a Cloudflare outage: every
+check is skipped and the SPA gets no site key, so it renders no widget.
 
 A token passes only when Cloudflare reports the expected ``action`` (one per
 form) and the hostname of ``SX_PUBLIC_URL``. Cloudflare's test secrets answer
@@ -17,6 +20,8 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException
+
+from server.settings import env_flag
 
 logger = logging.getLogger("server.turnstile")
 
@@ -35,16 +40,24 @@ def turnstile_secret() -> str:
     return os.environ.get("SX_TURNSTILE_SECRET", "").strip()
 
 
+def turnstile_disabled() -> bool:
+    return env_flag("SX_TURNSTILE_DISABLED")
+
+
 def turnstile_site_key() -> str:
+    if turnstile_disabled():
+        return ""
     return os.environ.get("SX_TURNSTILE_SITE_KEY", "").strip()
 
 
 def turnstile_enabled() -> bool:
-    return bool(turnstile_secret())
+    return bool(turnstile_secret()) and not turnstile_disabled()
 
 
 def log_turnstile_status() -> None:
-    if not turnstile_secret():
+    if turnstile_disabled():
+        logger.warning("SX_TURNSTILE_DISABLED=1: the bot check is skipped.")
+    elif not turnstile_secret():
         logger.warning("SX_TURNSTILE_SECRET is not set: the bot check is skipped.")
     elif not turnstile_site_key():
         logger.warning("SX_TURNSTILE_SITE_KEY is not set: the forms cannot render the challenge.")
@@ -67,9 +80,9 @@ def _expected_hostname() -> str:
 
 def verify_turnstile(token: str | None, ip: str | None, *actions: str) -> None:
     """Raise 400 ``BOT_CHECK_FAILED`` unless Cloudflare accepts ``token`` for one of ``actions``."""
-    secret = turnstile_secret()
-    if not secret:
+    if not turnstile_enabled():
         return
+    secret = turnstile_secret()
     token = (token or "").strip()
     if not token or len(token) > MAX_TOKEN_LENGTH:
         raise _bot_check_failed()

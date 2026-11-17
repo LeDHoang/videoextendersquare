@@ -54,7 +54,7 @@ Ranked by priority (2026-11-16). Registration has been open to everyone since 20
 
 **High priority:**
 
-- Exposed now on the public site, tracked in `docs/to-beta.md` → "Open items by priority" group 1: Turnstile keys, age gate, cookie-consent banner, legal placeholders, staff and support env values, and the takedown path on production.
+- Exposed now on the public site, tracked in `docs/to-beta.md` → "Open items by priority" group 1: age gate, legal placeholders, staff and support env values, and the takedown path on production.
 
 **Verification on production:**
 

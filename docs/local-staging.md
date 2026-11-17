@@ -112,9 +112,11 @@ backup bucket. Run it from the repo root.
    exec docker compose --env-file "$PWD/.env.staging" run --rm -T rclone "\$@"
    EOF
    chmod +x ~/.cache/echo-staging/bin/rclone
+   [ -f ~/.cache/echo-staging/backup.key ] || age-keygen -o ~/.cache/echo-staging/backup.key   # brew install age
    cat > ~/.cache/echo-staging/backup.env <<EOF
    set -a; . "$PWD/.env.staging"; set +a
    BACKUP_REMOTE=staging:echo-backups
+   BACKUP_AGE_RECIPIENT=$(age-keygen -y ~/.cache/echo-staging/backup.key)
    EOF
    export PATH="$HOME/.cache/echo-staging/bin:$PATH"
    BACKUP_ENV_FILE=~/.cache/echo-staging/backup.env deploy/backup.sh
@@ -131,10 +133,10 @@ backup bucket. Run it from the repo root.
    ```bash
    C() { docker compose --env-file .env.staging "$@"; }
    day=$(date -u +%Y-%m-%d)
-   rclone cat "staging:echo-backups/$day/<echo-...dump>" > logs/restore.dump
+   rclone cat "staging:echo-backups/$day/<echo-...dump.age>" | age -d -i ~/.cache/echo-staging/backup.key > logs/restore.dump
    C exec -T postgres sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < logs/restore.dump
    C up -d app && C exec app alembic current          # expect 20261101_0020 (head)
-   rclone cat "staging:echo-backups/$day/<avatars-...tar.gz>" | C exec -T app tar -C /app/data -xzf -
+   rclone cat "staging:echo-backups/$day/<avatars-...tar.gz.age>" | age -d -i ~/.cache/echo-staging/backup.key | C exec -T app tar -C /app/data -xzf -
    mkdir -p logs/restore-media
    C run --rm -T -v "$PWD/logs/restore-media:/out" rclone copy staging:echo-public/uploads /out/uploads
    C cp logs/restore-media/uploads app:/app/output/

@@ -34,6 +34,12 @@ describe('TermsPage', () => {
     expect(screen.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute('href', '/privacy');
   });
 
+  it('discloses the anonymous viewer cookie and links to the cookie list', () => {
+    renderTerms();
+    expect(screen.getByText(/random anonymous ID for 1 year/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Section 5 of the Privacy Policy' })).toHaveAttribute('href', '/privacy#privacy-cookies');
+  });
+
   it('highlights unfilled legal values instead of rendering them as plain text', () => {
     renderTerms();
     const unfilled = Object.values(LEGAL).filter((v) => typeof v === 'string' && v.startsWith('['));

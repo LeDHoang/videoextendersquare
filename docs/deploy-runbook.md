@@ -144,6 +144,7 @@ Store these in a password manager **outside the VPS** before the first user sign
 - [ ] `SX_MESSAGE_ENCRYPTION_KEY`. Losing it makes every DM and all report evidence unreadable.
 - [ ] `SX_FAL_KEY_ENCRYPTION_KEY`. Losing it makes saved per-user fal keys unreadable.
 - [ ] The R2 app token and the R2 backup token.
+- [ ] The backup age private key (`docs/backup-restore-runbook.md`). Keep it only here, never on the VPS. Losing it makes every backup unreadable.
 - [ ] `TUNNEL_TOKEN`.
 - [ ] `POSTGRES_PASSWORD`.
 

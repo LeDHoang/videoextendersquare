@@ -4,12 +4,13 @@ What a full restore needs, and where each piece lives:
 
 | Piece | Lives in | Backed up by |
 |---|---|---|
-| PostgreSQL (users, posts, DMs, reports, credits) | `pgdata` volume | `deploy/backup.sh`: nightly `pg_dump -Fc` to the private R2 bucket |
-| Avatars | `data` volume, `/app/data/avatars` | `deploy/backup.sh`: nightly tarball to the private R2 bucket |
+| PostgreSQL (users, posts, DMs, reports, credits) | `pgdata` volume | `deploy/backup.sh`: nightly `pg_dump -Fc`, encrypted with age, to the private R2 bucket |
+| Avatars | `data` volume, `/app/data/avatars` | `deploy/backup.sh`: nightly tarball, encrypted with age, to the private R2 bucket |
 | Media of every post, published or removed | R2 public bucket (`media.<domain>`), `uploads/` | R2 itself (no copy) |
 | Completed job results | R2 public bucket, `jobs/` | R2 itself; a lifecycle rule deletes them after 30 days |
 | Files of posts removed before 2026-11-01 (moderation evidence) | `output` volume, `/app/output/uploads` | Not backed up (see step 3) |
 | `SX_SECURITY_SECRET`, `SX_MESSAGE_ENCRYPTION_KEY`, `SX_FAL_KEY_ENCRYPTION_KEY` | `.env` on the VPS | **Password-manager escrow** (`docs/deploy-runbook.md` §Secret escrow) |
+| The backup age private key | **Only** in the password manager, never on the VPS | **Password-manager escrow**. Without it no backup can be read |
 | Map-tile cache, job dirs, staged uploads | `data/map_tiles`, container `/tmp` | Not backed up (rebuildable / ephemeral; completed jobs are read back from `jobs/`) |
 
 > **The database alone is not a backup.** DMs, report evidence, and saved fal keys are encrypted with the three escrowed secrets. Restoring a dump with different secrets boots fine but every encrypted field is unreadable. Session cookies are signed with `SX_SECURITY_SECRET`; a new one logs everyone out.
@@ -23,29 +24,36 @@ What a full restore needs, and where each piece lives:
    curl -fsSLO https://downloads.rclone.org/rclone-current-linux-amd64.deb
    sudo apt-get install -y ./rclone-current-linux-amd64.deb && rclone version
    ```
+   Install age from Debian (`sudo apt-get install -y age`); it encrypts each dump before upload.
    Then add a remote for the private backup bucket (S3 provider `Cloudflare`, endpoint `https://<account-id>.r2.cloudflarestorage.com`, the **backup-only** R2 token). `no_check_bucket` is needed because a bucket-scoped token cannot create buckets:
    ```bash
    rclone config create r2-backup s3 provider=Cloudflare \
      access_key_id=<backup-token-id> secret_access_key=<backup-token-secret> \
      endpoint=https://<account-id>.r2.cloudflarestorage.com no_check_bucket=true
    ```
-2. Create `/etc/echo-backup.env` (mode 600):
+2. Make the backup key pair **on your own machine, not the VPS**, and store the whole key file in the password manager. Then delete the local file:
+   ```bash
+   age-keygen -o echo-backup.key    # prints "Public key: age1..."
+   ```
+   The VPS gets only the public key. Anyone who takes the VPS or the backup token still cannot read a backup, and losing the private key makes every backup unreadable.
+3. Create `/etc/echo-backup.env` (mode 600):
    ```bash
    BACKUP_REMOTE=r2-backup:<backup-bucket>
+   BACKUP_AGE_RECIPIENT=age1...                 # the public key from step 2
    BACKUP_PING_URL=https://hc-ping.com/<uuid>   # optional
    BACKUP_SENTRY_CRON_URL=https://o<org-id>.ingest.us.sentry.io/api/<project-id>/cron/echo-backup/<dsn-public-key>/   # optional
    ```
    The Sentry values come from `SENTRY_DSN` (`https://<dsn-public-key>@o<org-id>.ingest.us.sentry.io/<project-id>`). The first run creates the `echo-backup` monitor for a 03:15 UTC daily schedule, so the host clock must be on UTC (`timedatectl`). Sentry opens an issue, and emails you, when a run fails or is missed.
-3. Cron (`crontab -e` as the deploy user, who must be in the `docker` group):
+4. Cron (`crontab -e` as the deploy user, who must be in the `docker` group):
    ```cron
    15 3 * * * cd /opt/echo && deploy/backup.sh >> "$HOME/echo-backup.log" 2>&1
    ```
-4. Run it once by hand and confirm both objects exist:
+5. Run it once by hand and confirm both objects exist:
    ```bash
    deploy/backup.sh && rclone ls r2-backup:<backup-bucket>/$(date -u +%Y-%m-%d)/
    ```
 
-Each run writes `<YYYY-MM-DD>/echo-<stamp>.dump` and `<YYYY-MM-DD>/avatars-<stamp>.tar.gz`. Uploads stream to a `.partial` name and are renamed only when the whole pipe succeeded, so a file without `.partial` is complete. The bucket's 30-day lifecycle rule handles retention (and sweeps any leftover `.partial`). With `BACKUP_PING_URL` set, the script pings `/start`, success, or `/fail`; configure the check's grace period so a *missed* run also alerts.
+Each run writes `<YYYY-MM-DD>/echo-<stamp>.dump.age` and `<YYYY-MM-DD>/avatars-<stamp>.tar.gz.age`. The script stops with an error when `BACKUP_AGE_RECIPIENT` is unset or `age` is missing, so nothing is ever uploaded unencrypted. Uploads stream to a `.partial` name and are renamed only when the whole pipe succeeded, so a file without `.partial` is complete. The bucket's 30-day lifecycle rule handles retention (and sweeps any leftover `.partial`). With `BACKUP_PING_URL` set, the script pings `/start`, success, or `/fail`; configure the check's grace period so a *missed* run also alerts.
 
 ## Restore (disaster recovery or drill)
 
@@ -62,16 +70,18 @@ cp deploy/env.example .env && chmod 600 .env
 # staging bucket or leave the public-bucket token read-only.
 docker compose build --build-arg GIT_SHA="$(git rev-parse HEAD)"
 docker compose up -d postgres
+# age (apt-get install -y age) and the backup private key from the password
+# manager, saved as ./restore/echo-backup.key (mode 600; delete it afterwards).
 ```
 
 ### 1. Database: `pg_restore --clean`
 
 ```bash
-day=<YYYY-MM-DD>; dump=<echo-...dump>
+day=<YYYY-MM-DD>; dump=<echo-...dump.age>
 rclone copy "r2-backup:<backup-bucket>/$day/$dump" ./restore/
-docker compose exec -T postgres sh -c \
-  'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-  < "./restore/$dump"
+age -d -i ./restore/echo-backup.key "./restore/$dump" \
+  | docker compose exec -T postgres sh -c \
+  'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
 
 `--clean --if-exists` drops existing objects first, so it is safe on a fresh database and on one the app already migrated. Then start the app; its entrypoint runs `alembic upgrade head`, which is a no-op when the dump is from the same release:
@@ -84,8 +94,9 @@ docker compose exec app alembic current        # expect 20261101_0020 (head)
 ### 2. Avatars: untar into the data volume
 
 ```bash
-rclone copy "r2-backup:<backup-bucket>/$day/<avatars-...tar.gz>" ./restore/
-docker compose exec -T app tar -C /app/data -xzf - < ./restore/avatars-*.tar.gz
+rclone copy "r2-backup:<backup-bucket>/$day/<avatars-...tar.gz.age>" ./restore/
+age -d -i ./restore/echo-backup.key ./restore/avatars-*.tar.gz.age \
+  | docker compose exec -T app tar -C /app/data -xzf -
 ```
 
 The `exec` runs as the image's non-root `app` user, so the extracted files are owned correctly.

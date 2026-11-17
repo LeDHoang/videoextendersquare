@@ -45,6 +45,12 @@ describe('SupportPage', () => {
     expect(screen.getByLabelText('LINK (OPTIONAL)')).toHaveValue('/profile/someone');
   });
 
+  it('points cookie questions to the privacy topic and the cookie list', () => {
+    renderAt();
+    expect(screen.getByText(/1-year anonymous viewer cookie/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'every cookie we set' })).toHaveAttribute('href', '/privacy#privacy-cookies');
+  });
+
   it('ignores an unknown category prefill', () => {
     renderAt('/support?category=nonsense');
     expect(screen.getByLabelText('TOPIC')).toHaveValue('other');

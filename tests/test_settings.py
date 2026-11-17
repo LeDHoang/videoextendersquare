@@ -15,11 +15,12 @@ GOOD_ENV = {
     "R2_ACCESS_KEY_ID": "key",
     "R2_SECRET_ACCESS_KEY": "secret",
     "R2_PUBLIC_BUCKET": "media",
+    "SX_TURNSTILE_SECRET": "0x4AAAAAAAturnstile",
 }
 
 
 def _apply(monkeypatch, env):
-    for name in list(GOOD_ENV) + ["SX_DEV_ORIGINS", "SX_LOGIN_RATE_LIMIT", "SX_PASSWORD_RESET_EXPOSE_TOKEN"]:
+    for name in list(GOOD_ENV) + ["SX_DEV_ORIGINS", "SX_LOGIN_RATE_LIMIT", "SX_PASSWORD_RESET_EXPOSE_TOKEN", "SX_TURNSTILE_DISABLED"]:
         monkeypatch.delenv(name, raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -50,6 +51,7 @@ def test_empty_production_config_lists_every_problem(monkeypatch):
         "DATABASE_URL",
         "SX_MEDIA_BASE_URL",
         "R2_PUBLIC_BUCKET",
+        "SX_TURNSTILE_SECRET",
     ):
         assert name in errors
 
@@ -95,6 +97,14 @@ def test_login_rate_limit_can_be_lifted_only_for_a_localhost_stack(monkeypatch):
     assert settings.production_config_errors() == []
     monkeypatch.delenv("SX_LOGIN_RATE_LIMIT")
     assert settings.login_rate_limit_enabled()
+
+
+def test_turnstile_secret_is_required_unless_explicitly_disabled(monkeypatch):
+    _apply(monkeypatch, {**GOOD_ENV, "SX_TURNSTILE_SECRET": " "})
+    errors = settings.production_config_errors()
+    assert len(errors) == 1 and "SX_TURNSTILE_SECRET" in errors[0]
+    monkeypatch.setenv("SX_TURNSTILE_DISABLED", "1")
+    assert settings.production_config_errors() == []
 
 
 def test_env_int_falls_back_and_clamps(monkeypatch):

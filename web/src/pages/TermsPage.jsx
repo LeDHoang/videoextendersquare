@@ -211,6 +211,12 @@ export default function TermsPage() {
           Our <Link to="/privacy">Privacy Policy</Link> explains what personal data we collect, how we use it,
           which providers receive it, and how long we keep it. It is part of these Terms.
         </p>
+        <p>
+          The Service sets cookies that keep you signed in, protect your actions, limit abuse, and, when you
+          are not signed in, link your viewing activity to a random anonymous ID for 1 year so view counts and
+          recommendations work. <Link to="/privacy#privacy-cookies">Section 5 of the Privacy Policy</Link> lists
+          each cookie and how long it lasts. Clearing your browser&apos;s cookies removes the anonymous ID.
+        </p>
       </Section>
 
       <Section id="terms-termination" title="15. Deleting your account and termination">

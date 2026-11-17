@@ -3,13 +3,17 @@
 #
 #   15 3 * * * cd /opt/echo && deploy/backup.sh >> /var/log/echo-backup.log 2>&1
 #
-# Streams a custom-format pg_dump and a tarball of data/avatars straight into
-# the PRIVATE R2 backup bucket via rclone (nothing is staged on local disk).
+# Streams a custom-format pg_dump and a tarball of data/avatars, each encrypted
+# with age to a public key, straight into the PRIVATE R2 backup bucket via
+# rclone (nothing is staged on local disk). The host holds only the public key,
+# so neither the host nor the bucket token can read a backup.
 # Public media already lives in the public R2 bucket and is not copied here.
 # Restore procedure: docs/backup-restore-runbook.md
 #
 # Configuration (env, or the file named by BACKUP_ENV_FILE):
 #   BACKUP_REMOTE    rclone destination, e.g. r2-backup:echo-backups (required)
+#   BACKUP_AGE_RECIPIENT  age public key (age1...) the backups are encrypted to
+#                    (required); its private key is escrowed off the host
 #   BACKUP_PING_URL  optional healthchecks.io-style URL; "/fail" is appended on error
 #   BACKUP_SENTRY_CRON_URL  optional Sentry Crons check-in URL; the first
 #                    check-in creates the monitor (daily 03:15 UTC, as above)
@@ -23,6 +27,7 @@ if [[ -f "$BACKUP_ENV_FILE" ]]; then
 fi
 
 : "${BACKUP_REMOTE:?set BACKUP_REMOTE (rclone remote:bucket for the private backup bucket)}"
+: "${BACKUP_AGE_RECIPIENT:?set BACKUP_AGE_RECIPIENT (age public key the backups are encrypted to)}"
 COMPOSE_DIR="${COMPOSE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BACKUP_PING_URL="${BACKUP_PING_URL:-}"
 BACKUP_SENTRY_CRON_URL="${BACKUP_SENTRY_CRON_URL:-}"
@@ -40,6 +45,7 @@ checkin() {
         --data "{\"status\": \"$1\", \"monitor_config\": {\"schedule\": {\"type\": \"crontab\", \"value\": \"15 3 * * *\"}, \"timezone\": \"UTC\", \"checkin_margin\": 30, \"max_runtime\": 120}}" || true
 }
 trap 'ping /fail; checkin error' ERR
+command -v age >/dev/null || { echo "backup: age is not installed" >&2; false; }
 
 cd "$COMPOSE_DIR"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -58,14 +64,16 @@ ping /start
 checkin in_progress
 
 # Database: custom format so pg_restore can --clean / pick objects.
-db_name="echo-${stamp}.dump"
+db_name="echo-${stamp}.dump.age"
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+    | age -r "$BACKUP_AGE_RECIPIENT" \
     | rclone rcat "${BACKUP_REMOTE}/${day}/${db_name}.partial"
 publish "$db_name"
 
 # Avatars are the only user files kept on the VPS volume (media is in R2).
-avatars_name="avatars-${stamp}.tar.gz"
+avatars_name="avatars-${stamp}.tar.gz.age"
 docker compose exec -T app sh -c 'mkdir -p /app/data/avatars && tar -C /app/data -czf - avatars' \
+    | age -r "$BACKUP_AGE_RECIPIENT" \
     | rclone rcat "${BACKUP_REMOTE}/${day}/${avatars_name}.partial"
 publish "$avatars_name"
 
