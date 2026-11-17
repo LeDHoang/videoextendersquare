@@ -211,6 +211,17 @@ export default function ExplorePage() {
   };
 
   const openReel = (video) => {
+    // A posted reel opens by its post id, so the link is short and names no
+    // storage path; Reels already defaults folder, codec and sort. A file with
+    // no post (admin library) still opens by its path.
+    if (video.post_id) {
+      const query = new URLSearchParams({ post: video.post_id });
+      if (folder !== 'ALL FOLDERS') query.set('folder', folder);
+      if (codecParam !== 'hevc') query.set('codec', codecParam);
+      if (debouncedSearch) query.set('search', debouncedSearch);
+      navigate('/reels?' + query.toString());
+      return;
+    }
     const query = new URLSearchParams({
       folder,
       codec: codecParam,

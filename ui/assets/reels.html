@@ -4748,7 +4748,14 @@
       if (location.pathname.indexOf('/api/reels/player') === 0) path = '/reels';
       try {
         const url = new URL(path, location.origin);
-        if (item && item.path) url.searchParams.set('play', item.path);
+        // A ?post= in the page URL wins over ?play=, so point both at this reel.
+        if (item && item.post_id) {
+          url.searchParams.set('post', item.post_id);
+          url.searchParams.delete('play');
+        } else if (item && item.path) {
+          url.searchParams.delete('post');
+          url.searchParams.set('play', item.path);
+        }
         return url.pathname + url.search;
       } catch (e) {
         return '/reels';

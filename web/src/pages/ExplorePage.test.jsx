@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ExplorePage from './ExplorePage.jsx';
 
@@ -17,7 +17,7 @@ vi.mock('../components/explore/ExploreTile.jsx', async () => {
   const actual = await vi.importActual('../components/explore/ExploreTile.jsx');
   return {
     ...actual,
-    default: ({ video }) => <article data-testid="tile">{video.title}</article>,
+    default: ({ video, onOpen }) => <article data-testid="tile" onClick={() => onOpen(video)}>{video.title}</article>,
   };
 });
 
@@ -151,5 +151,44 @@ describe('ExplorePage beta controls', () => {
     expect(screen.getAllByTestId('tile').map((tile) => tile.textContent)).toEqual(['Reel A', 'Reel B', 'Reel C']);
     expect(mocks.api.get).toHaveBeenCalledWith('/api/reels', expect.objectContaining({ cursor: 'page-2', limit: 48, sort: 'for_you' }));
     expect(screen.queryByRole('button', { name: 'LOAD MORE REELS' })).not.toBeInTheDocument();
+  });
+
+  it('opens a posted reel by its post id, and a file with no post by its path', async () => {
+    mocks.api.get.mockImplementation(async (path) => (
+      path === '/api/packs' ? { total: 0, items: [], next_offset: null } : {
+        ...reels,
+        total: 2,
+        count: 2,
+        videos: [{ ...reels.videos[0], post_id: 'p1' }, { ...reels.videos[0], path: 'uploads/b.mp4', title: 'Reel B' }],
+      }
+    ));
+    function Where() {
+      const location = useLocation();
+      return <output data-testid="where">{location.pathname + location.search}</output>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/explore']}>
+        <Routes>
+          <Route path="/explore" element={<ExplorePage />} />
+          <Route path="/reels" element={<Where />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByText('Reel A'));
+    expect(screen.getByTestId('where').textContent).toBe('/reels?post=p1');
+    cleanup();
+
+    render(
+      <MemoryRouter initialEntries={['/explore']}>
+        <Routes>
+          <Route path="/explore" element={<ExplorePage />} />
+          <Route path="/reels" element={<Where />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByText('Reel B'));
+    expect(screen.getByTestId('where').textContent).toBe(
+      '/reels?folder=ALL+FOLDERS&codec=hevc&sort=for_you&play=uploads%2Fb.mp4',
+    );
   });
 });

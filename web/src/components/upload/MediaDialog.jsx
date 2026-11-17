@@ -188,7 +188,9 @@ export default function MediaDialog({
                 </div>
                 <div className="sx-studio-actions">
                   {posted.rel_path ? (
-                    <Button variant="primary" onClick={() => navigate(`/reels?folder=uploads&codec=all&sort=newest&play=${encodeURIComponent(posted.rel_path)}`)}>
+                    <Button variant="primary" onClick={() => navigate(posted.post_id
+                      ? `/reels?post=${encodeURIComponent(posted.post_id)}&codec=all`
+                      : `/reels?folder=uploads&codec=all&sort=newest&play=${encodeURIComponent(posted.rel_path)}`)}>
                       ▶ PLAY IN REELS
                     </Button>
                   ) : null}
