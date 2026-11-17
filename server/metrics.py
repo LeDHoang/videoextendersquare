@@ -320,7 +320,11 @@ def check_alerts() -> list[str]:
         if now - _last_alert.get(key, -math.inf) < cooldown:
             continue
         _last_alert[key] = now
-        logger.error("ALERT %s: %s", key, message, extra={"alert": key})
+        # One Sentry issue per alert key: by default every "ALERT %s: %s" line
+        # groups into one issue, so the first-seen email rule fires only once ever.
+        with sentry_sdk.new_scope() as scope:
+            scope.fingerprint = ["sx-alert", key]
+            logger.error("ALERT %s: %s", key, message, extra={"alert": key})
         logged.append(key)
     return logged
 

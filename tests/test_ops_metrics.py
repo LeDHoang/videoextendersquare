@@ -204,6 +204,29 @@ def test_each_alert_is_logged_once_per_cooldown(monkeypatch, caplog):
     assert metrics.check_alerts() == ["5xx_rate"]
 
 
+
+def test_each_alert_key_gets_its_own_sentry_issue(monkeypatch):
+    import sentry_sdk
+
+    sent = []
+
+    class Capture(sentry_sdk.transport.Transport):
+        def capture_envelope(self, envelope):
+            sent.extend(item.payload.json for item in envelope.items if item.type == "event")
+
+        def flush(self, *args, **kwargs):
+            pass
+
+    snap = _snapshot(requests={"count": 50, "errors_5xx": 10, "error_rate": 0.2, "p95_ms": 9000.0})
+    monkeypatch.setattr(metrics, "snapshot", lambda: snap)
+    monkeypatch.setattr(metrics, "_registration_and_report_spikes", lambda: {})
+    sentry_sdk.init(dsn="https://key@o1.ingest.sentry.io/1", transport=Capture)
+    try:
+        assert set(metrics.check_alerts()) == {"5xx_rate", "p95"}
+    finally:
+        sentry_sdk.init()
+    assert sorted(event["fingerprint"] for event in sent) == [["sx-alert", "5xx_rate"], ["sx-alert", "p95"]]
+
 def test_report_spike_raises_an_alert(app, monkeypatch, caplog):
     monkeypatch.setenv("SX_MOD_SPIKE_MIN", "5")
     monkeypatch.setattr(metrics, "snapshot", _snapshot)
