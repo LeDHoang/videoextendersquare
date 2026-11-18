@@ -275,6 +275,8 @@ jobs:
           SIT_PROBE_EMAIL: ${{ secrets.SIT_PROBE_EMAIL }}
           SIT_PROBE_PEER: ${{ secrets.SIT_PROBE_PEER }}
           SIT_PROBE_PASSWORD: ${{ secrets.SIT_PROBE_PASSWORD }}
+          SIT_ACCESS_CLIENT_ID: ${{ secrets.SIT_ACCESS_CLIENT_ID }}
+          SIT_ACCESS_CLIENT_SECRET: ${{ secrets.SIT_ACCESS_CLIENT_SECRET }}
         run: |
           node scripts/verify_staging.cjs \
             --app https://sit.echomultiverse.com --media https://sit-media.echomultiverse.com \

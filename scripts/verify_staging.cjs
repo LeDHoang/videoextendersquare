@@ -10,6 +10,9 @@
 // --open-signup: the stack runs with registration open (SIT, as production
 // does), so the sign-up check expects the invite gate not to refuse.
 //
+// SIT_ACCESS_CLIENT_ID / SIT_ACCESS_CLIENT_SECRET (env): a Cloudflare Access
+// service token, sent to the app origin only.
+//
 // Backup/restore drill (docs/local-staging.md): seed before the backup, check
 // after the restore that the DM still decrypts and the post media still serves.
 //
@@ -57,6 +60,20 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`);
 }
 
+// SIT sits behind Cloudflare Access: with a service token in the environment,
+// every request to the app origin carries it. The media origin stays outside
+// Access (docs/to-beta.md), so media and Mailpit requests never get these.
+const ACCESS_HEADERS =
+  process.env.SIT_ACCESS_CLIENT_ID && process.env.SIT_ACCESS_CLIENT_SECRET
+    ? {
+        'CF-Access-Client-Id': process.env.SIT_ACCESS_CLIENT_ID,
+        'CF-Access-Client-Secret': process.env.SIT_ACCESS_CLIENT_SECRET,
+      }
+    : {};
+function appFetch(url, init = {}) {
+  return fetch(url, { ...init, headers: { ...ACCESS_HEADERS, ...init.headers } });
+}
+
 const jar = new Map();
 function storeCookies(res) {
   for (const raw of res.headers.getSetCookie()) {
@@ -75,7 +92,7 @@ async function call(path, { method = 'GET', json, form, headers = {} } = {}) {
   } else if (form) {
     init.body = form;
   }
-  const res = await fetch(APP + path, init);
+  const res = await appFetch(APP + path, init);
   storeCookies(res);
   return res;
 }
@@ -175,7 +192,7 @@ async function drillSeed() {
 async function drillCheck() {
   const marker = flag('--marker', '');
   const mediaUrl = flag('--media-url', '');
-  const ready = await fetch(`${APP}/api/readyz`);
+  const ready = await appFetch(`${APP}/api/readyz`);
   check('readyz 200 after restore', ready.status === 200, ready.status === 200 ? '' : await ready.text());
   check('peer signs in with restored password', (await signIn(PEER)).status === 200);
   // A first DM from someone the peer does not follow lands in "requests".
@@ -254,9 +271,9 @@ async function main() {
   console.log(`app ${APP}  media ${MEDIA}`);
 
   // ── Boot and gates ──
-  const health = await fetch(`${APP}/api/healthz`);
+  const health = await appFetch(`${APP}/api/healthz`);
   check('healthz 200', health.status === 200);
-  const shell = await fetch(`${APP}/`);
+  const shell = await appFetch(`${APP}/`);
   const shellHtml = await shell.text();
   for (const [label, res] of [['healthz', health], ['SPA', shell]]) {
     const h = res.headers;
@@ -270,12 +287,12 @@ async function main() {
   const csp = shell.headers.get('content-security-policy-report-only') || '';
   const nonce = (csp.match(/'nonce-([^']+)'/) || [])[1];
   check('SPA: report-only CSP with matching nonce', !!nonce && shellHtml.includes(`nonce="${nonce}"`), csp ? '' : 'no CSP header');
-  const echoed = await fetch(`${APP}/api/healthz`, { headers: { 'X-Request-ID': 'verify-staging-0001' } });
+  const echoed = await appFetch(`${APP}/api/healthz`, { headers: { 'X-Request-ID': 'verify-staging-0001' } });
   check('incoming X-Request-ID echoed', echoed.headers.get('x-request-id') === 'verify-staging-0001');
-  const ready = await fetch(`${APP}/api/readyz`);
+  const ready = await appFetch(`${APP}/api/readyz`);
   check('readyz 200', ready.status === 200, ready.status === 200 ? '' : await ready.text());
-  check('/media mount gone (404)', (await fetch(`${APP}/media/uploads/x.mp4`)).status === 404);
-  check('reels diag hidden (404)', (await fetch(`${APP}/api/reels/diag`)).status === 404);
+  check('/media mount gone (404)', (await appFetch(`${APP}/media/uploads/x.mp4`)).status === 404);
+  check('reels diag hidden (404)', (await appFetch(`${APP}/api/reels/diag`)).status === 404);
   const anonForm = new FormData();
   anonForm.append('file', new Blob([tinyPng()], { type: 'image/png' }), 'anon.png');
   check('anonymous upload refused (401)', (await call('/api/image/upload', { method: 'POST', form: anonForm })).status === 401);
