@@ -42,6 +42,19 @@ def test_h3_defaults_to_768p_and_caps_credit_quotes_at_ten_seconds():
     assert quote_video(width=1920, height=1080, duration=60, params=trimmed)["stages"][0]["details"]["billed_seconds"] == 4
 
 
+def test_h3_estimate_past_ten_seconds_is_approximate():
+    # BYOK estimates run past the credit limit; fal's window overlap is not priced.
+    short = quote_video(width=1920, height=1080, duration=10, params={"outpaint_model": H3}, estimate=True)
+    assert "approximate" not in short["stages"][0]["details"]
+    long = quote_video(width=1920, height=1080, duration=12, params={"outpaint_model": H3}, estimate=True)
+    stage = long["stages"][0]
+    assert stage["details"]["approximate"] is True
+    assert stage["details"]["billed_seconds"] == 12
+    assert Decimal(stage["provider_cost_usd"]) == Decimal("0.96")
+    with pytest.raises(PricingError, match="300 s or less"):
+        quote_video(width=1920, height=1080, duration=301, params={"outpaint_model": H3}, estimate=True)
+
+
 @pytest.mark.parametrize(("resolution", "cost"), [("720p", "0.70"), ("1080p", "1.40")])
 def test_ltx25_bills_started_seconds_per_resolution(resolution, cost):
     quote = quote_video(
@@ -79,7 +92,7 @@ class _Submitted(Exception):
     pass
 
 
-def _sent_arguments(tmp_path, monkeypatch, model, **kwargs):
+def _sent_arguments(tmp_path, monkeypatch, model, duration=5.0, **kwargs):
     sent = []
 
     class _FakeFal:
@@ -93,7 +106,7 @@ def _sent_arguments(tmp_path, monkeypatch, model, **kwargs):
             sent.append((endpoint, arguments))
             raise _Submitted
 
-    monkeypatch.setattr(video_worker, "get_video_dimensions_and_duration", lambda *_a, **_k: (1080, 1920, 5.0))
+    monkeypatch.setattr(video_worker, "get_video_dimensions_and_duration", lambda *_a, **_k: (1080, 1920, duration))
     monkeypatch.setattr(video_worker.fal_client, "SyncClient", _FakeFal)
     source = tmp_path / "portrait.mp4"
     source.write_bytes(b"x")
@@ -120,6 +133,12 @@ def test_worker_sends_h3_resolution_seed_and_prompt(tmp_path, monkeypatch):
 def test_worker_omits_empty_h3_prompt_and_seed(tmp_path, monkeypatch):
     arguments = _sent_arguments(tmp_path, monkeypatch, H3, prompt="  ")
     assert arguments == {"video_url": "https://fal.test/source.mp4", "aspect_ratio": "1:1", "resolution": "768p"}
+
+
+def test_worker_submits_h3_source_past_ten_seconds(tmp_path, monkeypatch):
+    # The 10 s limit is for credit quotes only; BYOK jobs reach fal.
+    arguments = _sent_arguments(tmp_path, monkeypatch, H3, duration=12.0)
+    assert arguments["resolution"] == "768p"
 
 
 def test_worker_sends_ltx25_placement_only_off_centre(tmp_path, monkeypatch):

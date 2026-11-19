@@ -196,7 +196,10 @@ def quote_video(
             # Exact ids first: both contain "reframe" and would hit the Luma branch.
             check_outpaint_source_seconds(outpaint_entry, float(effective))
             credit_limit = outpaint_entry.get("credit_max_seconds")
-            if credit_limit is not None and float(effective) > float(credit_limit):
+            # Past the credit limit fal's billed window overlap is unknown, so a
+            # BYOK estimate is flagged approximate and a credit quote is refused.
+            over_limit = credit_limit is not None and float(effective) > float(credit_limit)
+            if over_limit and not estimate:
                 raise PricingError(
                     f"{outpaint_entry['label']} credit quotes cover a segment of {credit_limit} s or less "
                     f"(selected segment is {float(effective):.2f} s); trim it or use a personal Fal key."
@@ -216,6 +219,7 @@ def quote_video(
                     billed_seconds=int(billed_seconds),
                     resolution=resolution,
                     aspect_ratio="1:1",
+                    **({"approximate": True} if over_limit else {}),
                 )
             )
         elif "luma" in model_lower or "reframe" in model_lower:
