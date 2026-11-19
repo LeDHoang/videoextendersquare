@@ -33,8 +33,30 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # Runner image 20261116 points apt at us-east-2.ec2.archive.ubuntu.com, which
+      # served ffmpeg's 62.8 MB of .debs at 49 kB/s (21 min). Keep the .debs in the
+      # Actions cache so a slow mirror only costs the index. Restore and save are
+      # separate steps so a cold run saves the cache even if a later step fails.
+      - name: Restore ffmpeg .debs
+        id: apt-debs
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/apt-debs
+          key: apt-debs-ffmpeg-ubuntu-24.04-v1
       - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        run: |
+          cat /etc/apt/apt-mirrors.txt
+          mkdir -p ~/apt-debs/partial
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/apt-debs" ffmpeg
+          sudo rm -rf ~/apt-debs/lock ~/apt-debs/partial
+          sudo chown -R "$USER" ~/apt-debs
+      - name: Save ffmpeg .debs
+        if: steps.apt-debs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/apt-debs
+          key: apt-debs-ffmpeg-ubuntu-24.04-v1
       - name: Install Python deps into .venv
         run: |
           python -m venv .venv
