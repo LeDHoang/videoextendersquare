@@ -109,29 +109,6 @@ VIDEO_OUTPAINT = [
             "aspect_ratio": ["aspect_ratios", "constraints.aspect_ratios"],
         },
     },
-    {
-        "label": "Wan VACE 14B",
-        "model": "fal-ai/wan-vace-14b/outpainting",
-        "fal_unit": "seconds",
-        "fal_base_usd": "0.08",
-        "pricing_kind": "per_second",
-        "price": 0.08,
-        "unit_price_usd": "0.08",
-        "resolution_rates": {"480p": "0.04", "580p": "0.06", "720p": "0.08"},
-        "default_resolution": "720p",
-        "credit_enabled": True,
-        "pricing_version": PRICING_VERSION,
-        "pricing_verified_at": PRICING_VERIFIED_AT,
-        "pricing_source": "https://fal.ai/models/fal-ai/wan-vace-14b/outpainting",
-        "rounding_rule": "bill explicit output frames as (frames - 1) / 16 seconds",
-        "constraints": {"fps": 16, "min_frames": 17, "max_frames": 241, "resolutions": ["480p", "580p", "720p"], "max_expand_ratio_per_side": 1.0},
-        "aspect_ratios": ["1:1", "16:9", "9:16"],
-        "fal_fields": {
-            "resolution": ["resolution_rates", "constraints.resolutions"],
-            "aspect_ratio": ["aspect_ratios"],
-        },
-        "fal_frames": "num_frames",
-    },
 ]
 
 

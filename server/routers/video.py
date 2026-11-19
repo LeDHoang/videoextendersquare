@@ -208,7 +208,6 @@ def start_video_process(
     ltx_prompt_expansion: bool = Form(False),
     ltx_negative_prompt: str = Form(LTX_NEGATIVE_PROMPT),
     ltx_loras: str = Form(""),
-    wan_resolution: str = Form("720p"),
     luma_resolution: str = Form("1080p"),
     seedvr_factor: float = Form(2.0),
     seedvr_target: str = Form("1080p"),
@@ -238,8 +237,6 @@ def start_video_process(
         bytedance_target_res, bytedance_target_fps, bytedance_tier,
         trim_start, trim_duration, ltx_guidance,
     )
-    if wan_resolution not in {"480p", "580p", "720p"}:
-        raise HTTPException(status_code=400, detail="Invalid wan_resolution")
     if luma_resolution not in {"540p", "720p", "1080p"}:
         raise HTTPException(status_code=400, detail="Invalid luma_resolution")
     parsed_loras = _parse_ltx_loras(ltx_loras)
@@ -276,7 +273,6 @@ def start_video_process(
         "ltx_prompt_expansion": ltx_prompt_expansion,
         "ltx_negative_prompt": ltx_negative_prompt,
         "ltx_loras": parsed_loras,
-        "wan_resolution": wan_resolution,
         "luma_resolution": luma_resolution,
         "seedvr_factor": seedvr_factor,
         "seedvr_target": seedvr_target,
@@ -369,7 +365,6 @@ def start_video_process(
         "ltx_prompt_expansion": params["ltx_prompt_expansion"],
         "ltx_negative_prompt": params["ltx_negative_prompt"],
         "ltx_loras": params["ltx_loras"],
-        "wan_resolution": params["wan_resolution"],
         "luma_resolution": params["luma_resolution"],
         "seedvr_factor": params["seedvr_factor"],
         "seedvr_target": params["seedvr_target"],

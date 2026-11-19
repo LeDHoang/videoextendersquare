@@ -38,15 +38,6 @@ def test_representative_video_prices():
     assert luma["stages"][0]["details"]["resolution"] == "1080p"
     assert luma["stages"][0]["pricing_verified_at"] == "2026-10-20"
 
-    wan = quote_video(
-        width=1920,
-        height=1080,
-        duration=5,
-        params={"outpaint_model": "fal-ai/wan-vace-14b/outpainting", "wan_resolution": "720p"},
-    )
-    assert wan["credits"] == 54
-    assert wan["stages"][0]["details"]["frames"] == 81
-
     bytedance = quote_video(
         width=1080,
         height=1080,
@@ -109,22 +100,6 @@ def test_byok_only_and_provider_limits_are_rejected():
             width=1000,
             height=1000,
             params={"upscale_engine": "fal", "upscale_model": "fal-ai/ccsr"},
-        )
-
-    with pytest.raises(PricingError, match="at most"):
-        quote_video(
-            width=1920,
-            height=1080,
-            duration=16,
-            params={"outpaint_model": "fal-ai/wan-vace-14b/outpainting"},
-        )
-
-    with pytest.raises(PricingError, match="cannot expand"):
-        quote_video(
-            width=4000,
-            height=1000,
-            duration=5,
-            params={"outpaint_model": "fal-ai/wan-vace-14b/outpainting"},
         )
 
     with pytest.raises(PricingError, match="Unsupported LTX resolution"):

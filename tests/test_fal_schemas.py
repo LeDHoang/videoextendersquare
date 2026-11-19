@@ -35,11 +35,6 @@ FIELDS = {
         "resolution": {"enum": ["540p", "720p", "1080p"]},
         "aspect_ratio": {"enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]},
     },
-    "fal-ai/wan-vace-14b/outpainting": {
-        "resolution": {"enum": ["auto", "240p", "360p", "480p", "580p", "720p"]},
-        "aspect_ratio": {"enum": ["auto", "16:9", "1:1", "9:16"]},
-        "num_frames": {"type": "integer", "minimum": 17, "maximum": 241},
-    },
     BYTEDANCE: {
         "target_resolution": {"enum": ["1080p", "2k", "4k", "6k", "8k"]},
         "target_fps": {"type": "integer", "minimum": 24, "maximum": 120},

@@ -422,32 +422,6 @@ def _process_video_impl(
                     outpaint_model, duration=duration,
                     resolution=kwargs.get("ltx_resolution", "720p"),
                 )
-            elif "wan" in model_lower or "vace" in model_lower:
-                wan_low, wan_high = _models.frame_limits(outpaint_model, (17, 241))
-                wan_frames = max(wan_low, int(duration * 16 + 0.5) + 1)
-                if wan_frames > wan_high:
-                    raise ValueError(f"Wan VACE outpaint supports at most {wan_high} frames; trim the source video.")
-                horizontal = left > 0 or right > 0
-                vertical = top > 0 or bottom > 0
-                per_side_ratio = (max(left, right) / max(1, width)) if horizontal else (max(top, bottom) / max(1, height))
-                if per_side_ratio > 1:
-                    raise ValueError("Wan VACE cannot expand this aspect ratio to square in one request.")
-                arguments = {
-                    "video_url": video_url,
-                    "prompt": prompt or default_prompt,
-                    "aspect_ratio": "1:1",
-                    "resolution": kwargs.get("wan_resolution", "720p"),
-                    "match_input_num_frames": False,
-                    "num_frames": wan_frames,
-                    "match_input_frames_per_second": False,
-                    "frames_per_second": 16,
-                    "expand_left": left > 0,
-                    "expand_right": right > 0,
-                    "expand_top": top > 0,
-                    "expand_bottom": bottom > 0,
-                    "expand_ratio": max(0.0, min(1.0, per_side_ratio)),
-                }
-                _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             else:
                 arguments = {
                     "video_url": video_url,

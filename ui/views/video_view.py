@@ -139,7 +139,6 @@ def render(ctx: dict) -> None:
                 "LTX 2.3 Quality": "fal-ai/ltx-2.3-quality/outpaint",
                 "LTX 2.3 Quality + LoRA": "fal-ai/ltx-2.3-quality/outpaint/lora",
                 "Luma Ray 3.2 Reframe": "luma/agent/ray/v3.2/reframe",
-                "Wan VACE 14B": "fal-ai/wan-vace-14b/video-to-video",
             }
             selected_outpaint = st.segmented_control(
                 "Outpaint Model Options",
@@ -400,9 +399,6 @@ def render(ctx: dict) -> None:
                 est_outpaint_cost = mp * 0.0024075
                 lora_suffix = " + LoRA" if "/lora" in outpaint_lower else ""
                 outpaint_label = f"LTX 2.3 Quality{lora_suffix} ({ltx_resolution}) (~$0.0024/MP)"
-            elif "wan" in outpaint_lower or "vace" in outpaint_lower:
-                est_outpaint_cost = total_effective_dur * 0.08
-                outpaint_label = "Wan VACE 14B ($0.08/s @ 720p)"
             else:
                 est_outpaint_cost = total_effective_dur * 0.06
                 outpaint_label = "Video Outpaint ($0.06/s)"

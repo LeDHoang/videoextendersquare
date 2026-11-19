@@ -79,7 +79,6 @@ def video_parameters(raw: Mapping[str, Any], defaults: Mapping[str, str] = CATAL
         "ltx_prompt_expansion": _bool(raw.get("ltx_prompt_expansion")),
         "ltx_negative_prompt": _text(raw.get("ltx_negative_prompt"), LTX_NEGATIVE_PROMPT),
         "ltx_loras": list(loras) if isinstance(loras, list) else [],
-        "wan_resolution": _text(raw.get("wan_resolution"), "720p"),
         "luma_resolution": _text(raw.get("luma_resolution"), "1080p"),
         "seedvr_factor": _float(raw.get("seedvr_factor"), 2.0),
         "seedvr_target": _text(raw.get("seedvr_target"), "1080p"),

@@ -79,7 +79,6 @@ const MODELS = {
     { label: 'LTX 2.3 Quality', model: 'fal-ai/ltx-2.3-quality/outpaint', is_custom: false, credit_enabled: true },
     { label: 'LTX 2.3 Quality + LoRA', model: 'fal-ai/ltx-2.3-quality/outpaint/lora', is_custom: false, credit_enabled: true },
     { label: 'Luma Ray 3.2 Reframe', model: 'luma/agent/ray/v3.2/reframe', is_custom: false, credit_enabled: true },
-    { label: 'Wan VACE 14B', model: 'fal-ai/wan-vace-14b/outpainting', is_custom: false, credit_enabled: true },
   ],
   video_upscale_catalog: [
     { label: 'Bytedance Upscaler', model: 'fal-ai/bytedance-upscaler/upscale/video', is_custom: false, credit_enabled: true },
@@ -265,7 +264,6 @@ describe('UploadPage — video extender parity', () => {
         { path: 'https://x.test/a.safetensors', scale: 1, transformer: 'both' },
         { path: 'https://x.test/c.safetensors', scale: 0.75, transformer: 'low' },
       ],
-      wanResolution: '720p',
       seedvrFactor: 3,
       seedvrTarget: '2160p',
       bytedanceTargetRes: '2k',

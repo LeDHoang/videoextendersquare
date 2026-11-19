@@ -24,7 +24,6 @@ const CREDIT_OUTPAINT_MODELS = new Set([
   'fal-ai/ltx-2.3-quality/outpaint',
   'fal-ai/ltx-2.3-quality/outpaint/lora',
   'luma/agent/ray/v3.2/reframe',
-  'fal-ai/wan-vace-14b/outpainting',
 ]);
 const CREDIT_UPSCALE_MODELS = new Set([
   'fal-ai/bytedance-upscaler/upscale/video',
@@ -135,10 +134,6 @@ export default function VideoPage() {
     ltxPromptExpansion,
     ltxNegativePrompt,
     ltxLoras: loraList,
-    // No WAN resolution selector in the UI yet: pin the top tier so quotes
-    // never understate the charge (backend bills 480p/580p/720p at
-    // $0.04/$0.06/$0.08 per second).
-    wanResolution: topTier(outpaintCatalog, 'fal-ai/wan-vace-14b/outpainting', '720p'),
     // No Ray 3.2 resolution selector either: default to 1080p ($0.36/s).
     lumaResolution: topTier(outpaintCatalog, 'luma/agent/ray/v3.2/reframe', '1080p'),
     seedvrFactor,

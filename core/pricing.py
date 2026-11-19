@@ -204,34 +204,6 @@ def quote_video(
                     aspect_ratio="1:1",
                 )
             )
-        elif "wan-vace" in model_lower:
-            resolution = str(params.get("wan_resolution") or outpaint_entry.get("default_resolution", "720p"))
-            rates = outpaint_entry.get("resolution_rates", {})
-            if resolution not in rates:
-                raise PricingError(f"Unsupported Wan resolution: {resolution}")
-            short_side = max(1, min(int(width), int(height)))
-            long_side = max(int(width), int(height))
-            per_side_ratio = math.ceil((long_side - short_side) / 2) / short_side
-            if per_side_ratio > 1:
-                raise PricingError("Wan VACE cannot expand this aspect ratio to square in one request.")
-            outpaint_fps = 16
-            low, high = models.frame_limits(outpaint_model, (17, 241))
-            outpaint_frames = _frames(effective, outpaint_fps, minimum=low, maximum=high)
-            billed_seconds = Decimal(outpaint_frames - 1) / Decimal(16)
-            cost = _decimal(rates[resolution]) * billed_seconds
-            stages.append(
-                _stage(
-                    "outpaint",
-                    outpaint_entry,
-                    cost,
-                    duration_seconds=float(effective),
-                    frames=outpaint_frames,
-                    fps=16,
-                    billed_seconds=float(billed_seconds),
-                    resolution=resolution,
-                    aspect_ratio="1:1",
-                )
-            )
         else:
             raise PricingError("This video outpainting model requires a personal Fal key.")
 

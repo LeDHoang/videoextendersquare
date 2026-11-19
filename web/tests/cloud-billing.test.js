@@ -33,7 +33,7 @@ test('video parameters preserve quote-sensitive trim and model options', () => {
     falPicked: false,
     studioPicked: false,
     sharpening: 0.25,
-    outpaintModel: 'fal-ai/wan-vace-14b/outpainting',
+    outpaintModel: 'luma/agent/ray/v3.2/reframe',
     upscaleModel: 'fal-ai/bytedance-upscaler/upscale/video',
     trimEnabled: true,
     trimStart: 2,
