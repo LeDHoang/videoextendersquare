@@ -163,6 +163,8 @@ def test_policy_contents(client, monkeypatch):
         assert "https://media.example.com" in directives[name]
     assert "https://media.tenor.com" in directives["img-src"]
     assert "https://nominatim.openstreetmap.org" in directives["connect-src"]
+    # The VR image player fetch()es the prefetched next image's blob: URL.
+    assert "blob:" in directives["connect-src"]
     assert directives["frame-ancestors"] == ["'none'"]
     # ComparePage puts /api/compare/player in an iframe.
     assert "'self'" in directives["frame-src"]

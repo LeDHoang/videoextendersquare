@@ -109,7 +109,8 @@ def build_policy(nonce: str, mode: str | None = None) -> str:
         ("font-src", ["'self'", "data:", GOOGLE_FONTS_FILES]),
         ("img-src", ["'self'", "data:", "blob:", *media, *gif_origins()]),
         ("media-src", ["'self'", "blob:", *media]),
-        ("connect-src", ["'self'", *media, NOMINATIM]),
+        # blob: for the VR image player, which fetch()es the prefetched next image's object URL.
+        ("connect-src", ["'self'", "blob:", *media, NOMINATIM]),
         ("frame-src", ["'self'", TURNSTILE]),
         ("frame-ancestors", ["'none'"]),
         ("object-src", ["'none'"]),
