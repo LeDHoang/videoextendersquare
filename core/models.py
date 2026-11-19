@@ -477,6 +477,15 @@ def parse_custom_args(raw, *, limit_keys: int = 20, limit_str: int = 2000) -> di
     return out
 
 
+def _estimate_entries(catalog: list[dict], mid: str) -> list[dict]:
+    """The exact catalog entry when there is one, else the loose matches.
+
+    Exact first, so the LTX LoRA id is not priced as the base LTX id it contains.
+    """
+    exact = [entry for entry in catalog if entry["model"].lower() == mid]
+    return exact or [entry for entry in catalog if entry["model"].lower() in mid or mid in entry["model"].lower()]
+
+
 def estimate_outpaint_cost(model_id: str, *, duration: float, resolution: str | None = None) -> tuple[str, float]:
     """Return (label, estimated USD) for a video outpaint job.
 
@@ -484,19 +493,18 @@ def estimate_outpaint_cost(model_id: str, *, duration: float, resolution: str | 
     catalog, so the frontend estimator and the worker agree.
     """
     mid = (model_id or "").lower()
-    for entry in VIDEO_OUTPAINT:
-        if entry["model"].lower() in mid or mid in entry["model"].lower():
-            if entry["pricing_kind"] == "per_second":
-                rate = entry["price"]
-                rates = entry.get("resolution_rates")
-                if rates:
-                    rate = float(rates.get(resolution or entry.get("default_resolution"), rate))
-                return entry["label"], (duration if duration > 0 else 5.0) * rate
-            # per_mp
-            w = entry["resolutions"].get(resolution or entry.get("default_resolution"), 720)
-            frames = int(duration * 24) if duration > 0 else 121
-            mp = (w * w * frames) / 1000000.0
-            return entry["label"], mp * entry["price"]
+    for entry in _estimate_entries(VIDEO_OUTPAINT, mid):
+        if entry["pricing_kind"] == "per_second":
+            rate = entry["price"]
+            rates = entry.get("resolution_rates")
+            if rates:
+                rate = float(rates.get(resolution or entry.get("default_resolution"), rate))
+            return entry["label"], (duration if duration > 0 else 5.0) * rate
+        # per_mp
+        w = entry["resolutions"].get(resolution or entry.get("default_resolution"), 720)
+        frames = int(duration * 24) if duration > 0 else 121
+        mp = (w * w * frames) / 1000000.0
+        return entry["label"], mp * entry["price"]
     # Generic fallback matching the worker's default branch. Unknown ids are
     # user-supplied customs — label them as such so metrics stay truthful.
     dur_calc = duration if duration > 0 else 5.0
@@ -517,20 +525,19 @@ def estimate_upscale_cost(
 ) -> tuple[str, float]:
     """Return (label, estimated USD) for a video fal.ai upscale job."""
     mid = (model_id or "").lower()
-    for entry in VIDEO_UPSCALE:
-        if entry["model"].lower() in mid or mid in entry["model"].lower():
-            if entry["pricing_kind"] == "per_second":
-                if "bytedance" in mid:
-                    base = entry["base_rates"].get(bytedance_res, 0.0288)
-                    rate = base * entry["fps_multiplier"].get(bytedance_fps, 1.0) * entry["tier_multiplier"].get(bytedance_tier, 1.0)
-                    return f"Bytedance ({bytedance_res}, {bytedance_fps}, {bytedance_tier})", (duration if duration > 0 else 5.0) * rate
-                dur_calc = duration if duration > 0 else 5.0
-                return entry["label"], dur_calc * entry["price"]
-            # per_mp (SeedVR)
-            w = entry["resolutions"].get(seedvr_target, 1080)
-            frames = int(duration * 24) if duration > 0 else 121
-            mp = (w * w * frames) / 1000000.0
-            return entry["label"], mp * entry["price"]
+    for entry in _estimate_entries(VIDEO_UPSCALE, mid):
+        if entry["pricing_kind"] == "per_second":
+            if "bytedance" in mid:
+                base = entry["base_rates"].get(bytedance_res, 0.0288)
+                rate = base * entry["fps_multiplier"].get(bytedance_fps, 1.0) * entry["tier_multiplier"].get(bytedance_tier, 1.0)
+                return f"Bytedance ({bytedance_res}, {bytedance_fps}, {bytedance_tier})", (duration if duration > 0 else 5.0) * rate
+            dur_calc = duration if duration > 0 else 5.0
+            return entry["label"], dur_calc * entry["price"]
+        # per_mp (SeedVR)
+        w = entry["resolutions"].get(seedvr_target, 1080)
+        frames = int(duration * 24) if duration > 0 else 121
+        mp = (w * w * frames) / 1000000.0
+        return entry["label"], mp * entry["price"]
     dur_calc = duration if duration > 0 else 5.0
     if model_id and model_id.strip():
         return f"CUSTOM({short_name(model_id)})", max(0.08, dur_calc * 0.02)

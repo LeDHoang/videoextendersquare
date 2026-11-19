@@ -115,6 +115,20 @@ def test_a_price_change_reprices_quotes_and_alerts_once(db, alerts, monkeypatch)
     assert len(alerts) == 1
 
 
+def test_the_lora_job_estimate_uses_the_lora_price(db, alerts, monkeypatch):
+    lora = LTX + "/lora"
+    mp_frames = 720 * 720 * 120 / 1_000_000  # 5 s at 24 fps, default 720p
+    assert models.estimate_outpaint_cost(lora, duration=5) == (
+        "LTX 2.3 Quality + LoRA", pytest.approx(mp_frames * 0.0027075)
+    )
+    assert models.estimate_outpaint_cost(LTX, duration=5) == (
+        "LTX 2.3 Quality", pytest.approx(mp_frames * 0.0024075)
+    )
+    serve(monkeypatch, fal_rows(**{lora: {"unit_price": 0.003}}))
+    fal_prices.sync(db)
+    assert models.estimate_outpaint_cost(lora, duration=5)[1] == pytest.approx(mp_frames * 0.003)
+
+
 def test_stored_prices_apply_at_startup(db, alerts, monkeypatch):
     serve(monkeypatch, fal_rows(**{RAY: {"unit_price": 0.045}}))
     fal_prices.sync(db)
