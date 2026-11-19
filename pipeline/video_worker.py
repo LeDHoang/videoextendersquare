@@ -384,6 +384,7 @@ def _process_video_impl(
                 if neg_prompt is None or not str(neg_prompt).strip():
                     neg_prompt = "yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"
 
+                ltx_frames = _models.frame_limits(outpaint_model, (9, 481))
                 arguments = {
                     "video_url": video_url,
                     "prompt": prompt or default_prompt,
@@ -396,11 +397,11 @@ def _process_video_impl(
                     "num_inference_steps": int(kwargs.get("ltx_steps", 15)),
                     "guidance_scale": float(kwargs.get("ltx_guidance", 1.0)),
                     "generate_audio": bool(kwargs.get("ltx_audio", True)),
-                    "num_frames": max(9, int(duration * 24 + 0.5) + 1),
+                    "num_frames": max(ltx_frames[0], int(duration * 24 + 0.5) + 1),
                     "frames_per_second": 24,
                 }
-                if arguments["num_frames"] > 481:
-                    raise ValueError("LTX outpaint supports at most 481 frames; trim the source video.")
+                if arguments["num_frames"] > ltx_frames[1]:
+                    raise ValueError(f"LTX outpaint supports at most {ltx_frames[1]} frames; trim the source video.")
                 if "/lora" in model_lower:
                     loras = kwargs.get("ltx_loras") or []
                     loras = [
@@ -422,9 +423,10 @@ def _process_video_impl(
                     resolution=kwargs.get("ltx_resolution", "720p"),
                 )
             elif "wan" in model_lower or "vace" in model_lower:
-                wan_frames = max(17, int(duration * 16 + 0.5) + 1)
-                if wan_frames > 241:
-                    raise ValueError("Wan VACE outpaint supports at most 241 frames; trim the source video.")
+                wan_low, wan_high = _models.frame_limits(outpaint_model, (17, 241))
+                wan_frames = max(wan_low, int(duration * 16 + 0.5) + 1)
+                if wan_frames > wan_high:
+                    raise ValueError(f"Wan VACE outpaint supports at most {wan_high} frames; trim the source video.")
                 horizontal = left > 0 or right > 0
                 vertical = top > 0 or bottom > 0
                 per_side_ratio = (max(left, right) / max(1, width)) if horizontal else (max(top, bottom) / max(1, height))

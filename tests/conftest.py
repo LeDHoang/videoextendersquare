@@ -56,6 +56,7 @@ def _no_live_fal_prices(monkeypatch):
     monkeypatch.setenv("SX_FAL_PRICE_SYNC_S", "0")
     yield
     models.apply_synced_prices({})
+    models.apply_fal_schemas({})
 
 
 @pytest.fixture(autouse=True)

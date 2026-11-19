@@ -18,6 +18,7 @@ off for that model instead of charging a wrong price.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from decimal import Decimal
@@ -55,6 +56,8 @@ VIDEO_OUTPAINT = [
         "constraints": {"fps": 24, "min_frames": 9, "max_frames": 481, "resolutions": ["480p", "720p", "1080p"]},
         "resolutions": {"480p": 480, "720p": 720, "1080p": 1080},
         "default_resolution": "720p",
+        "fal_fields": {"output_resolution": ["resolutions", "constraints.resolutions"]},
+        "fal_frames": "num_frames",
     },
     {
         "label": "LTX 2.3 Quality + LoRA",
@@ -72,6 +75,8 @@ VIDEO_OUTPAINT = [
         "constraints": {"fps": 24, "min_frames": 9, "max_frames": 481, "resolutions": ["480p", "720p", "1080p"], "max_loras": 3},
         "resolutions": {"480p": 480, "720p": 720, "1080p": 1080},
         "default_resolution": "720p",
+        "fal_fields": {"output_resolution": ["resolutions", "constraints.resolutions"]},
+        "fal_frames": "num_frames",
     },
     {
         # Replaces fal-ai/luma-dream-machine/ray-2-flash/reframe, which fal
@@ -98,6 +103,10 @@ VIDEO_OUTPAINT = [
         },
         "aspect_ratios": ["3:4", "4:3", "1:1", "9:16", "16:9", "21:9"],
         "max_source_seconds": 10,
+        "fal_fields": {
+            "resolution": ["resolution_rates", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios", "constraints.aspect_ratios"],
+        },
     },
     {
         "label": "Wan VACE 14B",
@@ -116,6 +125,11 @@ VIDEO_OUTPAINT = [
         "rounding_rule": "bill explicit output frames as (frames - 1) / 16 seconds",
         "constraints": {"fps": 16, "min_frames": 17, "max_frames": 241, "resolutions": ["480p", "580p", "720p"], "max_expand_ratio_per_side": 1.0},
         "aspect_ratios": ["1:1", "16:9", "9:16"],
+        "fal_fields": {
+            "resolution": ["resolution_rates", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios"],
+        },
+        "fal_frames": "num_frames",
     },
 ]
 
@@ -145,6 +159,11 @@ VIDEO_UPSCALE = [
         "pricing_source": "https://fal.ai/models/fal-ai/bytedance-upscaler/upscale/video",
         "rounding_rule": "ceil source duration to whole seconds",
         "constraints": {"resolutions": ["1080p", "2k", "4k"], "frame_rates": ["30fps", "60fps"], "tiers": ["fast", "standard", "pro"]},
+        "fal_fields": {
+            "target_resolution": ["base_rates", "base_rates_usd", "constraints.resolutions"],
+            "target_fps": ["fps_multiplier", "constraints.frame_rates"],
+            "enhancement_tier": ["tier_multiplier", "constraints.tiers"],
+        },
     },
     {
         "label": "SeedVR2 Video",
@@ -159,8 +178,9 @@ VIDEO_UPSCALE = [
         "pricing_verified_at": PRICING_VERIFIED_AT,
         "pricing_source": "https://fal.ai/models/fal-ai/seedvr/upscale/video",
         "rounding_rule": "exact output megapixel-frames; final credit charge rounds up",
-        "constraints": {"target_resolutions": ["720p", "1080p", "2160p"]},
-        "resolutions": {"720p": 720, "1080p": 1080, "2160p": 2160},
+        "constraints": {"target_resolutions": ["720p", "1080p", "1440p", "2160p"]},
+        "resolutions": {"720p": 720, "1080p": 1080, "1440p": 1440, "2160p": 2160},
+        "fal_fields": {"target_resolution": ["resolutions", "constraints.target_resolutions"]},
     },
 ]
 
@@ -268,14 +288,110 @@ def _synced_entry(entry: dict, synced: dict | None) -> dict:
     return out
 
 
-def apply_synced_prices(prices: dict[str, dict]) -> None:
-    """Price the catalogs from fal sync records keyed by model id; {} restores the code prices.
+def _accepts(field: dict, value) -> bool:
+    """Whether a fal input field (a server/fal_schemas.py snapshot) takes one catalog option."""
+    if "enum" in field:
+        return str(value) in {str(option) for option in field["enum"]}
+    digits = re.match(r"\d+(\.\d+)?", str(value))
+    if digits is None:
+        return True
+    number = float(digits.group())
+    return field.get("minimum", number) <= number <= field.get("maximum", number)
 
-    Each entry is replaced whole, so a reader sees an old or a new entry, never a mix.
+
+def _option_tables(entry: dict, paths: list[str]):
+    """The (parent, key) of each option table a "fal_fields" path names."""
+    for path in paths:
+        parent = entry
+        *heads, last = path.split(".")
+        for head in heads:
+            parent = parent.get(head) or {}
+        if last in parent:
+            yield parent, last
+
+
+def unsupported_options(entry: dict, schema: dict | None) -> dict[str, list[str]]:
+    """Catalog options fal's input schema no longer accepts, by fal field."""
+    fields = (schema or {}).get("fields") or {}
+    out = {}
+    for name, paths in (entry.get("fal_fields") or {}).items():
+        if name not in fields:
+            continue
+        offered = []
+        for parent, key in _option_tables(entry, paths):
+            offered += [value for value in parent[key] if value not in offered]
+        rejected = [str(value) for value in offered if not _accepts(fields[name], value)]
+        if rejected:
+            out[name] = rejected
+    return out
+
+
+def _schema_entry(entry: dict, schema: dict | None) -> dict:
+    """The entry limited to what fal's input schema accepts (see server/fal_schemas.py).
+
+    Options fal dropped are removed, frame limits follow fal's, and an entry left
+    without an option in some table loses credits. New fal options are not added:
+    they have no price here yet.
     """
+    if not schema or not (entry.get("fal_fields") or entry.get("fal_frames")):
+        return entry
+    out = copy.deepcopy(entry)
+    for name, rejected in unsupported_options(entry, schema).items():
+        for parent, key in _option_tables(out, entry["fal_fields"][name]):
+            table = parent[key]
+            if isinstance(table, dict):
+                parent[key] = {k: v for k, v in table.items() if str(k) not in rejected}
+            else:
+                parent[key] = [v for v in table if str(v) not in rejected]
+            if not parent[key]:
+                out["credit_enabled"] = False
+    if out.get("default_resolution"):
+        options = out.get("resolutions") or out.get("resolution_rates") or {}
+        if options and out["default_resolution"] not in options:
+            out["default_resolution"] = next(iter(options))
+    frames = ((schema.get("fields") or {}).get(entry.get("fal_frames") or "")) or {}
+    constraints = out.get("constraints") or {}
+    if "minimum" in frames and "min_frames" in constraints:
+        constraints["min_frames"] = int(frames["minimum"])
+    if "maximum" in frames and "max_frames" in constraints:
+        constraints["max_frames"] = int(frames["maximum"])
+    return out
+
+
+_synced_prices: dict[str, dict] = {}
+_fal_schemas: dict[str, dict] = {}
+
+
+def _rebuild() -> None:
+    # Each entry is replaced whole, so a reader sees an old or a new entry, never a mix.
     for catalog, code in zip(_CATALOGS, _CODE_CATALOGS):
         for index, entry in enumerate(code):
-            catalog[index] = _synced_entry(entry, prices.get(entry["model"]))
+            entry = _schema_entry(entry, _fal_schemas.get(entry["model"]))
+            catalog[index] = _synced_entry(entry, _synced_prices.get(entry["model"]))
+
+
+def apply_synced_prices(prices: dict[str, dict]) -> None:
+    """Price the catalogs from fal sync records keyed by model id; {} restores the code prices."""
+    global _synced_prices
+    _synced_prices = dict(prices)
+    _rebuild()
+
+
+def apply_fal_schemas(schemas: dict[str, dict]) -> None:
+    """Limit the catalogs' options to fal's input schemas keyed by model id; {} restores the code options."""
+    global _fal_schemas
+    _fal_schemas = dict(schemas)
+    _rebuild()
+
+
+def frame_limits(model_id: str, default: tuple[int, int]) -> tuple[int, int]:
+    """(min, max) frames fal accepts for a stock video outpaint model."""
+    mid = (model_id or "").lower()
+    for entry in VIDEO_OUTPAINT:
+        if entry["model"].lower() == mid:
+            constraints = entry.get("constraints") or {}
+            return int(constraints.get("min_frames", default[0])), int(constraints.get("max_frames", default[1]))
+    return default
 
 
 def video_outpaint_catalog() -> list[dict]:

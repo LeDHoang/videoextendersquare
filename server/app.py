@@ -181,13 +181,25 @@ def _sync_fal_prices() -> None:
         fal_prices.sync(db)
 
 
+def _sync_fal_schemas() -> None:
+    from server import fal_schemas
+    from server.social.database import SessionLocal
+
+    with SessionLocal() as db:
+        fal_schemas.sync(db)
+
+
 async def _fal_price_loop():
-    """Keep credit prices on fal's live prices; the first sync runs at startup."""
+    """Keep credit prices and options on fal's live ones; the first sync runs at startup."""
     while True:
         try:
             await asyncio.to_thread(_sync_fal_prices)
         except Exception:
             logger.exception("fal price sync failed")
+        try:
+            await asyncio.to_thread(_sync_fal_schemas)
+        except Exception:
+            logger.exception("fal schema sync failed")
         await asyncio.sleep(_fal_price_sync_s())
 
 
@@ -311,11 +323,12 @@ async def lifespan(app: FastAPI):
     job_manager.start()
     start_derived_pool()
 
-    # The last synced fal prices, before the first request is priced.
-    from server import fal_prices
+    # The last synced fal prices and options, before the first request is priced.
+    from server import fal_prices, fal_schemas
     from server.social.database import SessionLocal
     with SessionLocal() as db:
         fal_prices.load(db)
+        fal_schemas.load(db)
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
     alert_task = asyncio.create_task(_alert_loop())

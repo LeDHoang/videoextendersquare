@@ -167,7 +167,8 @@ def quote_video(
                 raise PricingError(f"Unsupported LTX resolution: {resolution}")
             side = int(outpaint_entry["resolutions"][resolution])
             outpaint_fps = 24
-            outpaint_frames = _frames(effective, outpaint_fps, minimum=9, maximum=481)
+            low, high = models.frame_limits(outpaint_model, (9, 481))
+            outpaint_frames = _frames(effective, outpaint_fps, minimum=low, maximum=high)
             generated_mp = math.ceil((side * side * outpaint_frames) / 1_000_000)
             cost = _decimal(outpaint_entry["unit_price_usd"]) * generated_mp
             stages.append(
@@ -214,7 +215,8 @@ def quote_video(
             if per_side_ratio > 1:
                 raise PricingError("Wan VACE cannot expand this aspect ratio to square in one request.")
             outpaint_fps = 16
-            outpaint_frames = _frames(effective, outpaint_fps, minimum=17, maximum=241)
+            low, high = models.frame_limits(outpaint_model, (17, 241))
+            outpaint_frames = _frames(effective, outpaint_fps, minimum=low, maximum=high)
             billed_seconds = Decimal(outpaint_frames - 1) / Decimal(16)
             cost = _decimal(rates[resolution]) * billed_seconds
             stages.append(
@@ -268,7 +270,9 @@ def quote_video(
             )
         elif "seedvr" in model_lower:
             resolution = str(params.get("seedvr_target") or "1080p")
-            side = int(entry["resolutions"].get(resolution, 1080))
+            if resolution not in entry["resolutions"]:
+                raise PricingError(f"Unsupported SeedVR resolution: {resolution}")
+            side = int(entry["resolutions"][resolution])
             if outpaint_frames is not None:
                 fps = int(outpaint_fps or 24)
                 frame_count = outpaint_frames

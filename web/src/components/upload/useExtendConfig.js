@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { imageBillingParameters, videoBillingParameters } from '../../utils/cloudBilling.js';
+import { offeredValue, topTier, videoOptions } from '../../utils/modelOptions.js';
 
 // Extender settings for the Upload Studio, one hook per media kind. Each kind
 // keeps its own settings for the whole visit (like the standalone /image and
@@ -134,17 +135,17 @@ export function useVideoExtendConfig(models) {
   const [outpaintOpt, setOutpaintOpt] = useState(outpaintOptions[0] || 'LTX 2.3 Quality');
   const [falUpscale, setFalUpscale] = useState(upscaleOptions[0] || 'Bytedance Upscaler');
   const [sharpening, setSharpening] = useState(0.5);
-  const [ltxRes, setLtxRes] = useState('720p');
+  const [ltxResPicked, setLtxRes] = useState('720p');
   const [ltxAudio, setLtxAudio] = useState(true);
   const [ltxGuidance, setLtxGuidance] = useState(1.0);
   const [ltxPromptExpansion, setLtxPromptExpansion] = useState(false);
   const [ltxNegativePrompt, setLtxNegativePrompt] = useState(VID_NEG_DEFAULT);
   const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
-  const [seedvrTarget, setSeedvrTarget] = useState('1080p');
-  const [btdRes, setBtdRes] = useState('2k');
-  const [btdFps, setBtdFps] = useState('30fps');
-  const [btdTier, setBtdTier] = useState('fast');
+  const [seedvrTargetPicked, setSeedvrTarget] = useState('1080p');
+  const [btdResPicked, setBtdRes] = useState('2k');
+  const [btdFpsPicked, setBtdFps] = useState('30fps');
+  const [btdTierPicked, setBtdTier] = useState('fast');
   const [btdPreset, setBtdPreset] = useState('general');
   const [btdFidelity, setBtdFidelity] = useState('medium');
   const [trimEnabled, setTrimEnabled] = useState(false);
@@ -160,6 +161,13 @@ export function useVideoExtendConfig(models) {
   const studioPicked = engine === 'STUDIO';
   const outpaintEntry = outpaintCatalog.find((e) => e.label === outpaintOpt) || outpaintCatalog[0];
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
+  // Options fal still accepts; the server withdraws the others (server/fal_schemas.py).
+  const offered = videoOptions(outpaintEntry, upscaleEntry);
+  const ltxRes = offeredValue(ltxResPicked, offered.ltxRes);
+  const seedvrTarget = offeredValue(seedvrTargetPicked, offered.seedvrTarget);
+  const btdRes = offeredValue(btdResPicked, offered.btdRes);
+  const btdFps = offeredValue(btdFpsPicked, offered.btdFps);
+  const btdTier = offeredValue(btdTierPicked, offered.btdTier);
   const outpaintModel = outpaintEntry?.model || models.outpaint_vid;
   const upscaleModel = upscaleEntry?.model || models.upscale_vid;
 
@@ -199,9 +207,9 @@ export function useVideoExtendConfig(models) {
     ltxLoras: loraList,
     // No WAN resolution selector in the UI yet: pin the top tier so quotes
     // never understate the charge (same as VideoPage).
-    wanResolution: '720p',
+    wanResolution: topTier(outpaintCatalog, 'fal-ai/wan-vace-14b/outpainting', '720p'),
     // No Ray 3.2 resolution selector either: default to 1080p ($0.36/s).
-    lumaResolution: '1080p',
+    lumaResolution: topTier(outpaintCatalog, 'luma/agent/ray/v3.2/reframe', '1080p'),
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,
@@ -233,6 +241,7 @@ export function useVideoExtendConfig(models) {
     falUpscale, setFalUpscale,
     sharpening, setSharpening,
     ltxRes, setLtxRes,
+    videoOptions: offered,
     ltxAudio, setLtxAudio,
     ltxGuidance, setLtxGuidance,
     ltxPromptExpansion, setLtxPromptExpansion,

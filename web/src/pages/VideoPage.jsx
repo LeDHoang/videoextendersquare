@@ -14,6 +14,7 @@ import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
+import { offeredValue, topTier, videoOptions } from '../utils/modelOptions.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
 import { assertUploadSize } from '../utils/uploadLimits.js';
 
@@ -62,17 +63,17 @@ export default function VideoPage() {
   const [engine, setEngine] = useState('FAST');
   const [falUpscale, setFalUpscale] = useState(defaultUpscale);
   const [sharpening, setSharpening] = useState(0.5);
-  const [ltxRes, setLtxRes] = useState('720p');
+  const [ltxResPicked, setLtxRes] = useState('720p');
   const [ltxAudio, setLtxAudio] = useState(true);
   const [ltxGuidance, setLtxGuidance] = useState(1.0);
   const [ltxPromptExpansion, setLtxPromptExpansion] = useState(false);
   const [ltxNegativePrompt, setLtxNegativePrompt] = useState('yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated');
   const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
-  const [seedvrTarget, setSeedvrTarget] = useState('1080p');
-  const [btdRes, setBtdRes] = useState('2k');
-  const [btdFps, setBtdFps] = useState('30fps');
-  const [btdTier, setBtdTier] = useState('fast');
+  const [seedvrTargetPicked, setSeedvrTarget] = useState('1080p');
+  const [btdResPicked, setBtdRes] = useState('2k');
+  const [btdFpsPicked, setBtdFps] = useState('30fps');
+  const [btdTierPicked, setBtdTier] = useState('fast');
   const [btdPreset, setBtdPreset] = useState('general');
   const [btdFidelity, setBtdFidelity] = useState('medium');
   const [trimEnabled, setTrimEnabled] = useState(false);
@@ -91,6 +92,13 @@ export default function VideoPage() {
   const studioPicked = engine === 'STUDIO';
   const outpaintEntry = outpaintCatalog.find((e) => e.label === outpaintOpt) || outpaintCatalog[0];
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
+  // Options fal still accepts; the server withdraws the others (server/fal_schemas.py).
+  const offered = videoOptions(outpaintEntry, upscaleEntry);
+  const ltxRes = offeredValue(ltxResPicked, offered.ltxRes);
+  const seedvrTarget = offeredValue(seedvrTargetPicked, offered.seedvrTarget);
+  const btdRes = offeredValue(btdResPicked, offered.btdRes);
+  const btdFps = offeredValue(btdFpsPicked, offered.btdFps);
+  const btdTier = offeredValue(btdTierPicked, offered.btdTier);
   const outpaintModel = outpaintEntry?.model || models.outpaint_vid;
   const upscaleModel = upscaleEntry?.model || models.upscale_vid;
 
@@ -130,9 +138,9 @@ export default function VideoPage() {
     // No WAN resolution selector in the UI yet: pin the top tier so quotes
     // never understate the charge (backend bills 480p/580p/720p at
     // $0.04/$0.06/$0.08 per second).
-    wanResolution: '720p',
+    wanResolution: topTier(outpaintCatalog, 'fal-ai/wan-vace-14b/outpainting', '720p'),
     // No Ray 3.2 resolution selector either: default to 1080p ($0.36/s).
-    lumaResolution: '1080p',
+    lumaResolution: topTier(outpaintCatalog, 'luma/agent/ray/v3.2/reframe', '1080p'),
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,
@@ -347,7 +355,7 @@ export default function VideoPage() {
                     <div className="sx-expander-body sx-cols sx-cols-2">
                       <Field label="OUTPUT RESOLUTION TIER">
                         <select className="sx-select" value={ltxRes} onChange={(e) => setLtxRes(e.target.value)}>
-                          {['720p', '1080p', '480p'].map((o) => (
+                          {offered.ltxRes.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>
@@ -484,21 +492,21 @@ export default function VideoPage() {
                     <div className="sx-expander-body sx-cols sx-cols-2">
                       <Field label="TARGET RESOLUTION">
                         <select className="sx-select" value={btdRes} onChange={(e) => setBtdRes(e.target.value)}>
-                          {['4k', '2k', '1080p'].map((o) => (
+                          {offered.btdRes.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>
                       </Field>
                       <Field label="TARGET FPS">
                         <select className="sx-select" value={btdFps} onChange={(e) => setBtdFps(e.target.value)}>
-                          {['30fps', '60fps'].map((o) => (
+                          {offered.btdFps.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>
                       </Field>
                       <Field label="QUALITY TIER">
                         <select className="sx-select" value={btdTier} onChange={(e) => setBtdTier(e.target.value)}>
-                          {['fast', 'standard', 'pro'].map((o) => (
+                          {offered.btdTier.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>
@@ -538,7 +546,7 @@ export default function VideoPage() {
                       </Field>
                       <Field label="TARGET RESOLUTION TIER">
                         <select className="sx-select" value={seedvrTarget} onChange={(e) => setSeedvrTarget(e.target.value)}>
-                          {['1080p', '2160p', '1440p', '720p'].map((o) => (
+                          {offered.seedvrTarget.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>

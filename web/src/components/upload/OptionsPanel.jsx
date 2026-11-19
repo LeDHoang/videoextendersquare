@@ -321,7 +321,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
                   />
                 </div>
               </div>
-              <Select id="studio-ltx-res" label="OUTPUT RESOLUTION TIER" value={cfg.ltxRes} onChange={cfg.setLtxRes} options={['720p', '1080p', '480p']} />
+              <Select id="studio-ltx-res" label="OUTPUT RESOLUTION TIER" value={cfg.ltxRes} onChange={cfg.setLtxRes} options={cfg.videoOptions.ltxRes} />
             </div>
             <div className="sx-studio-grid-2 sx-studio-toggles">
               <ToggleRow label="Preserve Audio Track" checked={cfg.ltxAudio} onChange={cfg.setLtxAudio} />
@@ -332,9 +332,9 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
         {isVideo && outpaint && cfg.loraPicked ? <LoraStack cfg={cfg} /> : null}
         {bytedance ? (
           <div className="sx-studio-grid-3" role="group" aria-label="Bytedance upscaler settings">
-            <Select id="studio-btd-res" label="TARGET RESOLUTION" value={cfg.btdRes} onChange={cfg.setBtdRes} options={['4k', '2k', '1080p']} />
-            <Select id="studio-btd-fps" label="TARGET FPS" value={cfg.btdFps} onChange={cfg.setBtdFps} options={['30fps', '60fps']} />
-            <Select id="studio-btd-tier" label="QUALITY TIER" value={cfg.btdTier} onChange={cfg.setBtdTier} options={['fast', 'standard', 'pro']} />
+            <Select id="studio-btd-res" label="TARGET RESOLUTION" value={cfg.btdRes} onChange={cfg.setBtdRes} options={cfg.videoOptions.btdRes} />
+            <Select id="studio-btd-fps" label="TARGET FPS" value={cfg.btdFps} onChange={cfg.setBtdFps} options={cfg.videoOptions.btdFps} />
+            <Select id="studio-btd-tier" label="QUALITY TIER" value={cfg.btdTier} onChange={cfg.setBtdTier} options={cfg.videoOptions.btdTier} />
             <Select id="studio-btd-preset" label="SCENARIO PRESET" value={cfg.btdPreset} onChange={cfg.setBtdPreset} options={['general', 'ugc', 'short_series', 'aigc', 'old_film']} />
             <Select id="studio-btd-fidelity" label="FIDELITY INTENSITY" value={cfg.btdFidelity} onChange={cfg.setBtdFidelity} options={['medium', 'high']} />
           </div>
@@ -342,7 +342,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
         {seedvr ? (
           <div className="sx-studio-grid-2" role="group" aria-label="SeedVR2 upscale settings">
             <NumberField id="studio-seedvr-factor" label="UPSCALE FACTOR" min={1} max={4} step={0.5} value={cfg.seedvrFactor} onChange={cfg.setSeedvrFactor} />
-            <Select id="studio-seedvr-target" label="TARGET RESOLUTION TIER" value={cfg.seedvrTarget} onChange={cfg.setSeedvrTarget} options={['1080p', '2160p', '1440p', '720p']} />
+            <Select id="studio-seedvr-target" label="TARGET RESOLUTION TIER" value={cfg.seedvrTarget} onChange={cfg.setSeedvrTarget} options={cfg.videoOptions.seedvrTarget} />
           </div>
         ) : null}
         {!cfg.studioPicked ? (
