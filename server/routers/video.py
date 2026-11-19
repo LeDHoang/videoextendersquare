@@ -208,7 +208,7 @@ def start_video_process(
     ltx_negative_prompt: str = Form("yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"),
     ltx_loras: str = Form(""),
     wan_resolution: str = Form("720p"),
-    luma_resolution: str = Form("720p"),
+    luma_resolution: str = Form("1080p"),
     seedvr_factor: float = Form(2.0),
     seedvr_target: str = Form("1080p"),
     bytedance_target_res: str = Form("2k"),

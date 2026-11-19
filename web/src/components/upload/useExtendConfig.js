@@ -200,9 +200,8 @@ export function useVideoExtendConfig(models) {
     // No WAN resolution selector in the UI yet: pin the top tier so quotes
     // never understate the charge (same as VideoPage).
     wanResolution: '720p',
-    // No Ray 3.2 resolution selector either: 720p ($0.12/s) keeps the
-    // output size of the retired Ray-2 Flash entry.
-    lumaResolution: '720p',
+    // No Ray 3.2 resolution selector either: default to 1080p ($0.36/s).
+    lumaResolution: '1080p',
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,

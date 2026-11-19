@@ -131,9 +131,8 @@ export default function VideoPage() {
     // never understate the charge (backend bills 480p/580p/720p at
     // $0.04/$0.06/$0.08 per second).
     wanResolution: '720p',
-    // No Ray 3.2 resolution selector either: 720p ($0.12/s) keeps the
-    // output size of the retired Ray-2 Flash entry.
-    lumaResolution: '720p',
+    // No Ray 3.2 resolution selector either: default to 1080p ($0.36/s).
+    lumaResolution: '1080p',
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,

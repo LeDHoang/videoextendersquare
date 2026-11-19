@@ -37,7 +37,7 @@ export function videoBillingParameters({
   ltxNegativePrompt,
   ltxLoras,
   wanResolution = '720p',
-  lumaResolution = '720p',
+  lumaResolution = '1080p',
   seedvrFactor,
   seedvrTarget,
   bytedanceTargetRes,

@@ -369,7 +369,7 @@ def _process_video_impl(
                 # Ray 3.2 reframe: prompt is required, resolution sets the
                 # per-second rate, and duration is left to default to the
                 # source length (the source length was checked before upload).
-                luma_resolution = kwargs.get("luma_resolution", "720p")
+                luma_resolution = kwargs.get("luma_resolution", "1080p")
                 arguments = {
                     "video_url": video_url,
                     "prompt": (prompt or "").strip() or default_prompt,

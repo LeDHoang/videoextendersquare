@@ -33,9 +33,9 @@ def test_representative_video_prices():
         duration=5,
         params={"outpaint_model": "luma/agent/ray/v3.2/reframe"},
     )
-    # Ray 3.2 defaults to 720p: 5 s x $0.12 = $0.60.
-    assert luma["credits"] == 81
-    assert luma["stages"][0]["details"]["resolution"] == "720p"
+    # Ray 3.2 defaults to 1080p: 5 s x $0.36 = $1.80.
+    assert luma["credits"] == 243
+    assert luma["stages"][0]["details"]["resolution"] == "1080p"
     assert luma["stages"][0]["pricing_verified_at"] == "2026-10-20"
 
     wan = quote_video(
@@ -76,6 +76,7 @@ def test_image_apps_one_megapixel_and_square_skip():
 def test_trim_duration_is_authoritative_and_per_item():
     params = {
         "outpaint_model": "luma/agent/ray/v3.2/reframe",
+        "luma_resolution": "720p",
         "trim_enabled": True,
         "trim_start": 8,
         "trim_duration": 7,
@@ -135,6 +136,7 @@ def test_parameter_hash_is_stable_and_stage_bound():
 def test_luma_to_seedvr_is_refused_for_quotes_but_estimated_approximately():
     params = {
         "outpaint_model": "luma/agent/ray/v3.2/reframe",
+        "luma_resolution": "720p",
         "upscale_engine": "fal",
         "upscale_model": "fal-ai/seedvr/upscale/video",
         "seedvr_target": "1080p",

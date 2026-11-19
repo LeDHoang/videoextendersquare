@@ -36,6 +36,6 @@ Billed per started source second, by output resolution:
 ## How this repo calls it
 
 `pipeline/video_worker.py` sends `video_url`, `prompt` (default prompt when blank),
-`aspect_ratio: "1:1"` and `resolution` (`luma_resolution`, default `720p`). It omits
+`aspect_ratio: "1:1"` and `resolution` (`luma_resolution`, default `1080p`). It omits
 `duration` so the output follows the source. Sources over 10 s are refused by the
 quote (`core/pricing.py`), the `/api/video/process` route and the worker.
