@@ -67,11 +67,11 @@ def test_bytedance_rates_and_multipliers_match_docs():
     section = _pricing_section("bytedance-upscaler/upscale/video")
     entry = _entry(models.VIDEO_UPSCALE, "fal-ai/bytedance-upscaler/upscale/video")
     base = {key: Decimal(value) for key, value in entry["base_rates_usd"].items()}
-    # "1080p costs $0.0072/s, 2K costs $0.0144/s, and 4K costs $0.0288/s, at a 30fps rate"
-    assert _prices(section)[:3] == [base["1080p"], base["2k"], base["4k"]]
+    # "1080p costs $0.0072/s, 2K ..., 6K costs $0.0574/s, and 8K costs $0.1148/s, at a 30fps rate"
+    assert _prices(section)[:5] == [base["1080p"], base["2k"], base["4k"], base["6k"], base["8k"]]
     assert "60fps doubles" in section
     assert Decimal(str(entry["fps_multiplier"]["60fps"])) == 2
     assert "10 times" in section
     assert Decimal(str(entry["tier_multiplier"]["pro"])) == 10
     # The pro prices quoted in the doc are the base rates x10.
-    assert _prices(section)[3:6] == [rate * 10 for rate in (base["1080p"], base["2k"], base["4k"])]
+    assert _prices(section)[5:8] == [rate * 10 for rate in (base["1080p"], base["2k"], base["4k"])]

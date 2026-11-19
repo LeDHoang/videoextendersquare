@@ -21,7 +21,7 @@ def test_representative_video_prices():
     assert ltx["credits"] == 21
     assert ltx["stages"][0]["details"]["frames"] == 121
     assert ltx["stages"][0]["details"]["billed_megapixels"] == 63
-    assert ltx["stages"][0]["pricing_version"] == "2026-10-20"
+    assert ltx["stages"][0]["pricing_version"] == "2026-11-20"
     assert ltx["stages"][0]["pricing_verified_at"] == "2026-09-13"
     assert ltx["stages"][0]["pricing_source"].startswith("https://fal.ai/models/")
     assert "ceil" in ltx["stages"][0]["rounding_rule"]
@@ -61,6 +61,20 @@ def test_representative_video_prices():
         },
     )
     assert bytedance["credits"] == 20
+
+    for resolution, cost in (("6k", "0.2870"), ("8k", "0.5740")):
+        quote = quote_video(
+            width=1080,
+            height=1080,
+            duration=5,
+            params={
+                "upscale_only": True,
+                "upscale_engine": "fal",
+                "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+                "bytedance_target_res": resolution,
+            },
+        )
+        assert Decimal(quote["stages"][0]["provider_cost_usd"]) == Decimal(cost)
 
 
 def test_image_apps_one_megapixel_and_square_skip():

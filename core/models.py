@@ -24,7 +24,8 @@ import re
 from decimal import Decimal
 
 # 2026-10-20: Ray-2 Flash reframe replaced by Ray 3.2 reframe (per-resolution rates).
-PRICING_VERSION = "2026-10-20"
+# 2026-11-20: Bytedance 6k and 8k targets added at fal's listed rates.
+PRICING_VERSION = "2026-11-20"
 PRICING_VERIFIED_AT = "2026-09-13"
 RAY_3_2_PRICING_VERIFIED_AT = "2026-10-20"
 # fal raised the LoRA endpoint from 0.0024075 (found by the live price sync work).
@@ -149,8 +150,8 @@ VIDEO_UPSCALE = [
         "fal_unit": "seconds",
         "fal_base_usd": "0.0072",
         "pricing_kind": "per_second",
-        "base_rates": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288},
-        "base_rates_usd": {"1080p": "0.0072", "2k": "0.0144", "4k": "0.0288"},
+        "base_rates": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288, "6k": 0.0574, "8k": 0.1148},
+        "base_rates_usd": {"1080p": "0.0072", "2k": "0.0144", "4k": "0.0288", "6k": "0.0574", "8k": "0.1148"},
         "fps_multiplier": {"30fps": 1.0, "60fps": 2.0},
         "tier_multiplier": {"fast": 1.0, "standard": 1.0, "pro": 10.0},
         "credit_enabled": True,
@@ -158,7 +159,7 @@ VIDEO_UPSCALE = [
         "pricing_verified_at": PRICING_VERIFIED_AT,
         "pricing_source": "https://fal.ai/models/fal-ai/bytedance-upscaler/upscale/video",
         "rounding_rule": "ceil source duration to whole seconds",
-        "constraints": {"resolutions": ["1080p", "2k", "4k"], "frame_rates": ["30fps", "60fps"], "tiers": ["fast", "standard", "pro"]},
+        "constraints": {"resolutions": ["1080p", "2k", "4k", "6k", "8k"], "frame_rates": ["30fps", "60fps"], "tiers": ["fast", "standard", "pro"]},
         "fal_fields": {
             "target_resolution": ["base_rates", "base_rates_usd", "constraints.resolutions"],
             "target_fps": ["fps_multiplier", "constraints.frame_rates"],

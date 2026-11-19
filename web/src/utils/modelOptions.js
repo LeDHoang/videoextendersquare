@@ -12,7 +12,7 @@ function offered(order, table) {
 export function videoOptions(outpaintEntry, upscaleEntry) {
   return {
     ltxRes: offered(['720p', '1080p', '480p'], outpaintEntry?.resolutions),
-    btdRes: offered(['4k', '2k', '1080p'], upscaleEntry?.base_rates_usd),
+    btdRes: offered(['8k', '6k', '4k', '2k', '1080p'], upscaleEntry?.base_rates_usd),
     btdFps: offered(['30fps', '60fps'], upscaleEntry?.fps_multiplier),
     btdTier: offered(['fast', 'standard', 'pro'], upscaleEntry?.tier_multiplier),
     seedvrTarget: offered(['1080p', '2160p', '1440p', '720p'], upscaleEntry?.resolutions),

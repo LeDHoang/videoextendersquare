@@ -142,7 +142,7 @@ def test_a_tiered_upscaler_scales_every_tier(db, alerts, monkeypatch):
     serve(monkeypatch, fal_rows(**{BYTEDANCE: {"unit_price": 0.0144}}))
     fal_prices.sync(db)
     entry = next(entry for entry in models.VIDEO_UPSCALE if entry["model"] == BYTEDANCE)
-    assert entry["base_rates_usd"] == {"1080p": "0.0144", "2k": "0.0288", "4k": "0.0576"}
+    assert entry["base_rates_usd"] == {"1080p": "0.0144", "2k": "0.0288", "4k": "0.0576", "6k": "0.1148", "8k": "0.2296"}
     assert entry["base_rates"]["4k"] == 0.0576
 
 

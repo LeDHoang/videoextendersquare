@@ -5,7 +5,7 @@ describe('videoOptions', () => {
   it('offers every option while the catalog has not loaded', () => {
     expect(videoOptions(undefined, undefined)).toEqual({
       ltxRes: ['720p', '1080p', '480p'],
-      btdRes: ['4k', '2k', '1080p'],
+      btdRes: ['8k', '6k', '4k', '2k', '1080p'],
       btdFps: ['30fps', '60fps'],
       btdTier: ['fast', 'standard', 'pro'],
       seedvrTarget: ['1080p', '2160p', '1440p', '720p'],
@@ -21,8 +21,7 @@ describe('videoOptions', () => {
     };
     const options = videoOptions(ltx, bytedance);
     expect(options.ltxRes).toEqual(['1080p', '480p']);
-    // 8k is not offered: it has a price but no place in the page's list.
-    expect(options.btdRes).toEqual(['4k', '1080p']);
+    expect(options.btdRes).toEqual(['8k', '4k', '1080p']);
     expect(options.btdFps).toEqual(['30fps']);
     expect(options.btdTier).toEqual(['fast', 'pro']);
     expect(videoOptions(null, { resolutions: { '720p': 720, '1440p': 1440 } }).seedvrTarget).toEqual(['1440p', '720p']);

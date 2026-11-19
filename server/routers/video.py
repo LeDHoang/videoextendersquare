@@ -46,8 +46,8 @@ STAGE_TTL_S = 6 * 3600
 _UPSCALE_ENGINES = {"fast", "fal", "studio", "none"}
 _LTX_RESOLUTIONS = {"480p", "720p", "1080p"}
 _LTX_TRANSFORMERS = {"high", "low", "both"}
-_SEEDVR_TARGETS = {"720p", "1080p", "2160p"}
-_BYTEDANCE_RES = {"1080p", "2k", "4k"}
+_SEEDVR_TARGETS = {"720p", "1080p", "1440p", "2160p"}
+_BYTEDANCE_RES = {"1080p", "2k", "4k", "6k", "8k"}
 _BYTEDANCE_FPS = {"30fps", "60fps"}
 _BYTEDANCE_TIERS = {"fast", "standard", "pro"}
 
