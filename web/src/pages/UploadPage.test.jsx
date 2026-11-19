@@ -387,6 +387,26 @@ describe('UploadPage — video extender parity', () => {
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
     expect(screen.getByText('THE SELECTED CUSTOM / NON-DETERMINISTIC MODEL REQUIRES MY FAL KEY')).toBeInTheDocument();
   });
+
+  it('hides options fal withdrew and falls back to the first one still offered', async () => {
+    const withdrawn = (catalog, model, patch) => catalog.map((e) => (e.model === model ? { ...e, ...patch } : e));
+    mocks.models = {
+      ...MODELS,
+      video_outpaint_catalog: withdrawn(MODELS.video_outpaint_catalog, 'fal-ai/ltx-2.3-quality/outpaint', { resolutions: { '480p': 480, '1080p': 1080 } }),
+      video_upscale_catalog: withdrawn(MODELS.video_upscale_catalog, 'fal-ai/bytedance-upscaler/upscale/video', { base_rates_usd: { '1080p': '0.01', '4k': '0.04' } }),
+    };
+    renderPage();
+    await pick(['portrait.mp4']);
+    await screen.findByText('1080×1920 ➔ 2048×2048');
+    const values = (select) => within(select).getAllByRole('option').map((node) => node.value);
+    const ltx = screen.getByLabelText('OUTPUT RESOLUTION TIER');
+    expect(values(ltx)).toEqual(['1080p', '480p']);
+    expect(ltx).toHaveValue('1080p');
+    fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
+    const target = within(screen.getByRole('group', { name: 'Bytedance upscaler settings' })).getByLabelText('TARGET RESOLUTION');
+    expect(values(target)).toEqual(['4k', '1080p']);
+    expect(target).toHaveValue('4k');
+  });
 });
 
 describe('UploadPage — image extender parity', () => {
