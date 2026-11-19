@@ -494,7 +494,8 @@ def _process_video_impl(
             arguments = {
                 "video_url": video_url_to_upscale,
                 "target_resolution": kwargs.get("bytedance_target_res", "2k"),
-                "target_fps": kwargs.get("bytedance_target_fps", "30fps"),
+                # fal takes a number (24 to 120); our "30fps"/"60fps" labels key the price.
+                "target_fps": int(str(kwargs.get("bytedance_target_fps", "30fps")).removesuffix("fps")),
                 "enhancement_preset": kwargs.get("bytedance_preset", "general"),
                 "enhancement_tier": kwargs.get("bytedance_tier", "fast"),
                 "fidelity": kwargs.get("bytedance_fidelity", "medium"),
