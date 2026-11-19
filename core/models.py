@@ -25,9 +25,11 @@ from decimal import Decimal
 
 # 2026-10-20: Ray-2 Flash reframe replaced by Ray 3.2 reframe (per-resolution rates).
 # 2026-11-20: Bytedance 6k and 8k targets added at fal's listed rates.
+# 2026-11-20: MiniMax H3 Max and LTX 2.5 reframe added at fal's listed rates.
 PRICING_VERSION = "2026-11-20"
 PRICING_VERIFIED_AT = "2026-09-13"
 RAY_3_2_PRICING_VERIFIED_AT = "2026-10-20"
+NEW_REFRAME_PRICING_VERIFIED_AT = "2026-11-20"
 # fal raised the LoRA endpoint from 0.0024075 (found by the live price sync work).
 LTX_LORA_PRICING_VERIFIED_AT = "2026-11-20"
 
@@ -104,6 +106,65 @@ VIDEO_OUTPAINT = [
         },
         "aspect_ratios": ["3:4", "4:3", "1:1", "9:16", "16:9", "21:9"],
         "max_source_seconds": 10,
+        "fal_fields": {
+            "resolution": ["resolution_rates", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios", "constraints.aspect_ratios"],
+        },
+    },
+    {
+        # Billed per second generated. fal splits longer sources into
+        # overlapping windows and bills the overlap too, so credit quotes stop
+        # at CREDIT_MAX_SECONDS, where one window covers the whole source.
+        "label": "MiniMax H3 Max Reframe",
+        "model": "minimax/h3-max/reframe-video",
+        "fal_unit": "units",
+        "fal_base_usd": "0.05",
+        "pricing_kind": "per_second",
+        "price": 0.08,
+        "unit_price_usd": "0.08",
+        "resolution_rates": {"480p": "0.05", "768p": "0.08", "1080p": "0.16"},
+        "default_resolution": "768p",
+        "credit_enabled": True,
+        "credit_max_seconds": 10,
+        "pricing_version": PRICING_VERSION,
+        "pricing_verified_at": NEW_REFRAME_PRICING_VERIFIED_AT,
+        "pricing_source": "https://fal.ai/models/minimax/h3-max/reframe-video",
+        "rounding_rule": "ceil source duration to whole seconds",
+        "constraints": {
+            "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"],
+            "resolutions": ["480p", "768p", "1080p"],
+            "max_source_seconds": 300,
+        },
+        "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"],
+        "max_source_seconds": 300,
+        "fal_fields": {
+            "resolution": ["resolution_rates", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios", "constraints.aspect_ratios"],
+        },
+    },
+    {
+        # Billed per second of input video at the output resolution. Takes no
+        # prompt; placement anchors the source inside the square.
+        "label": "LTX 2.5 Reframe",
+        "model": "lightricks/ltx-2.5/reframe",
+        "fal_unit": "units",
+        "fal_base_usd": "0.1",
+        "pricing_kind": "per_second",
+        "price": 0.2,
+        "unit_price_usd": "0.2",
+        "resolution_rates": {"720p": "0.10", "1080p": "0.20"},
+        "default_resolution": "1080p",
+        "credit_enabled": True,
+        "pricing_version": PRICING_VERSION,
+        "pricing_verified_at": NEW_REFRAME_PRICING_VERIFIED_AT,
+        "pricing_source": "https://fal.ai/models/lightricks/ltx-2.5/reframe",
+        "rounding_rule": "ceil source duration to whole seconds",
+        "constraints": {
+            "aspect_ratios": ["1:1", "4:5", "5:4", "9:16", "16:9"],
+            "resolutions": ["720p", "1080p"],
+            "anchors": ["center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"],
+        },
+        "aspect_ratios": ["1:1", "4:5", "5:4", "9:16", "16:9"],
         "fal_fields": {
             "resolution": ["resolution_rates", "constraints.resolutions"],
             "aspect_ratio": ["aspect_ratios", "constraints.aspect_ratios"],

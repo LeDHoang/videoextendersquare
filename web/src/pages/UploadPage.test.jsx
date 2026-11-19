@@ -79,6 +79,8 @@ const MODELS = {
     { label: 'LTX 2.3 Quality', model: 'fal-ai/ltx-2.3-quality/outpaint', is_custom: false, credit_enabled: true },
     { label: 'LTX 2.3 Quality + LoRA', model: 'fal-ai/ltx-2.3-quality/outpaint/lora', is_custom: false, credit_enabled: true },
     { label: 'Luma Ray 3.2 Reframe', model: 'luma/agent/ray/v3.2/reframe', is_custom: false, credit_enabled: true },
+    { label: 'MiniMax H3 Max Reframe', model: 'minimax/h3-max/reframe-video', is_custom: false, credit_enabled: true, resolution_rates: { '480p': '0.05', '768p': '0.08', '1080p': '0.16' } },
+    { label: 'LTX 2.5 Reframe', model: 'lightricks/ltx-2.5/reframe', is_custom: false, credit_enabled: true, resolution_rates: { '720p': '0.10', '1080p': '0.20' } },
   ],
   video_upscale_catalog: [
     { label: 'Bytedance Upscaler', model: 'fal-ai/bytedance-upscaler/upscale/video', is_custom: false, credit_enabled: true },
@@ -404,6 +406,82 @@ describe('UploadPage — video extender parity', () => {
     const target = within(screen.getByRole('group', { name: 'Bytedance upscaler settings' })).getByLabelText('TARGET RESOLUTION');
     expect(values(target)).toEqual(['4k', '1080p']);
     expect(target).toHaveValue('4k');
+  });
+});
+
+describe('UploadPage — H3 Max and LTX 2.5 reframe settings', () => {
+  const settingsOf = (overrides) => videoBillingParameters({
+    prompt: VID_PROMPT_DEFAULT,
+    upscaleOnly: false,
+    falPicked: false,
+    studioPicked: false,
+    sharpening: 0.5,
+    upscaleModel: 'fal-ai/bytedance-upscaler/upscale/video',
+    ltxResolution: '720p',
+    ltxAudio: true,
+    ltxGuidance: 1,
+    ltxPromptExpansion: false,
+    ltxNegativePrompt: VID_NEG_DEFAULT,
+    ltxLoras: [],
+    seedvrFactor: 2,
+    seedvrTarget: '1080p',
+    bytedanceTargetRes: '2k',
+    bytedanceTargetFps: '30fps',
+    bytedanceTier: 'fast',
+    bytedancePreset: 'general',
+    bytedanceFidelity: 'medium',
+    trimEnabled: false,
+    trimStart: 0,
+    trimDuration: 15,
+    customOutpaintArgs: {},
+    customUpscaleArgs: {},
+    ...overrides,
+  });
+
+  it('sends the H3 Max resolution, seed and prompt', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-h3' });
+    renderPage();
+    await pick(['portrait.mp4']);
+    await screen.findByText('1080×1920 ➔ 2048×2048');
+    fireEvent.click(radio('Outpaint Model', /MiniMax H3 Max Reframe/));
+    const group = screen.getByRole('group', { name: 'MiniMax H3 Max settings' });
+    const values = (select) => within(select).getAllByRole('option').map((node) => node.value);
+    expect(values(within(group).getByLabelText('OUTPUT RESOLUTION'))).toEqual(['480p', '768p', '1080p']);
+    expect(within(group).getByLabelText('OUTPUT RESOLUTION')).toHaveValue('768p');
+    fireEvent.change(within(group).getByLabelText('OUTPUT RESOLUTION'), { target: { value: '1080p' } });
+    fireEvent.change(within(group).getByLabelText('SEED (EMPTY = RANDOM)'), { target: { value: '4x2' } });
+    expect(within(group).getByLabelText('SEED (EMPTY = RANDOM)')).toHaveValue('42');
+    expect(screen.queryByLabelText('NEGATIVE PROMPT FILTER')).toBeNull();
+    expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toBeInTheDocument();
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1])).toEqual(expectedForm('st-portrait.mp4', settingsOf({
+      outpaintModel: 'minimax/h3-max/reframe-video',
+      minimaxResolution: '1080p',
+      minimaxSeed: '42',
+    }), { payment_source: 'credits', quote_id: 'q-st-portrait.mp4' }));
+  });
+
+  it('shows LTX 2.5 its own settings, not the LTX 2.3 ones, and no prompt', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-ltx25' });
+    renderPage();
+    await pick(['portrait.mp4']);
+    await screen.findByText('1080×1920 ➔ 2048×2048');
+    fireEvent.click(radio('Outpaint Model', /LTX 2\.5 Reframe/));
+    expect(screen.queryByLabelText('NEGATIVE PROMPT FILTER')).toBeNull();
+    expect(screen.queryByLabelText('OUTPUT RESOLUTION TIER')).toBeNull();
+    expect(screen.queryByLabelText('OUTPAINT EXTENSION PROMPT')).toBeNull();
+    const group = screen.getByRole('group', { name: 'LTX 2.5 Reframe settings' });
+    expect(within(group).getByLabelText('OUTPUT RESOLUTION')).toHaveValue('1080p');
+    fireEvent.change(within(group).getByLabelText('OUTPUT RESOLUTION'), { target: { value: '720p' } });
+    fireEvent.change(within(group).getByLabelText('KEEP SOURCE AT'), { target: { value: 'top_left' } });
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1])).toEqual(expectedForm('st-portrait.mp4', settingsOf({
+      outpaintModel: 'lightricks/ltx-2.5/reframe',
+      ltx25Resolution: '720p',
+      ltx25Anchor: 'top_left',
+    }), { payment_source: 'credits', quote_id: 'q-st-portrait.mp4' }));
   });
 });
 

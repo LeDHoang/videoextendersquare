@@ -69,6 +69,13 @@ def _ceil_seconds(duration: float) -> Decimal:
     return _decimal(max(0.0, duration)).to_integral_value(rounding=ROUND_CEILING)
 
 
+# Per-second reframe models other than Ray 3.2, and the param holding each one's resolution.
+REFRAME_RESOLUTION_PARAMS = {
+    "minimax/h3-max/reframe-video": "minimax_resolution",
+    "lightricks/ltx-2.5/reframe": "ltx25_resolution",
+}
+
+
 def _catalog_entry(model_id: str, catalog: list[dict]) -> dict | None:
     normalized = models.normalize_model_id(model_id).casefold()
     return next((entry for entry in catalog if entry["model"].casefold() == normalized), None)
@@ -185,6 +192,32 @@ def quote_video(
                     resolution=resolution,
                 )
             )
+        elif model_lower in REFRAME_RESOLUTION_PARAMS:
+            # Exact ids first: both contain "reframe" and would hit the Luma branch.
+            check_outpaint_source_seconds(outpaint_entry, float(effective))
+            credit_limit = outpaint_entry.get("credit_max_seconds")
+            if credit_limit is not None and float(effective) > float(credit_limit):
+                raise PricingError(
+                    f"{outpaint_entry['label']} credit quotes cover a segment of {credit_limit} s or less "
+                    f"(selected segment is {float(effective):.2f} s); trim it or use a personal Fal key."
+                )
+            resolution = str(params.get(REFRAME_RESOLUTION_PARAMS[model_lower]) or outpaint_entry["default_resolution"])
+            rates = outpaint_entry.get("resolution_rates", {})
+            if resolution not in rates:
+                raise PricingError(f"Unsupported {outpaint_entry['label']} resolution: {resolution}")
+            billed_seconds = _ceil_seconds(float(effective))
+            cost = _decimal(rates[resolution]) * billed_seconds
+            stages.append(
+                _stage(
+                    "outpaint",
+                    outpaint_entry,
+                    cost,
+                    duration_seconds=float(effective),
+                    billed_seconds=int(billed_seconds),
+                    resolution=resolution,
+                    aspect_ratio="1:1",
+                )
+            )
         elif "luma" in model_lower or "reframe" in model_lower:
             check_outpaint_source_seconds(outpaint_entry, float(effective))
             resolution = str(params.get("luma_resolution") or outpaint_entry.get("default_resolution", "720p"))
@@ -253,7 +286,7 @@ def quote_video(
                     raise PricingError("SeedVR credit quotes require source frame metadata.")
                 chained = not upscale_only and not is_square
                 if chained and not estimate:
-                    raise PricingError("Luma-to-SeedVR chaining is BYOK-only because output frame count is not deterministic.")
+                    raise PricingError("Reframe-to-SeedVR chaining is BYOK-only because output frame count is not deterministic.")
                 fps = float(source_fps)
                 frame_count = (
                     max(1, int((effective * _decimal(source_fps)).to_integral_value(rounding=ROUND_CEILING)))
@@ -261,7 +294,7 @@ def quote_video(
                     else int(source_frames)
                 )
                 if chained:
-                    # Estimate only: assume Luma returns the source frame rate.
+                    # Estimate only: assume the reframe model returns the source frame rate.
                     seedvr_approximate = True
             if not upscale_only or is_square:
                 out_w = out_h = side

@@ -41,6 +41,14 @@ FIELDS = {
         "enhancement_tier": {"enum": ["fast", "standard", "pro"]},
     },
     SEEDVR: {"target_resolution": {"enum": ["720p", "1080p", "1440p", "2160p"]}},
+    "minimax/h3-max/reframe-video": {
+        "resolution": {"enum": ["480p", "768p", "1080p"]},
+        "aspect_ratio": {"enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"]},
+    },
+    "lightricks/ltx-2.5/reframe": {
+        "resolution": {"enum": ["720p", "1080p"]},
+        "aspect_ratio": {"enum": ["1:1", "4:5", "5:4", "9:16", "16:9"]},
+    },
 }
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { imageBillingParameters, videoBillingParameters } from '../../utils/cloudBilling.js';
-import { offeredValue, topTier, videoOptions } from '../../utils/modelOptions.js';
+import { H3_REFRAME, LTX25_REFRAME, offeredValue, rateTiers, topTier, videoOptions } from '../../utils/modelOptions.js';
 
 // Extender settings for the Upload Studio, one hook per media kind. Each kind
 // keeps its own settings for the whole visit (like the standalone /image and
@@ -29,6 +29,8 @@ const CREDIT_VIDEO_OUTPAINT_MODELS = new Set([
   'fal-ai/ltx-2.3-quality/outpaint',
   'fal-ai/ltx-2.3-quality/outpaint/lora',
   'luma/agent/ray/v3.2/reframe',
+  H3_REFRAME,
+  LTX25_REFRAME,
 ]);
 const CREDIT_VIDEO_UPSCALE_MODELS = new Set([
   'fal-ai/bytedance-upscaler/upscale/video',
@@ -140,6 +142,10 @@ export function useVideoExtendConfig(models) {
   const [ltxPromptExpansion, setLtxPromptExpansion] = useState(false);
   const [ltxNegativePrompt, setLtxNegativePrompt] = useState(VID_NEG_DEFAULT);
   const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
+  const [minimaxResPicked, setMinimaxRes] = useState('768p');
+  const [minimaxSeed, setMinimaxSeed] = useState('');
+  const [ltx25ResPicked, setLtx25Res] = useState('1080p');
+  const [ltx25Anchor, setLtx25Anchor] = useState('center');
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
   const [seedvrTargetPicked, setSeedvrTarget] = useState('1080p');
   const [btdResPicked, setBtdRes] = useState('2k');
@@ -167,6 +173,10 @@ export function useVideoExtendConfig(models) {
   const btdRes = offeredValue(btdResPicked, offered.btdRes);
   const btdFps = offeredValue(btdFpsPicked, offered.btdFps);
   const btdTier = offeredValue(btdTierPicked, offered.btdTier);
+  const minimaxResOptions = rateTiers(outpaintCatalog, H3_REFRAME, ['480p', '768p', '1080p']);
+  const minimaxRes = offeredValue(minimaxResPicked, minimaxResOptions);
+  const ltx25ResOptions = rateTiers(outpaintCatalog, LTX25_REFRAME, ['720p', '1080p']);
+  const ltx25Res = offeredValue(ltx25ResPicked, ltx25ResOptions);
   const outpaintModel = outpaintEntry?.model || models.outpaint_vid;
   const upscaleModel = upscaleEntry?.model || models.upscale_vid;
 
@@ -183,7 +193,10 @@ export function useVideoExtendConfig(models) {
     if (uc?.is_custom) setFalUpscale(uc.label);
   }, [outpaintCatalog, upscaleCatalog, models]);
 
-  const ltxPicked = !upscaleOnly && outpaintOpt.includes('LTX');
+  const minimaxPicked = !upscaleOnly && outpaintModel === H3_REFRAME;
+  const ltx25Picked = !upscaleOnly && outpaintModel === LTX25_REFRAME;
+  // LTX 2.3 settings only: LTX 2.5 Reframe has its own.
+  const ltxPicked = !upscaleOnly && outpaintOpt.includes('LTX') && !ltx25Picked;
   const loraPicked = !upscaleOnly && (outpaintOpt.includes('LoRA') || (outpaintModel || '').includes('/lora'));
   const loraList = useMemo(
     () => loraPicked ? ltxLoras.map((lora) => ({ ...lora, path: (lora.path || '').trim() })).filter((lora) => lora.path) : [],
@@ -206,6 +219,10 @@ export function useVideoExtendConfig(models) {
     ltxLoras: loraList,
     // No Ray 3.2 resolution selector either: default to 1080p ($0.36/s).
     lumaResolution: topTier(outpaintCatalog, 'luma/agent/ray/v3.2/reframe', '1080p'),
+    minimaxResolution: minimaxRes,
+    minimaxSeed,
+    ltx25Resolution: ltx25Res,
+    ltx25Anchor,
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,
@@ -218,7 +235,7 @@ export function useVideoExtendConfig(models) {
     trimDuration: trimDur,
     customOutpaintArgs: outpaintEntry?.is_custom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, minimaxRes, minimaxSeed, ltx25Res, ltx25Anchor, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
 
   const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? CREDIT_VIDEO_OUTPAINT_MODELS.has(outpaintModel);
   const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? CREDIT_VIDEO_UPSCALE_MODELS.has(upscaleModel);
@@ -246,6 +263,10 @@ export function useVideoExtendConfig(models) {
     updateLora,
     addLora: () => setLtxLoras((current) => (current.length < MAX_LORAS ? [...current, { path: '', scale: 1, transformer: 'both' }] : current)),
     removeLora: (index) => setLtxLoras((current) => current.filter((_, position) => position !== index)),
+    minimaxRes, setMinimaxRes, minimaxResOptions,
+    minimaxSeed, setMinimaxSeed,
+    ltx25Res, setLtx25Res, ltx25ResOptions,
+    ltx25Anchor, setLtx25Anchor,
     seedvrFactor, setSeedvrFactor,
     seedvrTarget, setSeedvrTarget,
     btdRes, setBtdRes,
@@ -262,6 +283,8 @@ export function useVideoExtendConfig(models) {
     noUpscale,
     studioPicked,
     ltxPicked,
+    minimaxPicked,
+    ltx25Picked,
     loraPicked,
     outpaintCatalog,
     outpaintOptions,

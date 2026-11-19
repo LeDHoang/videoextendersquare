@@ -130,7 +130,7 @@ def test_luma_to_seedvr_is_refused_for_quotes_but_estimated_approximately():
         "upscale_model": "fal-ai/seedvr/upscale/video",
         "seedvr_target": "1080p",
     }
-    with pytest.raises(PricingError, match="Luma-to-SeedVR"):
+    with pytest.raises(PricingError, match="Reframe-to-SeedVR"):
         quote_video(width=1920, height=1080, duration=5, params=params, source_fps=24, source_frames=120)
 
     estimate = quote_video(

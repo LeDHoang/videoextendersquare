@@ -144,3 +144,28 @@ def test_worker_refuses_long_ray_source_before_upload(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="10 s or less"):
         video_worker.process_video(str(source), "", fal_key="key", outpaint_model=RAY)
     assert uploads == []
+
+
+@pytest.mark.parametrize(
+    ("model", "field", "value"),
+    [
+        ("minimax/h3-max/reframe-video", "minimax_resolution", "4k"),
+        ("minimax/h3-max/reframe-video", "minimax_seed", "-1"),
+        ("minimax/h3-max/reframe-video", "minimax_seed", "4294967296"),
+        ("lightricks/ltx-2.5/reframe", "ltx25_resolution", "480p"),
+        ("lightricks/ltx-2.5/reframe", "ltx25_anchor", "middle"),
+    ],
+)
+def test_process_refuses_invalid_h3_and_ltx25_settings(app, tmp_path, monkeypatch, model, field, value):
+    monkeypatch.setattr(video_router, "get_video_dimensions_and_duration", lambda *_a, **_k: (1080, 1920, 5.0))
+    monkeypatch.setattr(video_router, "create_billing_job", _no_billing)
+    monkeypatch.setattr(video_router, "require_billing_secrets", lambda: None)
+    with TestClient(app) as client:
+        user = _register(client, "reframe_settings_user")
+        _stage(tmp_path, user, "reframe-settings")
+        try:
+            response = _submit(client, "reframe-settings", outpaint_model=model, **{field: value})
+            assert response.status_code == 400, response.text
+            assert response.json()["detail"] == f"Invalid {field}"
+        finally:
+            video_router.STAGED_UPLOADS.pop("reframe-settings", None)

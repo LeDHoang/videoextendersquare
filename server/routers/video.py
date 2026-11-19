@@ -46,6 +46,7 @@ STAGE_TTL_S = 6 * 3600
 _UPSCALE_ENGINES = {"fast", "fal", "studio", "none"}
 _LTX_RESOLUTIONS = {"480p", "720p", "1080p"}
 _LTX_TRANSFORMERS = {"high", "low", "both"}
+_LTX25_ANCHORS = {"center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"}
 _SEEDVR_TARGETS = {"720p", "1080p", "1440p", "2160p"}
 _BYTEDANCE_RES = {"1080p", "2k", "4k", "6k", "8k"}
 _BYTEDANCE_FPS = {"30fps", "60fps"}
@@ -209,6 +210,10 @@ def start_video_process(
     ltx_negative_prompt: str = Form(LTX_NEGATIVE_PROMPT),
     ltx_loras: str = Form(""),
     luma_resolution: str = Form("1080p"),
+    minimax_resolution: str = Form("768p"),
+    minimax_seed: str = Form(""),
+    ltx25_resolution: str = Form("1080p"),
+    ltx25_anchor: str = Form("center"),
     seedvr_factor: float = Form(2.0),
     seedvr_target: str = Form("1080p"),
     bytedance_target_res: str = Form("2k"),
@@ -239,6 +244,14 @@ def start_video_process(
     )
     if luma_resolution not in {"540p", "720p", "1080p"}:
         raise HTTPException(status_code=400, detail="Invalid luma_resolution")
+    if minimax_resolution not in {"480p", "768p", "1080p"}:
+        raise HTTPException(status_code=400, detail="Invalid minimax_resolution")
+    if minimax_seed and not (minimax_seed.isascii() and minimax_seed.isdigit() and int(minimax_seed) <= 4294967295):
+        raise HTTPException(status_code=400, detail="Invalid minimax_seed")
+    if ltx25_resolution not in {"720p", "1080p"}:
+        raise HTTPException(status_code=400, detail="Invalid ltx25_resolution")
+    if ltx25_anchor not in _LTX25_ANCHORS:
+        raise HTTPException(status_code=400, detail="Invalid ltx25_anchor")
     parsed_loras = _parse_ltx_loras(ltx_loras)
     try:
         custom_outpaint = _models.parse_custom_args(custom_outpaint_args)
@@ -274,6 +287,10 @@ def start_video_process(
         "ltx_negative_prompt": ltx_negative_prompt,
         "ltx_loras": parsed_loras,
         "luma_resolution": luma_resolution,
+        "minimax_resolution": minimax_resolution,
+        "minimax_seed": minimax_seed,
+        "ltx25_resolution": ltx25_resolution,
+        "ltx25_anchor": ltx25_anchor,
         "seedvr_factor": seedvr_factor,
         "seedvr_target": seedvr_target,
         "bytedance_target_res": bytedance_target_res,
@@ -366,6 +383,10 @@ def start_video_process(
         "ltx_negative_prompt": params["ltx_negative_prompt"],
         "ltx_loras": params["ltx_loras"],
         "luma_resolution": params["luma_resolution"],
+        "minimax_resolution": params["minimax_resolution"],
+        "minimax_seed": params["minimax_seed"],
+        "ltx25_resolution": params["ltx25_resolution"],
+        "ltx25_anchor": params["ltx25_anchor"],
         "seedvr_factor": params["seedvr_factor"],
         "seedvr_target": params["seedvr_target"],
         "bytedance_target_res": params["bytedance_target_res"],

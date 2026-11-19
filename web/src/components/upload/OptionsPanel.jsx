@@ -5,6 +5,7 @@ import { onRovingKeyDown, tabStop } from '../ui/roving.js';
 import CloudFundingPanel from '../billing/CloudFundingPanel.jsx';
 import { CloudIcon, CubeIcon, SendIcon, SquareIcon, StackIcon } from '../icons/index.jsx';
 import { MODES, MAX_LORAS } from './useExtendConfig.js';
+import { LTX25_ANCHORS } from '../../utils/modelOptions.js';
 
 // How a file is made square: every extender setting of the standalone Image
 // and Video pages, in the order a person decides them. It binds to the same
@@ -191,6 +192,8 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
   const isVideo = cfg.kind === 'video';
   const outpaint = !cfg.upscaleOnly && !squareOnly;
   const ltx = isVideo && outpaint && cfg.ltxPicked;
+  const minimax = isVideo && outpaint && cfg.minimaxPicked;
+  const ltx25 = isVideo && outpaint && cfg.ltx25Picked;
   const bytedance = isVideo && cfg.falPicked && cfg.falUpscale.includes('Bytedance');
   const seedvr = isVideo && cfg.falPicked && cfg.falUpscale.includes('SeedVR');
   return (
@@ -264,7 +267,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
         </Step>
       ) : null}
 
-      {outpaint ? (
+      {outpaint && !ltx25 ? (
         <Step title="Describe the fill">
           <textarea
             id="studio-prompt"
@@ -330,6 +333,29 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
           </>
         ) : null}
         {isVideo && outpaint && cfg.loraPicked ? <LoraStack cfg={cfg} /> : null}
+        {minimax ? (
+          <div className="sx-studio-grid-2" role="group" aria-label="MiniMax H3 Max settings">
+            <Select id="studio-minimax-res" label="OUTPUT RESOLUTION" value={cfg.minimaxRes} onChange={cfg.setMinimaxRes} options={cfg.minimaxResOptions} />
+            <div className="sx-studio-field">
+              <Label htmlFor="studio-minimax-seed">SEED (EMPTY = RANDOM)</Label>
+              <input
+                id="studio-minimax-seed"
+                className="sx-input"
+                type="text"
+                inputMode="numeric"
+                value={cfg.minimaxSeed}
+                onChange={(e) => cfg.setMinimaxSeed(e.target.value.replace(/\D/g, ''))}
+                placeholder="random"
+              />
+            </div>
+          </div>
+        ) : null}
+        {ltx25 ? (
+          <div className="sx-studio-grid-2" role="group" aria-label="LTX 2.5 Reframe settings">
+            <Select id="studio-ltx25-res" label="OUTPUT RESOLUTION" value={cfg.ltx25Res} onChange={cfg.setLtx25Res} options={cfg.ltx25ResOptions} />
+            <Select id="studio-ltx25-anchor" label="KEEP SOURCE AT" value={cfg.ltx25Anchor} onChange={cfg.setLtx25Anchor} options={LTX25_ANCHORS} />
+          </div>
+        ) : null}
         {bytedance ? (
           <div className="sx-studio-grid-3" role="group" aria-label="Bytedance upscaler settings">
             <Select id="studio-btd-res" label="TARGET RESOLUTION" value={cfg.btdRes} onChange={cfg.setBtdRes} options={cfg.videoOptions.btdRes} />

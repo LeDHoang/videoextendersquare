@@ -29,3 +29,14 @@ export function topTier(catalog, model, fallback) {
   const tiers = Object.keys(catalog.find((entry) => entry.model === model)?.resolution_rates || {});
   return tiers.length ? tiers[tiers.length - 1] : fallback;
 }
+
+// Per-second reframe models with their own settings panel.
+export const H3_REFRAME = 'minimax/h3-max/reframe-video';
+export const LTX25_REFRAME = 'lightricks/ltx-2.5/reframe';
+export const LTX25_ANCHORS = ['center', 'top', 'bottom', 'left', 'right', 'top_left', 'top_right', 'bottom_left', 'bottom_right'];
+
+// The resolution tiers a catalog model prices, low to high, or the fallback.
+export function rateTiers(catalog, model, fallback) {
+  const tiers = Object.keys(catalog.find((entry) => entry.model === model)?.resolution_rates || {});
+  return tiers.length ? tiers : fallback;
+}

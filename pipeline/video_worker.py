@@ -365,7 +365,31 @@ def _process_video_impl(
                 "neutral color temperature, matching original white balance and color palette."
             )
             model_lower = (outpaint_model or "").lower()
-            if "luma" in model_lower or "reframe" in model_lower:
+            # Exact ids first: both contain "reframe", and LTX 2.5 contains "ltx".
+            if model_lower == "minimax/h3-max/reframe-video":
+                # H3 captions the source itself, so the prompt and seed are
+                # sent only when the user set them.
+                minimax_resolution = kwargs.get("minimax_resolution", "768p")
+                arguments = {"video_url": video_url, "aspect_ratio": "1:1", "resolution": minimax_resolution}
+                if (prompt or "").strip():
+                    arguments["prompt"] = prompt.strip()
+                seed = str(kwargs.get("minimax_seed") or "").strip()
+                if seed:
+                    arguments["seed"] = int(seed)
+                _, outpaint_cost = _models.estimate_outpaint_cost(
+                    outpaint_model, duration=duration, resolution=minimax_resolution,
+                )
+            elif model_lower == "lightricks/ltx-2.5/reframe":
+                # LTX 2.5 takes no prompt. Omitting placement centres the source.
+                ltx25_resolution = kwargs.get("ltx25_resolution", "1080p")
+                arguments = {"video_url": video_url, "aspect_ratio": "1:1", "resolution": ltx25_resolution}
+                anchor = kwargs.get("ltx25_anchor", "center")
+                if anchor and anchor != "center":
+                    arguments["placement"] = {"anchor": anchor}
+                _, outpaint_cost = _models.estimate_outpaint_cost(
+                    outpaint_model, duration=duration, resolution=ltx25_resolution,
+                )
+            elif "luma" in model_lower or "reframe" in model_lower:
                 # Ray 3.2 reframe: prompt is required, resolution sets the
                 # per-second rate, and duration is left to default to the
                 # source length (the source length was checked before upload).
