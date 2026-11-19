@@ -6,17 +6,28 @@ editor had no effect on what was actually submitted, and the two copies of the
 price tables could silently drift. This module is the one place model IDs,
 their human labels, and their pricing rules live. The backend serves it via
 `/api/config`; the frontend renders options and the cost estimator from it.
+
+Prices: the catalog keeps each model's pricing structure (units, resolution
+tiers, multipliers) and a fallback price. The live base price comes from fal's
+pricing API: server/fal_prices.py syncs it hourly and calls
+apply_synced_prices(), which rescales every price field of an entry by
+synced price / fal_base_usd. fal_unit is the unit fal must report ("megapixels"
+or "seconds"); a different unit, or a model fal no longer lists, turns credits
+off for that model instead of charging a wrong price.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from decimal import Decimal
 
 # 2026-10-20: Ray-2 Flash reframe replaced by Ray 3.2 reframe (per-resolution rates).
 PRICING_VERSION = "2026-10-20"
 PRICING_VERIFIED_AT = "2026-09-13"
 RAY_3_2_PRICING_VERIFIED_AT = "2026-10-20"
+# fal raised the LoRA endpoint from 0.0024075 (found by the live price sync work).
+LTX_LORA_PRICING_VERIFIED_AT = "2026-11-20"
 
 # ---------------------------------------------------------------------------
 # Video outpainting models
@@ -31,6 +42,8 @@ VIDEO_OUTPAINT = [
     {
         "label": "LTX 2.3 Quality",
         "model": "fal-ai/ltx-2.3-quality/outpaint",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.0024075",
         "pricing_kind": "per_mp",
         "price": 0.0024075,
         "unit_price_usd": "0.0024075",
@@ -46,12 +59,14 @@ VIDEO_OUTPAINT = [
     {
         "label": "LTX 2.3 Quality + LoRA",
         "model": "fal-ai/ltx-2.3-quality/outpaint/lora",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.0027075",
         "pricing_kind": "per_mp",
-        "price": 0.0024075,
-        "unit_price_usd": "0.0024075",
+        "price": 0.0027075,
+        "unit_price_usd": "0.0027075",
         "credit_enabled": True,
         "pricing_version": PRICING_VERSION,
-        "pricing_verified_at": PRICING_VERIFIED_AT,
+        "pricing_verified_at": LTX_LORA_PRICING_VERIFIED_AT,
         "pricing_source": "https://fal.ai/models/fal-ai/ltx-2.3-quality/outpaint/lora",
         "rounding_rule": "ceil total generated megapixel-frames to a whole megapixel-frame",
         "constraints": {"fps": 24, "min_frames": 9, "max_frames": 481, "resolutions": ["480p", "720p", "1080p"], "max_loras": 3},
@@ -64,6 +79,8 @@ VIDEO_OUTPAINT = [
         # requested output resolution; the source must be 10 s or less.
         "label": "Luma Ray 3.2 Reframe",
         "model": "luma/agent/ray/v3.2/reframe",
+        "fal_unit": "seconds",
+        "fal_base_usd": "0.03",
         "pricing_kind": "per_second",
         "price": 0.36,
         "unit_price_usd": "0.36",
@@ -85,6 +102,8 @@ VIDEO_OUTPAINT = [
     {
         "label": "Wan VACE 14B",
         "model": "fal-ai/wan-vace-14b/outpainting",
+        "fal_unit": "seconds",
+        "fal_base_usd": "0.08",
         "pricing_kind": "per_second",
         "price": 0.08,
         "unit_price_usd": "0.08",
@@ -113,6 +132,8 @@ VIDEO_UPSCALE = [
     {
         "label": "Bytedance Upscaler",
         "model": "fal-ai/bytedance-upscaler/upscale/video",
+        "fal_unit": "seconds",
+        "fal_base_usd": "0.0072",
         "pricing_kind": "per_second",
         "base_rates": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288},
         "base_rates_usd": {"1080p": "0.0072", "2k": "0.0144", "4k": "0.0288"},
@@ -128,6 +149,8 @@ VIDEO_UPSCALE = [
     {
         "label": "SeedVR2 Video",
         "model": "fal-ai/seedvr/upscale/video",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.001",
         "pricing_kind": "per_mp",
         "price": 0.001,
         "unit_price_usd": "0.001",
@@ -153,6 +176,8 @@ IMAGE_OUTPAINT = [
     {
         "label": "Image Apps Outpaint",
         "model": "fal-ai/image-apps-v2/outpaint",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.035",
         "pricing_kind": "per_mp",
         "price": 0.035,
         "unit_price_usd": "0.035",
@@ -174,6 +199,8 @@ IMAGE_UPSCALE = [
     {
         "label": "Clarity Upscaler",
         "model": "fal-ai/clarity-upscaler",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.03",
         "pricing_kind": "per_mp",
         "price": 0.03,
         "unit_price_usd": "0.03",
@@ -196,6 +223,59 @@ DEFAULT_VIDEO_MODELS = {
     "outpaint_vid": VIDEO_OUTPAINT[0]["model"],
     "upscale_vid": VIDEO_UPSCALE[0]["model"],
 }
+
+
+_CATALOGS = (VIDEO_OUTPAINT, VIDEO_UPSCALE, IMAGE_OUTPAINT, IMAGE_UPSCALE)
+# The code prices, kept so a sync result is always applied to them, never on
+# top of an earlier sync.
+_CODE_CATALOGS = tuple(tuple(entry for entry in catalog) for catalog in _CATALOGS)
+
+
+def synced_entries() -> list[dict]:
+    """Stock entries whose price comes from the fal sync (credit-priced ones)."""
+    return [entry for catalog in _CODE_CATALOGS for entry in catalog if entry.get("fal_unit")]
+
+
+def _price_text(value: Decimal) -> str:
+    return format(value.quantize(Decimal("1e-10")).normalize(), "f")
+
+
+def _synced_entry(entry: dict, synced: dict | None) -> dict:
+    """The entry priced from one sync record (see server/fal_prices.py)."""
+    if not synced or not entry.get("fal_unit"):
+        return entry
+    if synced.get("status") != "ok":
+        return {**entry, "credit_enabled": False}
+    unit_price = Decimal(str(synced["unit_price"]))
+    base = Decimal(entry["fal_base_usd"])
+
+    def scaled(value) -> Decimal:
+        # The ratio first: tiers are exact multiples of the base (2x, 0.75x),
+        # so a change keeps them exact.
+        return unit_price * (Decimal(str(value)) / base)
+
+    out = {**entry}
+    if "unit_price_usd" in entry:
+        out["unit_price_usd"] = _price_text(scaled(entry["unit_price_usd"]))
+        out["price"] = float(out["unit_price_usd"])
+    if "resolution_rates" in entry:
+        out["resolution_rates"] = {k: _price_text(scaled(v)) for k, v in entry["resolution_rates"].items()}
+    if "base_rates_usd" in entry:
+        out["base_rates_usd"] = {k: _price_text(scaled(v)) for k, v in entry["base_rates_usd"].items()}
+        out["base_rates"] = {k: float(v) for k, v in out["base_rates_usd"].items()}
+    if synced.get("synced_at"):
+        out["pricing_verified_at"] = str(synced["synced_at"])[:10]
+    return out
+
+
+def apply_synced_prices(prices: dict[str, dict]) -> None:
+    """Price the catalogs from fal sync records keyed by model id; {} restores the code prices.
+
+    Each entry is replaced whole, so a reader sees an old or a new entry, never a mix.
+    """
+    for catalog, code in zip(_CATALOGS, _CODE_CATALOGS):
+        for index, entry in enumerate(code):
+            catalog[index] = _synced_entry(entry, prices.get(entry["model"]))
 
 
 def video_outpaint_catalog() -> list[dict]:

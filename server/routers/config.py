@@ -7,23 +7,19 @@ from sqlalchemy.orm import Session
 from core import models as _models
 from server import kill_switch
 from server import media as SM
+from server.billing.parameters import CATALOG_DEFAULTS, MODEL_OVERRIDES_KEY, model_defaults
 from server.features import reel_pack_features, spatial_default_enabled, stereo_convert_enabled
 from server.social.auth import AuthContext, require_admin_csrf, validate_origin
 from server.social.database import get_db
+from server.social.models import AppSetting, utcnow
 from server.social.turnstile import turnstile_site_key
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
-# In-memory model endpoints config. The static catalogs (labels + pricing)
-# live in core/models.py — this dict holds only administrator-editable overrides.
-DEFAULT_MODELS = {
-    "outpaint_img": _models.IMAGE_MODELS["outpaint_img"],
-    "upscale_img": _models.IMAGE_MODELS["upscale_img"],
-    "outpaint_vid": _models.DEFAULT_VIDEO_MODELS["outpaint_vid"],
-    "upscale_vid": _models.DEFAULT_VIDEO_MODELS["upscale_vid"],
-}
-
-_model_config = dict(DEFAULT_MODELS)
+# The static catalogs (labels + pricing) live in core/models.py. The
+# administrator's model overrides are stored in app_settings, so they survive
+# a restart; billing/parameters.py model_defaults() resolves them.
+DEFAULT_MODELS = CATALOG_DEFAULTS
 
 
 class ModelsUpdate(BaseModel):
@@ -41,7 +37,7 @@ def get_config(db: Session = Depends(get_db)):
     masked. Operators confirm it via server logs / Stripe dashboard instead.
     """
     return {
-        "models": _models.config_payload(_model_config),
+        "models": _models.config_payload(model_defaults(db)),
         "features": {
             "reel_packs": reel_pack_features(),
             "stereo_convert": stereo_convert_enabled(),
@@ -63,6 +59,7 @@ def update_models(
     body: ModelsUpdate,
     request: Request,
     context: AuthContext = Depends(require_admin_csrf),
+    db: Session = Depends(get_db),
 ):
     """Update model endpoint overrides.
 
@@ -72,9 +69,20 @@ def update_models(
     """
     validate_origin(request)
     updates = body.model_dump(exclude_unset=True)
+    current = model_defaults(db)
     for k, v in updates.items():
-        if k not in _model_config:
+        if k not in current:
             continue
         norm = _models.normalize_model_id(v or "")
-        _model_config[k] = norm or DEFAULT_MODELS[k]
-    return {"status": "ok", "models": _models.config_payload(_model_config)}
+        current[k] = norm or DEFAULT_MODELS[k]
+    # Only real overrides, so a later catalog default is not pinned by a stored copy.
+    overrides = {k: v for k, v in current.items() if v != DEFAULT_MODELS[k]}
+    row = db.get(AppSetting, MODEL_OVERRIDES_KEY)
+    if row is None:
+        db.add(AppSetting(key=MODEL_OVERRIDES_KEY, value=overrides, updated_by=context.user.id))
+    else:
+        row.value = overrides
+        row.updated_by = context.user.id
+        row.updated_at = utcnow()
+    db.commit()
+    return {"status": "ok", "models": _models.config_payload(current)}

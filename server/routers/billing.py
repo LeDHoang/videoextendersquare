@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from core import models as model_catalog
 from pipeline.utils import get_image_dimensions, get_video_dimensions_and_duration, get_video_frame_metadata
 from server.billing.crypto import FalKeyConfigurationError, encrypt_fal_key, key_hint
-from server.billing.parameters import image_parameters, video_parameters
+from server.billing.parameters import image_parameters, model_defaults, video_parameters
 from server.billing.service import (
     BillingError,
     BillingNotConfigured,
@@ -180,7 +180,10 @@ def quote(
         _billing_http_error(exc)
     kind = body.kind.strip().casefold()
     stage_path, width, height, duration, source_fps, source_frames = _staged_metadata(kind, body.stage_id, request, context)
-    parameters = image_parameters(body.parameters) if kind == "image" else video_parameters(body.parameters)
+    defaults = model_defaults(db)
+    parameters = (
+        image_parameters(body.parameters, defaults) if kind == "image" else video_parameters(body.parameters, defaults)
+    )
     try:
         row = create_quote(
             db,
@@ -222,7 +225,10 @@ def estimate(
     rate_limiter.check(db, f"estimate-ip:{request_identity(request)}", max(quote_rpm * 16, 240), 60)
     kind = body.kind.strip().casefold()
     _stage_path, width, height, duration, source_fps, source_frames = _staged_metadata(kind, body.stage_id, request, context)
-    parameters = image_parameters(body.parameters) if kind == "image" else video_parameters(body.parameters)
+    defaults = model_defaults(db)
+    parameters = (
+        image_parameters(body.parameters, defaults) if kind == "image" else video_parameters(body.parameters, defaults)
+    )
     try:
         snapshot = price_job(
             kind=kind,

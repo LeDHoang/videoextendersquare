@@ -16,7 +16,7 @@ from pipeline.utils import (
 )
 from core import models as _models
 from core.pricing import PricingError, validate_outpaint_source
-from server.billing.parameters import video_parameters
+from server.billing.parameters import LTX_NEGATIVE_PROMPT, model_defaults, video_parameters
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
 from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
 from pipeline.video_worker import process_video
@@ -199,13 +199,14 @@ def start_video_process(
     upscale_only: bool = Form(False),
     upscale_engine: str = Form("fast"),
     sharpening: float = Form(0.0),
-    outpaint_model: str = Form("fal-ai/ltx-2.3-quality/outpaint"),
-    upscale_model: str = Form("fal-ai/seedvr/upscale/video"),
+    # Empty: the same default the quote used (billing/parameters.py model_defaults).
+    outpaint_model: str = Form(""),
+    upscale_model: str = Form(""),
     ltx_resolution: str = Form("720p"),
     ltx_audio: bool = Form(True),
     ltx_guidance: float = Form(1.0),
     ltx_prompt_expansion: bool = Form(False),
-    ltx_negative_prompt: str = Form("yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"),
+    ltx_negative_prompt: str = Form(LTX_NEGATIVE_PROMPT),
     ltx_loras: str = Form(""),
     wan_resolution: str = Form("720p"),
     luma_resolution: str = Form("1080p"),
@@ -289,7 +290,7 @@ def start_video_process(
         "trim_duration": trim_duration,
         "custom_outpaint_args": custom_outpaint,
         "custom_upscale_args": custom_upscale,
-    })
+    }, model_defaults(db))
 
     if cloud_required and not params["upscale_only"] and width != height:
         # Ray 3.2 reframe rejects sources over 10 s; refuse before the

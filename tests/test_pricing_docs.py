@@ -1,7 +1,8 @@
 """The credit catalog prices must match the Fal model docs kept in docs/Fal-ai-docs.
 
-core/models.py is the runtime price source; the markdown pages are the copied
-provider docs it was verified against. If a doc is refreshed with a new price,
+core/models.py holds the fallback prices (at runtime the live fal sync in
+server/fal_prices.py reprices them); the markdown pages are the copied
+provider docs they were verified against. If a doc is refreshed with a new price,
 this fails until the catalog (and PRICING_VERSION) is updated too.
 """
 

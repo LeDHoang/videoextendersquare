@@ -11,7 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 from pipeline.image_worker import process_image
 from pipeline.stereo_detect import detect_stereo
 from core import models as _models
-from server.billing.parameters import image_parameters
+from server.billing.parameters import image_parameters, model_defaults
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
 from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
 from pipeline.utils import calculate_square_padding, get_image_dimensions, shown_image_size
@@ -119,8 +119,9 @@ def start_image_process(
     upscale_only: bool = Form(False),
     sharpening: float = Form(0.0),
     upscale_engine: str = Form("fast"),
-    upscale_model: str = Form("fal-ai/clarity-upscaler"),
-    outpaint_model: str = Form("fal-ai/image-apps-v2/outpaint"),
+    # Empty: the same default the quote used (billing/parameters.py model_defaults).
+    upscale_model: str = Form(""),
+    outpaint_model: str = Form(""),
     custom_outpaint_args: str = Form("{}"),
     custom_upscale_args: str = Form("{}"),
     payment_source: str = Form("credits"),
@@ -163,7 +164,7 @@ def start_image_process(
         "outpaint_model": outpaint_model,
         "custom_outpaint_args": custom_outpaint,
         "custom_upscale_args": custom_upscale,
-    })
+    }, model_defaults(db))
 
     owner_id = context.user.id
     fal_key = None
