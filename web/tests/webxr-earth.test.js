@@ -2524,6 +2524,29 @@ test('head lock poses the live screen perpendicular and centered', () => {
   renderer.stopPreview();
 });
 
+test('lazy follow snaps on lock, holds inside the screen, drags at the edge and holds yaw at the pole', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.setScreenState({ locked: true });
+  const half = Math.atan2(2, 2.24); // 1:1 half-extent at the default size and distance
+  const lookAt = (yaw, pitch) => { api.setPreviewLook(yaw, pitch); api.applyLockToViewer(); return api.getFollowAngles(); };
+  let a = lookAt(0.3, 0);
+  closeTo(a.yaw, 0.3);
+  closeTo(a.pitch, 0);
+  a = lookAt(0.3 + half - 0.05, 0.2);
+  closeTo(a.yaw, 0.3);
+  closeTo(a.pitch, 0);
+  a = lookAt(0.3 + half + 0.1, 0);
+  closeTo(a.yaw, 0.4);
+  a = lookAt(1.0, Math.PI / 2);
+  closeTo(a.yaw, 0.4);
+  closeTo(a.pitch, Math.PI / 2 - half);
+  renderer.stopPreview();
+});
+
 test('grip plus stick Y scales the screen up and down', () => {
   const renderer = loadRenderer();
   renderer.init(null, {});
@@ -3099,6 +3122,8 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
     panelFwdOffset: -0.34,
     commentsScale: 0.432,
     guideScale: 0.314,
+    longEdgeMaxDeg: 60,
+    lazyFollowEdge: 1,
   });
   const before = api.getCommentsPanelLayout();
   const tuned = renderer.setLayoutTuning({ dockWidth: 0.7, panelSideGap: 0.5, screenScale: 20, bogus: 1 });
@@ -6286,6 +6311,51 @@ test('?vrstereoeye lowers the per-eye proxy for A/B', () => {
   renderer.stopPreview();
 });
 
+test('a 16:9 SBS source gets 16:9 eyes, scaled down to the GPU texture limit', () => {
+  // 7680x2160 SBS: 3840x2160 eyes. Two 3640x2048 eyes exceed the mock's 4096 limit.
+  const { renderer, api, frame } = stereoHarness(stereoVideo('sbs-169', 'sbs', 7680, 2160));
+  frame();
+  assert.equal(renderer.getScreenAspect(), 16 / 9);
+  assert.equal(api.getStereoState().canvas.join(','), '4096,1152');
+  renderer.stopPreview();
+});
+
+test('the host aspect hint shapes the screen and the mono proxy for the whole post', () => {
+  const { renderer, api, frame, setSource } = stereoHarness(stereoVideo('hint-1', 'mono', 1920, 1080));
+  // 0.5626 snaps to exactly 9:16; the hint wins over the element's 16:9 frame.
+  renderer.setSourceAspect(0.5626);
+  frame();
+  assert.equal(renderer.getScreenAspect(), 9 / 16);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '2048,3640');
+  // The same source keeps its shape even if the hint changes mid-post.
+  renderer.setSourceAspect(1);
+  frame();
+  assert.equal(renderer.getScreenAspect(), 9 / 16);
+  // A new source with no hint falls back to its own frame size.
+  renderer.setSourceAspect(null);
+  setSource(stereoVideo('hint-2', 'mono', 1920, 1080));
+  frame();
+  assert.equal(renderer.getScreenAspect(), 16 / 9);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '3640,2048');
+  // A square reel restores the square screen and proxy.
+  setSource(stereoVideo('hint-3', 'mono', 2160, 2160));
+  frame();
+  assert.equal(renderer.getScreenAspect(), 1);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '2048,2048');
+  renderer.stopPreview();
+});
+
+test('proxy sizes keep the short side at the cap and the long side at 4096', () => {
+  const api = loadRenderer().__test;
+  assert.equal(api.proxySizeFor(1, 2048).join(','), '2048,2048');
+  assert.equal(api.proxySizeFor(16 / 9, 2048).join(','), '3640,2048');
+  assert.equal(api.proxySizeFor(9 / 16, 2048).join(','), '2048,3640');
+  // 21:9 is long-side bound: 4096 wide, short side 4096 * 9 / 21.
+  assert.equal(api.proxySizeFor(21 / 9, 2048).join(','), '4096,1756');
+  assert.equal(api.stereoProxySize('sbs', 1).join(','), '4096,2048');
+  assert.equal(api.stereoProxySize('tb', 1).join(','), '2048,4096');
+});
+
 // ─── Direct VideoTexture default (v8.24) ────────────────────────────────
 
 function directHarness(initialSource) {
@@ -7549,6 +7619,7 @@ test('the globe top follows the live eye 1.6 m down: sitting glides, a nod does 
 
 test('looking down past 30° fades the video out, and looking up brings it back', () => {
   const { renderer, api, run } = startGround([KYOTO]);
+  renderer.setLayoutTuning({ lazyFollowEdge: 0 }); // the hard lock: the screen rides the gaze
   const look = (deg) => { api.setPreviewLook(0, -deg * Math.PI / 180); run(100); };
   look(20);
   assert.deepEqual({ ...api.screenFadeState() }, { fade: 1, opacity: 1, transparent: false, depthWrite: true, visible: true });
@@ -7566,5 +7637,80 @@ test('looking down past 30° fades the video out, and looking up brings it back'
   renderer.setSceneMode('earth');
   look(60);
   assert.equal(api.screenFadeState().fade, 1, 'Earth view never fades its screen');
+  renderer.stopPreview();
+});
+
+test('wide and tall screens move the panels, dock, ground fade and lock distance', () => {
+  // startGround, plus a visual source that changes shape per post.
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, withShell: true, search: '?vrtex=canvas' });
+  let source = stereoVideo('shape-1', 'mono', 2048, 2048);
+  renderer.init(source.element, { getVisualSource: () => source, getPlaylist: () => [KYOTO], getCurrentIndex: () => 0 });
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  const api = renderer.__test;
+  let t = 0;
+  const run = (ms) => { for (let spent = 0; spent < ms; spent += 100) { t += 100; renderer.__runScheduledFrame(t); } };
+  const shape = (aspect) => {
+    source = stereoVideo(`shape-${aspect}`, 'mono', Math.round(2048 * Math.max(1, aspect)), Math.round(2048 / Math.min(1, aspect)));
+    renderer.onVideoChange();
+    look(0);
+    assert.equal(renderer.getScreenAspect(), aspect);
+  };
+  const look = (deg) => { api.setPreviewLook(0, -deg * Math.PI / 180); run(300); };
+  const panelDist = () => {
+    const c = api.getCommentsPanelLayout().center;
+    return Math.hypot(c.x, c.y - 1.6, c.z);
+  };
+  const finite = (layout) => [layout.center.x, layout.center.y, layout.center.z, layout.w, layout.h].every(Number.isFinite);
+
+  shape(1);
+  const sqPanel = api.getCommentsPanelLayout();
+  const sqDockY = api.getSceneInfo().dock.pos[1];
+  assert.ok(panelDist() > 2.24, 'a square screen leaves its panels where they were');
+  assert.equal(api.groundGlobeState().screenFade, 1);
+
+  shape(16 / 9);
+  assert.ok(finite(api.getCommentsPanelLayout()) && finite(api.getGuidePanelLayout()));
+  assert.ok(panelDist() < 2.24, `a wide screen pulls its side panel nearer than the screen: ${panelDist()}`);
+  renderer.setLayoutTuning({ screenDistance: 1.2 });
+  assert.ok(api.lockDistance() > 1.2, 'the lock clears the deeper bulge of a wide curved screen');
+  renderer.setLayoutTuning({ screenDistance: 2.24 });
+
+  shape(9 / 16);
+  assert.ok(finite(api.getCommentsPanelLayout()));
+  assert.equal(api.getCommentsPanelLayout().w, sqPanel.w, 'panels size by the short side');
+  assert.ok(api.getSceneInfo().dock.pos[1] < sqDockY, 'the taller tag lowers the ground dock');
+  // Hard lock, a 10° nod: the tall screen's bottom edge covers the globe, the video stays.
+  renderer.setLayoutTuning({ lazyFollowEdge: 0 });
+  look(10);
+  assert.equal(api.screenFadeState().fade, 1);
+  assert.ok(api.groundGlobeState().screenFade < 1, `the globe fades under the tall screen: ${api.groundGlobeState().screenFade}`);
+  shape(1);
+  look(10);
+  assert.equal(api.groundGlobeState().screenFade, 1, 'a square screen never fades the globe');
+  renderer.stopPreview();
+});
+
+test('with lazy follow the video fades only once a look down drags the screen past 30°', () => {
+  const { renderer, api, run } = startGround([KYOTO]);
+  const look = (deg) => { api.setPreviewLook(0, -deg * Math.PI / 180); run(300); };
+  look(0); // the lock snaps to the first gaze
+  look(35);
+  assert.equal(api.screenFadeState().fade, 1, 'a 35° glance stays inside the screen');
+  closeTo(api.getFollowAngles().pitch, 0);
+  look(85);
+  assert.equal(api.screenFadeState().fade, 0, 'the dragged screen passes 40°');
+  assert.ok(api.getFollowAngles().pitch < -40 * Math.PI / 180);
+  look(0);
+  assert.deepEqual({ ...api.screenFadeState() }, { fade: 1, opacity: 1, transparent: false, depthWrite: true, visible: true });
+  closeTo(api.getFollowAngles().pitch, 0); // the faded screen rose with the gaze
+  // A slow look back up: the screen rises with the gaze until it is fully back.
+  look(85);
+  for (let deg = 80; deg >= 0; deg -= 5) look(deg);
+  closeTo(api.getFollowAngles().pitch, 0);
+  assert.equal(api.screenFadeState().fade, 1);
+  // The first look down after that is a plain lazy glance again.
+  look(20);
+  closeTo(api.getFollowAngles().pitch, 0);
   renderer.stopPreview();
 });
