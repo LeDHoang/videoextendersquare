@@ -23,6 +23,8 @@ import { useMessaging } from '../hooks/MessagingContext.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { FORMAT_FILTER_LABELS } from '../utils/mediaFormat.js';
+import useMasonry from '../hooks/useMasonry.js';
+import { tileAspect } from '../utils/aspect.js';
 
 const SORT_OPTIONS = [
   { label: 'TOP', value: 'trending' },
@@ -73,6 +75,7 @@ export default function TagExplorePage() {
   const [error, setError] = useState('');
   const [packError, setPackError] = useState('');
   const { items: videos, previewMessage } = useExplorePreviews(data?.videos);
+  const masonryRef = useMasonry(videos.map((video) => ({ key: video.path, aspect: tileAspect(video) })), density);
 
   useEffect(() => {
     let alive = true;
@@ -272,7 +275,7 @@ export default function TagExplorePage() {
                 <h2>{sort === 'trending' ? 'TOP REELS' : 'TAG REELS'}</h2>
                 <span>{videos.length + ' RESULT' + (videos.length === 1 ? '' : 'S')}</span>
               </div>
-              <div className={gridClassName(density)}>
+              <div ref={masonryRef} className={gridClassName(density)}>
                 {videos.map((video) => (
                   <ExploreTile
                     key={video.path}

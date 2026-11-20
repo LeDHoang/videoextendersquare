@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
 import { formatClock, formatDuration, imagePostLabel, stereoCropClass, stereoLayout } from '../../utils/mediaFormat.js';
+import { tileAspect } from '../../utils/aspect.js';
 
 export function formatCompactCount(value) {
   const count = Number(value) || 0;
@@ -181,6 +182,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
       role="button"
       tabIndex={0}
       className={'sx-explore-tile' + (ready ? '' : ' sx-skel')}
+      style={{ '--tile-aspect': tileAspect(video) }}
       aria-busy={ready ? undefined : true}
       onClick={() => onOpen(video)}
       onKeyDown={(event) => {
