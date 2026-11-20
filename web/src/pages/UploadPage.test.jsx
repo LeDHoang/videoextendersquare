@@ -1170,10 +1170,14 @@ describe('UploadPage — MAKE 3D', () => {
 });
 
 describe('UploadPage — depth version for VR', () => {
-  // Each depth job is named after its source; a source named in failOn fails.
+  // Each depth job is named after its source; a source named in failOn fails,
+  // and one named in skipOn is a shape the server does not make depth for.
   let failOn;
+  let skipOn;
   const answer = () => mocks.post.mockImplementation(async (path, body) => (
-    path === '/api/stereo/convert'
+    path === '/api/stereo/convert' && skipOn === (body.stage_id || body.job_id)
+      ? { job_id: null, status: 'skipped', code: 'UNSUPPORTED_SHAPE', message: 'Not a 1:1, 16:9 or 9:16 file.' }
+      : path === '/api/stereo/convert'
       ? { job_id: `job-sp-${body.stage_id || body.job_id}${failOn === (body.stage_id || body.job_id) ? '-fail' : ''}`, status: 'queued' }
       : { meta: { title: 'x' }, rel_path: 'uploads/x.jpg', media_url: '/m' }
   ));
@@ -1182,6 +1186,7 @@ describe('UploadPage — depth version for VR', () => {
 
   beforeEach(() => {
     failOn = null;
+    skipOn = null;
     mocks.features = { spatial_default: true, stereo_convert: true };
     answer();
   });
@@ -1204,6 +1209,17 @@ describe('UploadPage — depth version for VR', () => {
     await pick(['square.mp4']);
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-square.mp4-fail' }));
     expect(await screen.findByText('DEPTH VERSION FAILED — THE POST IS 2D ONLY')).toBeInTheDocument();
+    fireEvent.click(postButton());
+    await waitFor(() => expect(publishBody()).toBeDefined());
+    expect(publishBody().spatial_job_ids).toBeUndefined();
+  });
+
+  it('publishes 2D only when the server skips an unsupported shape', async () => {
+    skipOn = 'st-square.png';
+    renderPage();
+    await pick(['square.png']);
+    expect(await screen.findByText(/Depth versions take 1:1, 16:9 or 9:16 files only/)).toBeInTheDocument();
+    await waitFor(() => expect(postButton()).toBeEnabled());
     fireEvent.click(postButton());
     await waitFor(() => expect(publishBody()).toBeDefined());
     expect(publishBody().spatial_job_ids).toBeUndefined();

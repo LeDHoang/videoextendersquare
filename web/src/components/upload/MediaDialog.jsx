@@ -280,6 +280,9 @@ export default function MediaDialog({
                         </p>
                       ) : null;
                     }) : null}
+                    {spatial.skipped && !spatial.failed ? (
+                      <p role="status" className="sx-studio-note">Depth versions take 1:1, 16:9 or 9:16 files only, so this post is 2D only.</p>
+                    ) : null}
                     {spatial.failed ? (
                       <ErrorBox title="DEPTH VERSION FAILED — THE POST IS 2D ONLY">
                         {spatial.errors.map((error) => <div key={error}>{error}</div>)}

@@ -256,9 +256,11 @@ export default function UploadPage() {
   const posting = !!cover && !makeMode && !cover.posted && openItems.every((item) => postSource(item, asIs(item)));
   const spatialShown = posting && !!features.spatial_default && openItems.every((item) => !stereoOf(item) && !item.convert);
   const spatialSlots = spatialShown && !spatialOff ? openItems : [];
-  const spatialPending = spatialSlots.some((item) => !['done', 'failed'].includes(spatialOf(item)?.status));
+  const spatialPending = spatialSlots.some((item) => !['done', 'failed', 'skipped'].includes(spatialOf(item)?.status));
   const spatialReady = spatialSlots.length > 0 && spatialSlots.every((item) => spatialOf(item)?.status === 'done');
   const spatialFailed = spatialSlots.filter((item) => spatialOf(item)?.status === 'failed');
+  // A shape MAKE 3D does not take (not 1:1, 16:9 or 9:16) gets no depth version.
+  const spatialSkipped = spatialSlots.filter((item) => spatialOf(item)?.status === 'skipped');
   const spatialNext = spatialSlots.find((item) => !spatialOf(item));
   const spatialRunning = items.some((item) => item.spatial?.status === 'running');
   // One depth job at a time: the next slide starts when the last one ends.
@@ -270,7 +272,9 @@ export default function UploadPage() {
     api.post('/api/stereo/convert', { kind: spatialNext.kind, depth_pack: true, ...source }).then(
       (res) => {
         spatialStarting.current = false;
-        patch(spatialNext.id, { spatial: { source: key, jobId: res.job_id, status: 'running' } });
+        patch(spatialNext.id, { spatial: res.status === 'skipped'
+          ? { source: key, status: 'skipped', error: res.message }
+          : { source: key, jobId: res.job_id, status: 'running' } });
       },
       (requestError) => {
         spatialStarting.current = false;
@@ -541,6 +545,7 @@ export default function UploadPage() {
             onToggle: (on) => setSpatialOff(!on),
             failed: spatialFailed.length > 0,
             errors: spatialFailed.map((item) => spatialOf(item).error).filter(Boolean),
+            skipped: spatialSkipped.length > 0,
           }}
           postDisabled={postDisabled}
           postReasons={[!draft?.title.trim() && 'A TITLE IS NEEDED TO POST']}
