@@ -260,6 +260,39 @@ def test_rotated_video_reports_display_dims(tmp_path):
     assert not video_worker._is_rotated(str(tmp_path / "phone-coded.mp4"))
 
 
+def _stream(path) -> str:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height,sample_aspect_ratio", "-of", "csv=p=0", str(path)],
+        check=True, capture_output=True, text=True,
+    )
+    return out.stdout.strip()
+
+
+@needs_ffmpeg
+def test_video_already_at_the_target_skips_outpaint_and_masters_wide(tmp_path):
+    clip = tmp_path / "wide.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=s=128x72:d=0.4:r=10",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(clip)], check=True)
+    (_url, out), metrics = video_worker.process_video(str(clip), "", target_aspect="16:9")
+    try:
+        assert _stream(out) == "3640,2048,1:1"
+        assert metrics["skipped_stages"] == ["outpaint"]
+    finally:
+        Path(out).unlink(missing_ok=True)
+
+
+@needs_ffmpeg
+def test_rotated_video_keeps_its_shown_shape_without_a_rotation_tag(tmp_path):
+    clip = rotated_video(tmp_path / "phone.mp4", "256x144", 90)
+    (_url, out), _metrics = video_worker.process_video(str(clip), "", upscale_only=True, target_aspect="9:16")
+    try:
+        assert _stream(out) == "2048,3640,1:1"
+        assert not video_worker._is_rotated(out)
+    finally:
+        Path(out).unlink(missing_ok=True)
+
+
 def _exif_rotated_still(path: Path) -> Path:
     """A 72x128 portrait stored turned a quarter (128x72), tagged EXIF orientation 6."""
     stored = Image.new("RGB", (72, 128), "white").rotate(90, expand=True)
