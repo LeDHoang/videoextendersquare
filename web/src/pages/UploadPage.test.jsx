@@ -821,6 +821,29 @@ describe('UploadPage — several files at once', () => {
     ]);
   });
 
+  it('holds a shape pick for its own kind only', async () => {
+    renderPage();
+    await pick(['wide.png', 'portrait.mp4']);
+    await screen.findByRole('button', { name: /^Fill 2/ });
+    fireEvent.click(button('Options'));
+    fireEvent.click(radio('Shape', '16:9'));
+    fireEvent.click(radio('Options for', 'VIDEOS'));
+    expect(radio('Video Shape', '1:1')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Video Shape', '16:9')).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(radio('Options for', 'IMAGES'));
+    expect(radio('Shape', '16:9')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('draws a 9:16 fill on a portrait stage', async () => {
+    renderPage();
+    await pick(['phone.png']);
+    await screen.findByRole('button', { name: /^Fill/ });
+    const stage = screen.getByRole('region', { name: 'Master stage' });
+    expect(stage).toHaveClass('sx-portrait');
+    const [w, h] = stage.style.aspectRatio.split('/').map(Number);
+    expect(w / h).toBeCloseTo(9 / 16, 2);
+  });
+
   it('waits when the server is busy and starts the rest by itself when a job ends', async () => {
     mocks.form
       .mockResolvedValueOnce({ job_id: 'job-q1' })
