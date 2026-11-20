@@ -79,7 +79,7 @@ describe('ExplorePage beta controls', () => {
 
     expect(screen.getByLabelText('Search titles, creators, places, or tags')).toBeInTheDocument();
     expect(screen.getByRole('radiogroup', { name: 'Content type' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Compact square grid')).toBeInTheDocument();
+    expect(screen.getByLabelText('Compact grid')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /SHUFFLE/ })).toBeInTheDocument();
     expect(screen.getByText('MOST TRENDING:')).toBeInTheDocument();
 

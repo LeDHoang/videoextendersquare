@@ -14,6 +14,8 @@ import { useToast } from '../components/ui/Toast.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { clientId, useMessaging } from '../hooks/MessagingContext.jsx';
 import { formatDuration, formatPostResolution, imageDwellMs, imagePostLabel, packRuntime } from '../utils/mediaFormat.js';
+import useMasonry from '../hooks/useMasonry.js';
+import { tileAspect } from '../utils/aspect.js';
 
 const VISIBILITY_OPTIONS = [
   { label: 'PUBLIC · DISCOVERABLE', value: 'public' },
@@ -157,6 +159,7 @@ export default function PackPage() {
   }, [load]);
 
   const items = pack?.items || [];
+  const masonryRef = useMasonry(items.map((item) => ({ key: item.id, aspect: item.available && item.post ? tileAspect(item.post) : 1 })), density);
 
   const openPlayer = ({ item = null, forceRestart = false } = {}) => {
     const next = new URLSearchParams(searchParams);
@@ -504,7 +507,7 @@ export default function PackPage() {
               text={'This pack has no reels yet.' + (isOwner ? ' Use EDIT PACK to add some.' : '')}
             />
           ) : view === 'gallery' ? (
-            <div className={gridClassName(density) + ' sx-pk-gallery'} aria-label="Reels in this pack">
+            <div ref={masonryRef} className={gridClassName(density) + ' sx-pk-gallery'} aria-label="Reels in this pack">
               {items.map((item, index) => (
                 item.available && item.post ? (
                   <ExploreTile

@@ -245,7 +245,7 @@ describe('PackPage', () => {
       expect(screen.queryByRole('list')).not.toBeInTheDocument();
       expect(screen.getByRole('radio', { name: 'GALLERY' })).toHaveAttribute('aria-checked', 'true');
       expect(document.querySelector('.sx-pk-gallery.sx-explore-grid')).not.toBeNull();
-      expect(screen.getByRole('button', { name: 'Compact square grid' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'Compact grid' })).toHaveAttribute('aria-pressed', 'true');
     });
 
     it('lists Gallery before List in the view switch', async () => {
@@ -276,7 +276,7 @@ describe('PackPage', () => {
       await loaded();
       fireEvent.click(screen.getByRole('button', { name: 'Large tiles' }));
       expect(document.querySelector('.sx-explore-grid--stack.sx-pk-gallery')).not.toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Compact square grid' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Compact grid' }));
       expect(document.querySelector('.sx-explore-grid--stack')).toBeNull();
     });
 

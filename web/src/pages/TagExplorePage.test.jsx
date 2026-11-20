@@ -61,7 +61,7 @@ describe.each(PAGES)('$name explore page beta controls', (page) => {
     await waitFor(() => expect(mocks.api.get).toHaveBeenCalledWith(page.feed, expect.objectContaining({ codec: 'hevc', sort: 'trending' })));
 
     expect(screen.getByRole('radiogroup', { name: 'Content type' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Compact square grid')).toBeInTheDocument();
+    expect(screen.getByLabelText('Compact grid')).toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'RANK:' })).not.toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'FORMAT:' })).not.toBeInTheDocument();
   });
