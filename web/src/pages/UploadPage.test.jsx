@@ -628,7 +628,7 @@ describe('UploadPage — posting', () => {
     // Nothing to fill or stretch on a square file.
     expect(screen.queryByRole('radiogroup', { name: 'Video Pipeline Mode' })).toBeNull();
     // Unpicking the quality leaves nothing to do.
-    fireEvent.click(radio('Upscale Engine', 'Fast'));
+    fireEvent.click(radio('Upscale Engine', 'Fast'), { detail: 1 });
     expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'false');
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
     expect(renderButton()).toHaveAccessibleDescription('PICK A QUALITY TO UPSCALE, OR KEEP THE FILE AS IT IS');
@@ -641,7 +641,7 @@ describe('UploadPage — posting', () => {
     renderPage();
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1920 ➔ 2048×2048');
-    fireEvent.click(radio('Upscale Engine', 'Fast'));
+    fireEvent.click(radio('Upscale Engine', 'Fast'), { detail: 1 });
     expect(screen.getByText('1080×1920')).toBeInTheDocument();
     fireEvent.click(radio('Video Pipeline Mode', 'Stretch to fit'));
     expect(screen.getByText('1080×1920 ➔ 1920×1920')).toBeInTheDocument();

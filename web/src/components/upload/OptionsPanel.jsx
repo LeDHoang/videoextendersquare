@@ -56,7 +56,12 @@ function ChoiceCards({ options, cards, value, onChange, ariaLabel, clearable }) 
             tabIndex={index === stop ? 0 : -1}
             className={`sx-media-choice ${option === value ? 'sx-selected' : ''}`}
             title={hint}
-            onClick={() => onChange(clearable && option === value ? '' : option)}
+            onClick={(event) => {
+              if (option !== value) onChange(option);
+              // Only a single pointer click clears: not the second click of a double-click,
+              // and not Space or Enter on the focused card (event.detail is 0 for those).
+              else if (clearable && event.detail === 1) onChange('');
+            }}
           >
             <Icon />
             <span className="sx-media-choice-name">{name}</span>
