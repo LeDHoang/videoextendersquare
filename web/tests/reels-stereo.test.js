@@ -81,12 +81,17 @@ function loadStereo(items, { presenting = false, hevc = false } = {}) {
     startViewTracking: () => { calls.viewTracking += 1; },
     showFlash: (text) => calls.flashes.push(text),
     setTimeout: (fn, ms) => { calls.timers.push({ fn, ms }); return calls.timers.length; },
+    // Resource Timing for the preload fetches, by URL.
+    performance: {
+      timings: {},
+      getEntriesByName(name) { return this.timings[name] || []; },
+    },
   };
   vm.createContext(context);
   vm.runInContext(`${block('reels-stereo')}\n${block('reels-stereo-sync')}
     this.api = {
       playbackFor, playbackUrlFor, itemPlaybackUrl, blobFor, applyEntryStereo, syncStereoSource,
-      handleStereoFailure, handleVr2kFailure, clearStereoFailure,
+      handleStereoFailure, handleVr2kFailure, clearStereoFailure, noteDownload,
       layout: () => activeVisualLayout,
       crop: () => activeCropLayout,
     };`, context);
@@ -121,18 +126,69 @@ test('3D posts load the 2D rendition in 2D and the stereo file only in VR', () =
   assert.equal(playbackFor(sbsPost, { stereoFailed: true }).url, sbsPost.url);
 });
 
-test('in VR every post plays its full-resolution file, never the 2k rendition', () => {
-  const { playbackFor, engine } = loadStereo([], { hevc: true });
+test('in VR an unmeasured or fast link plays the full-resolution file, a slow one the 2k rendition', () => {
+  const { playbackFor, noteDownload, engine } = loadStereo([], { hevc: true });
   const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
   const sbs = { ...sbsPost, vr2k_url: '/media/uploads/clip-2k.mp4' };
   engine.presenting = true;
+  // Not measured yet: the master.
   assert.deepEqual({ ...playbackFor(mono, mono) }, { url: mono.url, layout: 'mono', crop: '' });
   assert.deepEqual({ ...playbackFor(sbs, sbs) }, { url: sbs.stereo_url, layout: 'sbs', crop: '' });
-  // The split-screen preview behaves like the headset.
+  // 10 MB in 2 s = 40 Mbps, three times: still the master.
+  for (const name of ['b', 'c', 'd']) noteDownload(`/media/${name}.mp4`, 10e6, 2000);
+  assert.equal(playbackFor(mono, mono).url, mono.url);
+  // 5 MB in 1.25 s = 32 Mbps: once the median is under 35 Mbps, the rendition.
+  for (const name of ['e', 'f', 'g']) noteDownload(`/media/${name}.mp4`, 5e6, 1250);
+  assert.deepEqual({ ...playbackFor(mono, mono) }, { url: mono.vr2k_url, layout: 'mono', crop: '' });
+  assert.deepEqual({ ...playbackFor(sbs, sbs) }, { url: sbs.vr2k_url, layout: 'sbs', crop: '' });
+  // Samples under 1 MB are mostly latency and are ignored.
+  noteDownload('/media/h.mp4', 1000, 1000);
+  assert.equal(playbackFor(mono, mono).url, mono.vr2k_url);
+  // The split-screen preview is not the headset: the master there.
   engine.presenting = false;
   engine.previewSplit = true;
   assert.equal(playbackFor(mono, mono).url, mono.url);
   assert.equal(playbackFor(sbs, sbs).url, sbs.stereo_url);
+});
+
+test('in VR one slow download does not drop to the 2k rendition', () => {
+  const { playbackFor, noteDownload } = loadStereo([], { presenting: true });
+  const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
+  // 5 MB in 8 s = 5 Mbps as the only sample: not enough to judge the link.
+  noteDownload('/media/b.mp4', 5e6, 8000);
+  assert.equal(playbackFor(mono, mono).url, mono.url);
+  // Slow, then two fast: the median of three is fast.
+  noteDownload('/media/c.mp4', 10e6, 1000);
+  noteDownload('/media/d.mp4', 10e6, 1000);
+  assert.equal(playbackFor(mono, mono).url, mono.url);
+  // Only the last five count: slow samples push the fast ones out.
+  for (const name of ['f', 'g']) noteDownload(`/media/${name}.mp4`, 5e6, 8000);
+  assert.equal(playbackFor(mono, mono).url, mono.vr2k_url);
+  // And the link speeding up again brings the master back.
+  for (const name of ['h', 'i', 'j']) noteDownload(`/media/${name}.mp4`, 10e6, 1000);
+  assert.equal(playbackFor(mono, mono).url, mono.url);
+});
+
+test('in VR downloads served from the HTTP cache do not count as link speed', () => {
+  const { playbackFor, noteDownload, context } = loadStereo([], { presenting: true });
+  const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
+  // A slow link measured over the network: the rendition.
+  for (const name of ['b', 'c', 'd']) noteDownload(`/media/${name}.mp4`, 5e6, 8000);
+  assert.equal(playbackFor(mono, mono).url, mono.vr2k_url);
+  // Instant cache hits must not lift the estimate back over 35 Mbps.
+  const cached = { transferSize: 0, decodedBodySize: 10e6 };
+  for (const name of ['e', 'f', 'g']) {
+    const url = `https://host.example/media/${name}.mp4`;
+    context.performance.timings[url] = [cached];
+    noteDownload(url, 10e6, 20);
+  }
+  assert.equal(playbackFor(mono, mono).url, mono.vr2k_url);
+  // Cross-origin without Timing-Allow-Origin zeroes both sizes: unknown, so
+  // the sample counts like one with no entry at all.
+  const opaque = 'https://cdn.example/media/x.mp4';
+  context.performance.timings[opaque] = [{ transferSize: 0, decodedBodySize: 0 }];
+  for (let i = 0; i < 3; i++) noteDownload(opaque, 10e6, 1000);
+  assert.equal(playbackFor(mono, mono).url, mono.url);
 });
 
 test('entering VR swaps a mono post from its 2k rendition to the master in place', () => {
@@ -155,9 +211,12 @@ test('entering VR swaps a mono post from its 2k rendition to the master in place
 });
 
 test('2D plays the 2k rendition of a mono post where HEVC decodes', () => {
-  const { playbackFor, engine } = loadStereo([], { hevc: true });
+  const { playbackFor, noteDownload, engine } = loadStereo([], { hevc: true });
   const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
   assert.deepEqual({ ...playbackFor(mono, mono) }, { url: mono.vr2k_url, layout: 'mono', crop: '' });
+  // A fast link does not bring back the master in 2D.
+  for (const name of ['b', 'c', 'd']) noteDownload(`/media/${name}.mp4`, 10e6, 1000);
+  assert.equal(playbackFor(mono, mono).url, mono.vr2k_url);
   // No rendition yet: the url.
   const plain = { url: '/media/p.mp4', stereo_layout: 'mono', vr2k_url: null };
   assert.equal(playbackFor(plain, plain).url, plain.url);
