@@ -23,15 +23,16 @@ function Mark({ label, children }) {
 }
 
 const STATE = {
-  needs: ['Needs to be made square', SquareIcon, 'sx-warn'],
-  working: ['Being made square', SquareIcon, 'sx-accent'],
+  needs: ['Needs to be made', SquareIcon, 'sx-warn'],
+  working: ['Being made', SquareIcon, 'sx-accent'],
   ready: ['Ready to post', CheckIcon, 'sx-ok', 'Ready'],
   posted: ['Posted', SendIcon, 'sx-ink', 'Posted'],
 };
 
 // One file as a square tile: the picture on carbon, with chips for what it is and what it needs.
-export default function MediaTile({ item, now, retention, progress, price, onOpen, onCheck, onDiscard }) {
-  const shelf = shelfOf(item);
+// `target`: the shape the file must already have to post as it is (null: any).
+export default function MediaTile({ item, target = '1:1', now, retention, progress, price, onOpen, onCheck, onDiscard }) {
+  const shelf = shelfOf(item, target);
   const [stateLabel, StateIcon, stateTone, stateWord] = STATE[shelf];
   const stereo = stereoOf(item);
   const threeD = stereo || item.convert?.status === 'ready';
@@ -58,7 +59,7 @@ export default function MediaTile({ item, now, retention, progress, price, onOpe
           <KindIcon className="sx-media-placeholder" />
         )}
         {shelf === 'working' ? (
-          <span className="sx-media-progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`Making ${item.name} square`}>
+          <span className="sx-media-progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`Making ${item.name}`}>
             <i style={{ width: `${pct}%` }} />
           </span>
         ) : null}
@@ -74,11 +75,11 @@ export default function MediaTile({ item, now, retention, progress, price, onOpe
       <div className="sx-media-marks">
         <span className={`sx-media-badge ${stateTone}`} title={stateLabel}>
           <Mark label={stateLabel}><StateIcon /></Mark>
-          {price != null ? <span className="sx-media-price" title="Price to make this square">{price} cr</span> : null}
+          {price != null ? <span className="sx-media-price" title="Price to make this">{price} cr</span> : null}
           {stateWord ? <span aria-hidden="true">{stateWord}</span> : null}
           {shelf === 'working' ? <span aria-hidden="true">{pct}%</span> : null}
         </span>
-        {failed ? <span className="sx-media-badge sx-danger"><Mark label="Could not be made square. Try again."><AlertIcon /></Mark></span> : null}
+        {failed ? <span className="sx-media-badge sx-danger"><Mark label="Could not be made. Try again."><AlertIcon /></Mark></span> : null}
         {unsaved ? <span className="sx-media-badge sx-danger"><Mark label="Not saved to the cloud. Download it now."><AlertIcon /></Mark></span> : null}
         {threeD ? <span className="sx-media-badge sx-accent"><Mark label="3D"><CubeIcon /></Mark></span> : null}
         <span className="sx-media-spacer" />

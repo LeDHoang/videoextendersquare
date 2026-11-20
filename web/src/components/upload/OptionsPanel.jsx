@@ -6,14 +6,28 @@ import CloudFundingPanel from '../billing/CloudFundingPanel.jsx';
 import { CloudIcon, CubeIcon, SendIcon, SquareIcon, StackIcon } from '../icons/index.jsx';
 import { MODES, MAX_LORAS } from './useExtendConfig.js';
 import { LTX25_ANCHORS } from '../../utils/modelOptions.js';
+import { TARGET_ASPECTS } from '../../utils/aspect.js';
 
-// How a file is made square: every extender setting of the standalone Image
-// and Video pages, in the order a person decides them. It binds to the same
-// config object (useExtendConfig), so the /process form does not change.
+// How a file is made: every extender setting of the standalone Image and Video
+// pages, in the order a person decides them, plus the shape. It binds to the
+// same config object (useExtendConfig), so the /process form does not change.
 
 const MODE_CARDS = {
-  [MODES[0]]: { name: 'Fill with AI', hint: 'New picture is painted on the empty sides', Icon: SquareIcon },
-  [MODES[1]]: { name: 'Stretch to fit', hint: 'No new picture; the file is stretched', Icon: StackIcon },
+  [MODES[0]]: { name: 'Fill with AI', hint: 'New picture is painted out to the shape', Icon: SquareIcon },
+  [MODES[1]]: { name: 'Keep shape', hint: 'Nothing is added; the file keeps its shape', Icon: StackIcon },
+};
+// A plain frame in the shape, centred in the 24×24 icon box.
+const shapeIcon = (width, height) => function ShapeIcon() {
+  return (
+    <svg className="sx-media-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x={(24 - width) / 2} y={(24 - height) / 2} width={width} height={height} />
+    </svg>
+  );
+};
+const SHAPE_CARDS = {
+  '1:1': { name: '1:1', hint: 'Square', Icon: shapeIcon(15, 15) },
+  '16:9': { name: '16:9', hint: 'Wide', Icon: shapeIcon(20, 11.25) },
+  '9:16': { name: '9:16', hint: 'Tall', Icon: shapeIcon(11.25, 20) },
 };
 const ENGINE_CARDS = {
   FAST: { name: 'Fast', hint: 'On this server, no credits', Icon: SendIcon },
@@ -192,10 +206,12 @@ function Trim({ cfg, maxSourceDur }) {
   );
 }
 
-// `squareOnly`: every file is already square, so there is nothing to fill or stretch.
-export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSourceDur, squareOnly }) {
+// `allMatch`: every file already has the picked shape, so there is nothing to fill.
+// `shape`: the shape shown as picked: the person's pick, else the one all the
+// files would be made in (null when they differ).
+export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSourceDur, allMatch, shape }) {
   const isVideo = cfg.kind === 'video';
-  const outpaint = !cfg.upscaleOnly && !squareOnly;
+  const outpaint = !cfg.upscaleOnly && !allMatch;
   const ltx = isVideo && outpaint && cfg.ltxPicked;
   const minimax = isVideo && outpaint && cfg.minimaxPicked;
   const ltx25 = isVideo && outpaint && cfg.ltx25Picked;
@@ -203,11 +219,12 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
   const seedvr = isVideo && cfg.falPicked && cfg.falUpscale.includes('SeedVR');
   return (
     <div className="sx-media-options">
-      {squareOnly ? null : (
-        <Step title="How">
-          <ChoiceCards options={MODES} cards={MODE_CARDS} value={cfg.mode} onChange={cfg.setMode} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />
-        </Step>
-      )}
+      <Step title="How">
+        <ChoiceCards options={MODES} cards={MODE_CARDS} value={cfg.mode} onChange={cfg.setMode} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />
+        {cfg.upscaleOnly ? null : (
+          <ChoiceCards options={TARGET_ASPECTS} cards={SHAPE_CARDS} value={shape} onChange={cfg.setShape} ariaLabel={isVideo ? 'Video Shape' : 'Shape'} />
+        )}
+      </Step>
 
       <Step title="Quality">
         <ChoiceCards options={cfg.engines} cards={ENGINE_CARDS} value={cfg.engine} onChange={cfg.setEngine} ariaLabel="Upscale Engine" clearable />
@@ -234,13 +251,14 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
             </div>
           ) : null}
           {outpaint && isVideo && cfg.outpaintEntry?.is_custom ? (
-            <CustomModelPanel model={cfg.outpaintEntry.model} kind="outpaint" entry={cfg.outpaintEntry} onArgs={cfg.setOutArgs} />
+            <CustomModelPanel model={cfg.outpaintEntry.model} kind="outpaint" entry={cfg.outpaintEntry} onArgs={cfg.setOutArgs} aspect={shape} />
           ) : null}
           {outpaint && !isVideo && cfg.outpaintCustom ? (
             <CustomModelPanel
               model={cfg.outpaintModel}
               kind="image_outpaint"
               onArgs={cfg.setOutArgs}
+              aspect={shape}
               entry={{
                 label: `CUSTOM OUTPAINT (${cfg.outpaintShort})`,
                 requirements: 'A saved personal Fal key is required; the source image is uploaded by the pipeline.',
@@ -281,7 +299,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
             aria-label="OUTPAINT EXTENSION PROMPT"
             value={cfg.prompt}
             onChange={(e) => cfg.setPrompt(e.target.value)}
-            placeholder={isVideo ? 'Describe the extended square background environment...' : 'Describe the environment to generate on left/right borders...'}
+            placeholder={isVideo ? 'Describe the background to paint around the video...' : 'Describe the background to paint around the picture...'}
           />
         </Step>
       ) : null}

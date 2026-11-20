@@ -1,3 +1,5 @@
+import { ASPECT_TOLERANCE } from './aspect.js';
+
 /** Whole seconds as "0:29", "1:05", "1:02:03" (0 -> "0:00"). */
 export function formatClock(totalSeconds) {
   const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
@@ -83,14 +85,28 @@ export function stereoLayout(item) {
   return layout === 'sbs' || layout === 'tb' ? layout : 'mono';
 }
 
-/** The stereo layout an exact 2:1 / 1:2 frame could hold, else null. */
-export function stereoCandidate(width, height) {
+// The six frame shapes a stereo pair comes in (two 1:1, 16:9 or 9:16 eyes), as
+// w:h, with the layout each holds. 9:8 (two 9:16 eyes side by side)
+// and 8:9 (two 16:9 eyes stacked) also pass for a plain near-square picture, so
+// they are never picked automatically: the person turns 3D on and says SBS or TB.
+const STEREO_FRAMES = [
+  ['2:1', 'sbs', false], ['32:9', 'sbs', false], ['9:8', 'sbs', true],
+  ['1:2', 'tb', false], ['9:32', 'tb', false], ['8:9', 'tb', true],
+].map(([shape, layout, manual]) => [shape.split(':').reduce((a, b) => a / b), layout, manual, shape]);
+
+/** { layout: 'sbs' | 'tb', manual, shape: '2:1' ... } for a stereo frame shape (within 1%), else null. */
+export function stereoFrame(width, height) {
   const w = Math.trunc(Number(width));
   const h = Math.trunc(Number(height));
   if (!(w > 0 && h > 0)) return null;
-  if (w === 2 * h) return 'sbs';
-  if (h === 2 * w) return 'tb';
-  return null;
+  const hit = STEREO_FRAMES.find(([ratio]) => Math.abs(w / h / ratio - 1) <= ASPECT_TOLERANCE);
+  return hit ? { layout: hit[1], manual: hit[2], shape: hit[3] } : null;
+}
+
+/** The stereo layout a 2:1 / 32:9 (SBS) or 1:2 / 9:32 (TB) frame could hold, else null. */
+export function stereoCandidate(width, height) {
+  const frame = stereoFrame(width, height);
+  return frame && !frame.manual ? frame.layout : null;
 }
 
 /** One eye of a stereo frame: half the width (SBS) or half the height (TB). */

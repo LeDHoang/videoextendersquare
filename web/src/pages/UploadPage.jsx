@@ -9,7 +9,7 @@ import { useHealthContext } from '../hooks/HealthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
-import { appendProcessingParameters } from '../utils/cloudBilling.js';
+import { appendProcessingParameters, matchesTarget } from '../utils/cloudBilling.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
 import { assertUploadSize } from '../utils/uploadLimits.js';
 import { ActivityIcon, ClockIcon, CloseIcon, SlidersIcon, IndustrialUploadIcon, SquareIcon, StackIcon } from '../components/icons/index.jsx';
@@ -21,13 +21,14 @@ import MediaTile from '../components/upload/MediaTile.jsx';
 import MediaDialog from '../components/upload/MediaDialog.jsx';
 import OptionsPanel from '../components/upload/OptionsPanel.jsx';
 import {
-  ACCEPT, groupProblem, isSquareMeta, kindOf, postSource, publishBody, shelfOf, sortItems, spatialOf, spatialSource, stagedItem, stereoOf,
+  ACCEPT, groupProblem, kindOf, postSource, publishBody, shelfOf, sortItems, spatialOf, spatialSource, stagedItem, stereoOf,
 } from '../components/upload/mediaItems.js';
 
 // Upload: the person's media, grouped by what each file needs next. Files that
-// are not square wait on the first shelf to be made square; square files and
-// finished results wait on the second to be posted. The Gallery tab lists
-// everything by time.
+// do not have their shape yet (the picked one, else the nearest of 1:1, 16:9
+// and 9:16; any shape under Keep shape) wait on the first shelf to be made;
+// files that have it and finished results wait on the second to be posted.
+// The Gallery tab lists everything by time.
 
 const KINDS = ['image', 'video'];
 const KIND_TABS = ['IMAGES', 'VIDEOS'];
@@ -74,13 +75,16 @@ export default function UploadPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // The shape a file must already have to post as it is, with its kind's options.
+  const asIs = (item) => cfgs[item.kind].asIsShapeFor(item.meta);
+  const shelf = (item) => shelfOf(item, asIs(item));
   const byShelf = { needs: [], working: [], ready: [], posted: [] };
-  for (const item of sortItems(items, 'added')) byShelf[shelfOf(item)].push(item);
+  for (const item of sortItems(items, 'added')) byShelf[shelf(item)].push(item);
   const openItems = open ? open.ids.map((id) => items.find((item) => item.id === id)).filter(Boolean) : [];
   const cover = openItems[0] || null;
   const group = openItems.length > 1;
-  // The options show for a file that still needs to be made square, or one being redone.
-  const makeMode = !!cover && !group && !cover.posted && cover.live && shelfOf(cover) !== 'working' && (shelfOf(cover) === 'needs' || !!open.redo);
+  // The options show for a file that still needs to be made, or one being redone.
+  const makeMode = !!cover && !group && !cover.posted && cover.live && shelf(cover) !== 'working' && (shelf(cover) === 'needs' || !!open.redo);
 
   // What the Make button acts on: the open file, else the checked files of the first shelf.
   const targets = makeMode ? [cover] : byShelf.needs.filter((item) => item.checked && item.live);
@@ -105,9 +109,14 @@ export default function UploadPage() {
   const studioBlocked = targetKinds.includes('video') && cfgs.video.studioPicked && !studioOk;
   const fundingBlocked = targetKinds.some((kind) => fundings[kind].fundingBlocked);
   const quoteStale = targetKinds.some((kind) => fundings[kind].quoteStale);
-  // Already-square files have nothing to fill or stretch; with no upscale (and no trim) nothing would change.
-  const squareOnly = targets.length > 0 && targets.every((item) => isSquareMeta(item.meta));
-  const nothingToDo = squareOnly && targets.every((item) => cfgs[item.kind].noUpscale && !(item.kind === 'video' && cfgs.video.trimEnabled));
+  // Files that already have their shape have nothing to fill; with no upscale (and no trim) nothing would change.
+  const allMatch = targets.length > 0 && targets.every((item) => matchesTarget(item.meta, cfgs[item.kind].shapeFor(item.meta)));
+  const nothingToDo = allMatch && targets.every((item) => cfgs[item.kind].noUpscale && !(item.kind === 'video' && cfgs.video.trimEnabled));
+  // The shape the options show for a kind: the pick, else the one all its files share.
+  const shownShape = (kind) => {
+    const shapes = new Set(targets.filter((item) => item.kind === kind).map((item) => cfgs[kind].shapeFor(item.meta)));
+    return cfgs[kind].shape || (shapes.size === 1 ? [...shapes][0] : null);
+  };
 
   // ── Adding files ──
   const onFiles = async (files) => {
@@ -157,12 +166,12 @@ export default function UploadPage() {
     openItem(row[(index + delta + row.length) % row.length]);
   };
 
-  // ── Make square ──
+  // ── Make ──
   const processForm = (kind, meta, quoteByStage, name) => {
     const funding = fundings[kind];
     const fd = new FormData();
     fd.append('stage_id', meta.stage_id);
-    appendProcessingParameters(fd, cfgs[kind].parameters);
+    appendProcessingParameters(fd, cfgs[kind].parametersFor(meta));
     if (funding.needsCloud(meta)) {
       fd.append('payment_source', funding.paymentSource);
       if (funding.paymentSource === 'credits') {
@@ -174,7 +183,7 @@ export default function UploadPage() {
     return fd;
   };
 
-  const makeSquare = async () => {
+  const make = async () => {
     setMakeError('');
     for (const kind of targetKinds) {
       const invalid = cfgs[kind].validate();
@@ -225,7 +234,7 @@ export default function UploadPage() {
   };
 
   useEffect(() => {
-    if (waiting && !makeBusy && !makeMode && targets.length) makeSquare();
+    if (waiting && !makeBusy && !makeMode && targets.length) make();
     // Runs when a job ends, with that render's targets and settings.
   }, [settled]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -244,7 +253,7 @@ export default function UploadPage() {
   };
 
   // ── Depth version (spatial 3D) of the open post: only a 2D post gets one ──
-  const posting = !!cover && !makeMode && !cover.posted && openItems.every((item) => postSource(item));
+  const posting = !!cover && !makeMode && !cover.posted && openItems.every((item) => postSource(item, asIs(item)));
   const spatialShown = posting && !!features.spatial_default && openItems.every((item) => !stereoOf(item) && !item.convert);
   const spatialSlots = spatialShown && !spatialOff ? openItems : [];
   const spatialPending = spatialSlots.some((item) => !['done', 'failed'].includes(spatialOf(item)?.status));
@@ -314,7 +323,8 @@ export default function UploadPage() {
   };
 
   // ── Options and the Make button ──
-  const makeLabel = `${quoteStale ? 'Retry quote & ' : ''}${squareOnly ? (quoteStale ? 'upscale' : 'Upscale') : `${quoteStale ? 'make' : 'Make'} ${targets.length > 1 ? `${targets.length} ` : ''}square`}${totalCredits ? ` · ${totalCredits} credits` : ''}`;
+  const keepShape = targetKinds.length > 0 && targetKinds.every((kind) => cfgs[kind].upscaleOnly);
+  const makeLabel = `${quoteStale ? 'Retry quote & ' : ''}${allMatch || keepShape ? (quoteStale ? 'upscale' : 'Upscale') : `${quoteStale ? 'fill' : 'Fill'}${targets.length > 1 ? ` ${targets.length}` : ''}`}${totalCredits ? ` · ${totalCredits} credits` : ''}`;
   const makeButton = (
     <Button
       variant="primary"
@@ -324,11 +334,11 @@ export default function UploadPage() {
         blocked.length && blocked[0].label + ' UNAVAILABLE — CHECK SYSTEM PROBES',
         !blocked.length && studioBlocked && 'STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI',
         !blocked.length && !studioBlocked && fundingBlocked && 'CHOOSE HOW TO PAY IN OPTIONS',
-        !targets.length && 'TICK THE FILES TO MAKE SQUARE',
+        !targets.length && 'TICK THE FILES TO MAKE',
         nothingToDo && 'PICK A QUALITY TO UPSCALE, OR KEEP THE FILE AS IT IS',
       ]}
       loading={makeBusy}
-      onClick={makeSquare}
+      onClick={make}
     >
       <SquareIcon /> {makeLabel}
     </Button>
@@ -346,7 +356,8 @@ export default function UploadPage() {
         funding={{ ...fundings[kind], setPaymentSource }}
         probes={probes}
         studioOk={studioOk}
-        squareOnly={squareOnly}
+        allMatch={allMatch}
+        shape={shownShape(kind)}
         maxSourceDur={Math.max(0, ...targets.filter((item) => item.kind === 'video').map((item) => item.meta?.duration || 0)) || 60}
       />
       {makeButton}
@@ -380,7 +391,7 @@ export default function UploadPage() {
   });
 
   const tile = (item, extra) => (
-    <MediaTile key={item.id} item={item} now={now} retention={retention} progress={progress[item.render?.jobId]} onOpen={openItem} {...extra} />
+    <MediaTile key={item.id} item={item} target={asIs(item)} now={now} retention={retention} progress={progress[item.render?.jobId]} onOpen={openItem} {...extra} />
   );
   const check = (item, checked) => patch(item.id, { checked });
   const discardable = (item) => (!item.render && !item.posted ? (target) => remove(target.id) : undefined);
@@ -433,7 +444,7 @@ export default function UploadPage() {
       {!items.length && !staging ? (
         <div className="sx-media-empty">
           <p className="sx-media-empty-line">Nothing here yet.</p>
-          <UploadZone accept={ACCEPT} multiple onFiles={onFiles} caption="Photos and videos. Anything not square is made square before it is posted." />
+          <UploadZone accept={ACCEPT} multiple onFiles={onFiles} caption="Photos and videos. Fill to 1:1, 16:9 or 9:16, or keep the shape." />
         </div>
       ) : tab === 'gallery' ? (
         <ul className="sx-media-grid" aria-label="All media">{sortItems(items, sort).map((item) => tile(item))}</ul>
@@ -442,7 +453,7 @@ export default function UploadPage() {
           {byShelf.needs.length ? (
             <section className="sx-media-shelf" aria-labelledby="shelf-needs">
               <header className="sx-media-shelf-head">
-                <h2 id="shelf-needs">Needs square <span>{byShelf.needs.length}</span></h2>
+                <h2 id="shelf-needs">To make <span>{byShelf.needs.length}</span></h2>
                 {makeMode ? null : makeButton}
                 <IconButton label="Options" onClick={() => setOptionsOpen(true)} disabled={!targets.length}><SlidersIcon /></IconButton>
               </header>
@@ -516,9 +527,9 @@ export default function UploadPage() {
           cfg={cfgs[cover.kind]}
           draft={draft}
           onDraft={setDraft}
-          onStereo={(on) => patch(cover.id, { stereoOn: on })}
-          onRedo={!group && cover.live && !cover.posted && shelfOf(cover) === 'ready' && !stereoOf(cover) && !converting ? () => setOpen({ ...open, redo: true }) : undefined}
-          onRedoBack={open.redo && shelfOf(cover) === 'ready' ? () => setOpen({ ...open, redo: false }) : undefined}
+          onStereo={(change) => patch(cover.id, change)}
+          onRedo={!group && cover.live && !cover.posted && shelf(cover) === 'ready' && !stereoOf(cover) && !converting ? () => setOpen({ ...open, redo: true }) : undefined}
+          onRedoBack={open.redo && shelf(cover) === 'ready' ? () => setOpen({ ...open, redo: false }) : undefined}
           canConvert={!!features.stereo_convert && !group && !stereoOf(cover)}
           convertBusy={convertBusy || blocked.length > 0}
           convertError={convertError}

@@ -1,7 +1,7 @@
-// Pure layout math for the Upload Studio stage: where the source sits inside
-// the 1:1 master and which bands the outpaint model has to generate.
+import { aspectCanvas, aspectPadding } from '../../utils/aspect.js';
 
-export const MASTER_SIDE = 2048;
+// Pure layout math for the Upload Studio stage: where the source sits inside
+// the master of the target shape and which bands the outpaint model has to generate.
 
 // Mirrors pipeline/utils.py calculate_square_padding (symmetric, floor first).
 export function squarePadding(width, height) {
@@ -22,14 +22,16 @@ export function squarePadding(width, height) {
 
 const pct = (value, side) => (side > 0 ? (value / side) * 100 : 0);
 
-// Geometry for one staged item ({ width, height, padding? } as returned by
-// /api/{image,video}/upload). Percentages are relative to the square stage.
-export function stageLayout(meta) {
-  const width = Number(meta?.width) || 0;
-  const height = Number(meta?.height) || 0;
-  if (!width || !height) return null;
-  const side = Math.max(width, height);
-  const padding = meta?.padding && typeof meta.padding === 'object'
+// The padding that takes width×height to `target`: the server's square padding
+// ({ width, height, padding? } as returned by /api/{image,video}/upload) for 1:1,
+// the shared aspect rule for 16:9 / 9:16, none for null (the file keeps its shape).
+function targetPadding(meta, width, height, target) {
+  if (!target) return { top: 0, bottom: 0, left: 0, right: 0 };
+  if (target !== '1:1') {
+    const [top, bottom, left, right] = aspectPadding(width, height, target);
+    return { top, bottom, left, right };
+  }
+  return meta?.padding && typeof meta.padding === 'object'
     ? {
         top: Number(meta.padding.top) || 0,
         bottom: Number(meta.padding.bottom) || 0,
@@ -37,32 +39,50 @@ export function stageLayout(meta) {
         right: Number(meta.padding.right) || 0,
       }
     : squarePadding(width, height);
+}
+
+// Geometry for one staged item made into `target` ('1:1' | '16:9' | '9:16', or
+// null for its own shape). The stage has the canvas's shape (`stageWidth` ×
+// `stageHeight`); x percentages are of its width, y percentages of its height.
+export function stageLayout(meta, target = '1:1') {
+  const width = Number(meta?.width) || 0;
+  const height = Number(meta?.height) || 0;
+  if (!width || !height) return null;
+  const side = Math.max(width, height);
+  const padding = targetPadding(meta, width, height, target);
+  const [stageWidth, stageHeight] = target === '1:1'
+    ? [side, side]
+    : target ? aspectCanvas(width, height, target) : [width, height];
+  const x = (value) => pct(value, stageWidth);
+  const y = (value) => pct(value, stageHeight);
   const axis = padding.left || padding.right ? 'x' : padding.top || padding.bottom ? 'y' : null;
   const zones = axis === 'x'
     ? [
-        { side: 'left', px: padding.left, style: { left: '0%', top: '0%', width: `${pct(padding.left, side)}%`, height: '100%' } },
-        { side: 'right', px: padding.right, style: { right: '0%', top: '0%', width: `${pct(padding.right, side)}%`, height: '100%' } },
+        { side: 'left', px: padding.left, style: { left: '0%', top: '0%', width: `${x(padding.left)}%`, height: '100%' } },
+        { side: 'right', px: padding.right, style: { right: '0%', top: '0%', width: `${x(padding.right)}%`, height: '100%' } },
       ]
     : axis === 'y'
       ? [
-          { side: 'top', px: padding.top, style: { left: '0%', top: '0%', width: '100%', height: `${pct(padding.top, side)}%` } },
-          { side: 'bottom', px: padding.bottom, style: { left: '0%', bottom: '0%', width: '100%', height: `${pct(padding.bottom, side)}%` } },
+          { side: 'top', px: padding.top, style: { left: '0%', top: '0%', width: '100%', height: `${y(padding.top)}%` } },
+          { side: 'bottom', px: padding.bottom, style: { left: '0%', bottom: '0%', width: '100%', height: `${y(padding.bottom)}%` } },
         ]
       : [];
   return {
     width,
     height,
     side,
+    stageWidth,
+    stageHeight,
     padding,
     axis,
     square: axis === null,
     orientation: width > height ? 'LANDSCAPE' : height > width ? 'PORTRAIT' : 'SQUARE',
     aspect: aspectLabel(width, height),
     source: {
-      left: `${pct(padding.left, side)}%`,
-      top: `${pct(padding.top, side)}%`,
-      width: `${pct(width, side)}%`,
-      height: `${pct(height, side)}%`,
+      left: `${x(padding.left)}%`,
+      top: `${y(padding.top)}%`,
+      width: `${x(width)}%`,
+      height: `${y(height)}%`,
     },
     zones,
     padLabel: axis === 'x'

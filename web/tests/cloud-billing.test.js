@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   appendProcessingParameters,
   imageBillingParameters,
+  matchesTarget,
   stagedItemNeedsCloud,
   videoBillingParameters,
 } from '../src/utils/cloudBilling.js';
@@ -50,6 +51,32 @@ test('cloud detection skips square local work but includes outpaint and Fal upsc
   assert.equal(stagedItemNeedsCloud({ width: 1000, height: 1000 }, { upscale_only: false, upscale_engine: 'fast' }), false);
   assert.equal(stagedItemNeedsCloud({ width: 1000, height: 500 }, { upscale_only: false, upscale_engine: 'fast' }), true);
   assert.equal(stagedItemNeedsCloud({ width: 1000, height: 1000 }, { upscale_only: true, upscale_engine: 'fal' }), true);
+});
+
+test('the Fill with AI shape is sent as target_aspect, never under Keep shape', () => {
+  const base = { prompt: 'extend', falPicked: false, outpaintModel: 'fal-ai/image-apps-v2/outpaint', upscaleModel: 'fal-ai/clarity-upscaler' };
+  const fill = imageBillingParameters({ ...base, upscaleOnly: false, targetAspect: '16:9' });
+  assert.equal(appendProcessingParameters(new FormData(), fill).get('target_aspect'), '16:9');
+  assert.equal('target_aspect' in imageBillingParameters({ ...base, upscaleOnly: true, targetAspect: '16:9' }), false);
+  assert.equal('target_aspect' in imageBillingParameters({ ...base, upscaleOnly: false }), false);
+  const video = videoBillingParameters({ ...base, upscaleOnly: false, studioPicked: false, targetAspect: '9:16' });
+  assert.equal(video.target_aspect, '9:16');
+});
+
+test('cloud detection follows the target shape', () => {
+  const fast = { upscale_only: false, upscale_engine: 'fast' };
+  assert.equal(stagedItemNeedsCloud({ width: 1920, height: 1080 }, { ...fast, target_aspect: '16:9' }), false);
+  assert.equal(stagedItemNeedsCloud({ width: 1920, height: 1080 }, { ...fast, target_aspect: '9:16' }), true);
+  assert.equal(stagedItemNeedsCloud({ width: 1000, height: 1000 }, { ...fast, target_aspect: '16:9' }), true);
+  assert.equal(stagedItemNeedsCloud({ width: 1500, height: 1200 }, { upscale_only: true, upscale_engine: 'fast' }), false);
+  assert.equal(stagedItemNeedsCloud({}, { ...fast, target_aspect: '1:1' }), true);
+});
+
+test('matchesTarget takes any shape for a null target and needs dimensions otherwise', () => {
+  assert.equal(matchesTarget({ width: 1500, height: 1200 }, null), true);
+  assert.equal(matchesTarget({ width: 1910, height: 1080 }, '16:9'), true);
+  assert.equal(matchesTarget({ width: 1080, height: 1920 }, '16:9'), false);
+  assert.equal(matchesTarget({}, '1:1'), false);
 });
 
 test('missing optionals never serialize as undefined or NaN', () => {

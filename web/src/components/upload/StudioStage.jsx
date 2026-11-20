@@ -2,12 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import UploadZone from '../ui/UploadZone.jsx';
 import { AccentBlock } from '../ui/primitives.jsx';
 import { onRovingKeyDown } from '../ui/roving.js';
-import { MASTER_SIDE, formatClock, stageLayout } from './stageGeometry.js';
+import { formatClock, stageLayout } from './stageGeometry.js';
+import { TARGET_ASPECTS, aspectMatches, masterSize } from '../../utils/aspect.js';
 import { STEREO_LABELS, stereoEyeSize } from '../../utils/mediaFormat.js';
 
-// Left half of the Upload Studio: the 1:1 master stage. Shows where the
-// source sits inside the square, which bands the outpaint model will
-// generate, and — once a render finishes — the extended result.
+// Left half of the Upload Studio: the master stage in the target shape
+// (`target`: '1:1' | '16:9' | '9:16', null for the file's own). Shows where the
+// source sits inside it, which bands the outpaint model will generate, and —
+// once a render finishes — the extended result.
 
 // Square transport glyphs in currentColor; the Unicode media symbols render as emoji on some platforms.
 function TransportGlyph({ name }) {
@@ -180,6 +182,7 @@ export default function StudioStage({
   stereo,
   upscaleOnly,
   targetLabel,
+  target = '1:1',
   trim,
   outpaintActive,
   onMoveGalleryItem,
@@ -193,7 +196,7 @@ export default function StudioStage({
   const [videoEl, setVideoEl] = useState(null);
   const selected = entries.find((entry) => entry.key === selectedKey) || entries[0] || null;
   const result = selected?.result || null;
-  const geometry = selected ? stageLayout(selected.meta) : null;
+  const geometry = selected ? stageLayout(selected.meta, target) : null;
   const isSlideshow = layout === 'slideshow';
   const kind = selected?.kind || null;
 
@@ -206,8 +209,19 @@ export default function StudioStage({
   const showExtended = view === 'extended' && resultUrl;
   // A MAKE 3D result is a side-by-side pair; the stage shows its left eye.
   const resultStereo = result?.stereo_layout || null;
-  // 3D stereo uploads show their left eye filling the square, as 2D views will.
+  // 3D stereo uploads show their left eye filling the stage, as 2D views will.
   const stereoEye = stereo && geometry ? stereoEyeSize(stereo, geometry.width, geometry.height) : null;
+  // The stage takes the shape of what it shows: the result (its left eye for 3D),
+  // the source's eye, the first slide of a post, else the target canvas.
+  const cover = entries[0]?.meta;
+  const frame = showExtended && result.width
+    ? stereoEyeSize(resultStereo, result.width, result.height)
+    : stereoEye
+      || (isSlideshow && cover?.width && cover?.height ? { width: cover.width, height: cover.height } : null)
+      || (geometry && !isSlideshow ? { width: geometry.stageWidth, height: geometry.stageHeight } : null);
+  const [masterWidth, masterHeight] = masterSize(1, 1, target || '1:1');
+  // The shape a file already has and is kept in: the target, else its own when it is one of the three.
+  const already = target || (geometry && TARGET_ASPECTS.find((shape) => aspectMatches(geometry.width, geometry.height, shape))) || null;
   const showZones = !showExtended && !isSlideshow && !stereo && geometry && !geometry.square && extendPath && !upscaleOnly;
   const meta = selected?.meta || {};
   const stageLabel = showExtended
@@ -215,7 +229,7 @@ export default function StudioStage({
     : stereoEye
       ? `LEFT EYE · 2D VIEW (${stereoEye.width}×${stereoEye.height})`
       : isSlideshow
-        ? 'PLAYER VIEW · 1:1 CROP'
+        ? 'PLAYER VIEW · FIRST SLIDE SETS THE SHAPE'
         : '';
 
   return (
@@ -249,10 +263,10 @@ export default function StudioStage({
               </>
             ) : geometry && !isSlideshow ? (
               <>
-                <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{[selected.sourceKnown === false ? null : `${geometry.width}×${geometry.height}`, result?.width ? `${result.width}×${result.height}` : targetLabel].filter(Boolean).join(' ➔ ') || '1:1 SQUARE'}</span>
+                <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{[selected.sourceKnown === false ? null : `${geometry.width}×${geometry.height}`, result?.width ? `${result.width}×${result.height}` : targetLabel].filter(Boolean).join(' ➔ ') || target || 'SAME SHAPE'}</span>
               </>
             ) : (
-              <span className="sx-studio-pill">{isSlideshow ? `${entries.length} IMAGES · AS-IS` : `TARGET ${MASTER_SIDE}×${MASTER_SIDE} · 1:1`}</span>
+              <span className="sx-studio-pill">{isSlideshow ? `${entries.length} IMAGES · AS-IS` : target ? `TARGET ${masterWidth}×${masterHeight} · ${target}` : 'SAME SHAPE'}</span>
             )}
           </div>
           {selected && onFiles && !locked ? (
@@ -280,7 +294,12 @@ export default function StudioStage({
           ) : null}
         </div>
 
-        <div className={`sx-studio-stage ${layout === 'empty' ? 'sx-empty' : ''}`} role="region" aria-label="Square master stage">
+        <div
+          className={`sx-studio-stage ${layout === 'empty' ? 'sx-empty' : ''} ${frame && frame.height > frame.width ? 'sx-portrait' : ''}`}
+          style={frame ? { aspectRatio: `${frame.width} / ${frame.height}` } : undefined}
+          role="region"
+          aria-label="Master stage"
+        >
           <div className="sx-studio-reticle" aria-hidden="true" />
           {layout === 'empty' && !staging ? (
             <div className="sx-studio-drop">
@@ -292,14 +311,14 @@ export default function StudioStage({
             kind === 'video' ? (
               <StageVideo
                 src={resultUrl}
-                label={resultStereo ? `Left eye of the 3D result for ${selected.name}` : `Rendered square video for ${selected.name}`}
+                label={resultStereo ? `Left eye of the 3D result for ${selected.name}` : `Rendered video for ${selected.name}`}
                 onElement={setVideoEl}
                 className={resultStereo ? `sx-studio-fill sx-stereo-${resultStereo}` : 'sx-studio-fill'}
               />
             ) : resultStereo ? (
               <img className={`sx-studio-fill sx-stereo-${resultStereo}`} src={resultUrl} alt={`3D result for ${selected.name} (left eye)`} />
             ) : (
-              <img className="sx-studio-fill" src={resultUrl} alt={`Rendered square result for ${selected.name}`} />
+              <img className="sx-studio-fill" src={resultUrl} alt={`Rendered result for ${selected.name}`} />
             )
           ) : null}
 
@@ -311,12 +330,9 @@ export default function StudioStage({
                 <img className={`sx-studio-fill sx-stereo-${stereo}`} src={selected.url} alt={`${selected.name} (left eye)`} />
               )
             ) : isSlideshow ? (
-              <img className="sx-studio-fill sx-cover" src={selected.url} alt={selected.name} />
+              <img className="sx-studio-fill" src={selected.url} alt={selected.name} />
             ) : (
-              <div
-                className={`sx-studio-source ${upscaleOnly && extendPath && geometry && !geometry.square ? 'sx-stretched' : ''}`}
-                style={upscaleOnly && extendPath ? { left: 0, top: 0, width: '100%', height: '100%' } : geometry?.source}
-              >
+              <div className="sx-studio-source" style={geometry?.source}>
                 {kind === 'video' ? (
                   <StageVideo src={selected.url} label="Source video preview" onElement={setVideoEl} className="sx-studio-media" />
                 ) : (
@@ -337,14 +353,11 @@ export default function StudioStage({
           ) : null}
 
           {selected && stageLabel ? <span className="sx-studio-stage-label">{stageLabel}</span> : null}
-          {selected && !showExtended && geometry?.square && !isSlideshow ? (
-            <span className="sx-studio-flag sx-ok">ALREADY 1:1</span>
+          {selected && !showExtended && geometry?.square && !isSlideshow && already ? (
+            <span className="sx-studio-flag sx-ok">ALREADY {already}</span>
           ) : null}
           {selected && !showExtended && !extendPath && layout !== 'batch' ? (
             <span className={`sx-studio-flag ${stereo ? 'sx-ok' : ''}`}>{stereo ? '3D · PUBLISHED AS-IS' : 'PUBLISHED AS-IS'}</span>
-          ) : null}
-          {selected && !showExtended && extendPath && upscaleOnly && geometry && !geometry.square ? (
-            <span className="sx-studio-flag sx-warn">UPSCALE ONLY · STRETCHED TO 1:1</span>
           ) : null}
           {showExtended && kind === 'video' && !result.preview_url && !resultStereo ? (
             <span className="sx-studio-flag sx-warn">HEVC MASTER — BROWSER PREVIEW NEEDS AN H.264 PROXY</span>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { imageBillingParameters, videoBillingParameters } from '../../utils/cloudBilling.js';
+import { imageBillingParameters, matchesTarget, videoBillingParameters } from '../../utils/cloudBilling.js';
+import { nearestAspect } from '../../utils/aspect.js';
 import { H3_REFRAME, LTX25_REFRAME, offeredValue, rateTiers, topTier, videoOptions } from '../../utils/modelOptions.js';
 
 // Extender settings for the Upload Studio, one hook per media kind. Each kind
@@ -8,7 +9,9 @@ import { H3_REFRAME, LTX25_REFRAME, offeredValue, rateTiers, topTier, videoOptio
 // The derivations below mirror ImagePage.jsx / VideoPage.jsx one-for-one so
 // both pages and the studio send identical /process payloads.
 
-export const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
+// Fill with AI paints the file out to a picked shape; Keep shape leaves its
+// shape alone (sent as upscale_only).
+export const MODES = ['FILL WITH AI', 'KEEP SHAPE'];
 export const IMG_ENGINES = ['FAST', 'FAL AI'];
 export const VID_ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
 
@@ -38,7 +41,23 @@ const CREDIT_VIDEO_UPSCALE_MODELS = new Set([
 ]);
 const VALID_ARGS = { args: {}, ok: true, error: '' };
 
-const isNonSquare = (item) => Number(item?.width) !== Number(item?.height);
+const nearestOf = (meta) => (Number(meta?.width) > 0 && Number(meta?.height) > 0 ? nearestAspect(Number(meta.width), Number(meta.height)) : '1:1');
+
+// The Fill with AI shape. A pick holds for the whole visit; until then each
+// file is made in the shape of the three nearest its own. Under Keep shape a
+// file keeps its shape (null).
+function useTargetShape(upscaleOnly, noUpscale) {
+  const [shape, setShape] = useState(null);
+  const shapeFor = (meta) => (upscaleOnly ? null : shape || nearestOf(meta));
+  return {
+    shape,
+    setShape,
+    shapeFor,
+    // The shape a file must already have to post as it is (null: any). With an
+    // upscale under Keep shape, square files still post as they are.
+    asIsShapeFor: (meta) => (upscaleOnly ? (noUpscale ? null : '1:1') : shapeFor(meta)),
+  };
+}
 
 export function useImageExtendConfig(models) {
   const outpaintCatalog = models.image_outpaint_catalog || [];
@@ -53,10 +72,12 @@ export function useImageExtendConfig(models) {
   const [outArgs, setOutArgs] = useState(VALID_ARGS);
   const [upArgs, setUpArgs] = useState(VALID_ARGS);
 
-  const upscaleOnly = mode === 'UPSCALE ONLY';
+  const upscaleOnly = mode === 'KEEP SHAPE';
   const falPicked = engine === 'FAL AI';
-  // No Quality card picked: made square at its own resolution, not upscaled to 2K.
+  // No Quality card picked: the file keeps its own resolution, not upscaled to 2K.
   const noUpscale = engine === '';
+  const target = useTargetShape(upscaleOnly, noUpscale);
+  const targetAspect = upscaleOnly ? null : target.shape;
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falModel) || null;
   const upscaleModel = upscaleEntry?.model || FALLBACK_FAL_MODEL_IDS[falModel] || models.upscale_img;
   const outpaintModel = models.outpaint_img || STOCK_OUTPAINT_IMG;
@@ -76,6 +97,7 @@ export function useImageExtendConfig(models) {
   const parameters = useMemo(() => imageBillingParameters({
     prompt,
     upscaleOnly,
+    targetAspect,
     sharpening,
     falPicked,
     noUpscale,
@@ -83,7 +105,7 @@ export function useImageExtendConfig(models) {
     outpaintModel,
     customOutpaintArgs: outpaintCustom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, sharpening, falPicked, noUpscale, upscaleModel, outpaintModel, outpaintCustom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, targetAspect, sharpening, falPicked, noUpscale, upscaleModel, outpaintModel, outpaintCustom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
 
   const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? !outpaintCustom;
   const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? upscaleModel === 'fal-ai/clarity-upscaler';
@@ -92,6 +114,7 @@ export function useImageExtendConfig(models) {
     kind: 'image',
     engines: IMG_ENGINES,
     mode, setMode,
+    ...target,
     prompt, setPrompt,
     engine, setEngine,
     falModel, setFalModel,
@@ -112,8 +135,10 @@ export function useImageExtendConfig(models) {
     outpaintLabel: outpaintCustom ? `CUSTOM (${outpaintShort})` : (outpaintEntry?.label || 'Image Apps Outpaint'),
     upscaleLabel: falModel,
     parameters,
+    // One file's /process parameters: an unpicked shape is that file's own nearest.
+    parametersFor: (meta) => (upscaleOnly ? parameters : { ...parameters, target_aspect: target.shapeFor(meta) }),
     byokOnlyFor(items) {
-      const needsOutpaintCloud = items.some((item) => !upscaleOnly && isNonSquare(item));
+      const needsOutpaintCloud = items.some((item) => !matchesTarget(item, target.shapeFor(item)));
       return (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);
     },
     validate() {
@@ -159,10 +184,12 @@ export function useVideoExtendConfig(models) {
   const [outArgs, setOutArgs] = useState(VALID_ARGS);
   const [upArgs, setUpArgs] = useState(VALID_ARGS);
 
-  const upscaleOnly = mode === 'UPSCALE ONLY';
+  const upscaleOnly = mode === 'KEEP SHAPE';
   const falPicked = engine === 'FAL AI';
-  // No Quality card picked: made square at its own resolution, not upscaled to 2K.
+  // No Quality card picked: the file keeps its own resolution, not upscaled to 2K.
   const noUpscale = engine === '';
+  const target = useTargetShape(upscaleOnly, noUpscale);
+  const targetAspect = upscaleOnly ? null : target.shape;
   const studioPicked = engine === 'STUDIO';
   const outpaintEntry = outpaintCatalog.find((e) => e.label === outpaintOpt) || outpaintCatalog[0];
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
@@ -205,6 +232,7 @@ export function useVideoExtendConfig(models) {
   const parameters = useMemo(() => videoBillingParameters({
     prompt,
     upscaleOnly,
+    targetAspect,
     falPicked,
     studioPicked,
     noUpscale,
@@ -235,7 +263,7 @@ export function useVideoExtendConfig(models) {
     trimDuration: trimDur,
     customOutpaintArgs: outpaintEntry?.is_custom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, minimaxRes, minimaxSeed, ltx25Res, ltx25Anchor, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, targetAspect, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, minimaxRes, minimaxSeed, ltx25Res, ltx25Anchor, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
 
   const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? CREDIT_VIDEO_OUTPAINT_MODELS.has(outpaintModel);
   const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? CREDIT_VIDEO_UPSCALE_MODELS.has(upscaleModel);
@@ -248,6 +276,7 @@ export function useVideoExtendConfig(models) {
     kind: 'video',
     engines: VID_ENGINES,
     mode, setMode,
+    ...target,
     prompt, setPrompt,
     engine, setEngine,
     outpaintOpt, setOutpaintOpt,
@@ -297,8 +326,10 @@ export function useVideoExtendConfig(models) {
     outpaintLabel: outpaintOpt,
     upscaleLabel: falUpscale,
     parameters,
+    // One file's /process parameters: an unpicked shape is that file's own nearest.
+    parametersFor: (meta) => (upscaleOnly ? parameters : { ...parameters, target_aspect: target.shapeFor(meta) }),
     byokOnlyFor(items) {
-      const needsOutpaintCloud = items.some((item) => !upscaleOnly && isNonSquare(item));
+      const needsOutpaintCloud = items.some((item) => !matchesTarget(item, target.shapeFor(item)));
       return (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);
     },
     validate() {
