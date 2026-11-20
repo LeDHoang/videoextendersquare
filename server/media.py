@@ -15,6 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
+from pipeline.utils import ASPECT_TOLERANCE, budget_size
 from server import media_store
 from server.settings import env_int
 
@@ -44,23 +45,27 @@ DEPTH_SUFFIX = "-depth"
 # Long side of the H.264 stereo proxy: 2048 px per eye, inside the Quest
 # H.264 decoder limits.
 STEREO_PROXY_LONG_SIDE = 4096
-# Left-eye 2D video renditions match the square web preview cap.
+# Pixel budgets: a budget names the side of a square with the same pixel
+# count, so a square keeps its size and other shapes keep their aspect.
+# The mono web preview and left-eye 2D video renditions: 2160² pixels.
 MONO_VIDEO_MAX_SIDE = 2160
-# VR rendition (<stem>-2k.mp4): 2048 px per eye, HEVC, for slow links in VR
-# (docs/vr-playback-review.md). Mono 2048 square ~8 Mbps; stereo ~14 Mbps.
+# VR rendition (<stem>-2k.mp4): 2048² pixels per eye, HEVC, for slow links in
+# VR (docs/vr-playback-review.md). Mono ~8 Mbps; stereo ~14 Mbps.
 VR2K_SUFFIX = "-2k.mp4"
 VR2K_EYE_SIDE = 2048
-# Left-eye 2D stills keep up to the square master size.
+# Left-eye 2D stills keep up to the square master's pixel count (3840²).
 MONO_IMAGE_MAX_SIDE = 3840
+# Explore tile videos and posters: short side 720, long side at most 16/9 of it.
+TILE_LONG_PER_SHORT = 16 / 9
 # WebP renditions of an image post, per stored image: name -> (sibling
 # suffix, max long side, max short side). Never upscaled. "tile" is the
 # Explore tile (preview/poster URL), "2d" the 2D player (a 1080p box either
-# way round), "vr" the VR bitmap (the headset texture is 2048 px). The "vr"
-# file is only written when it would be larger than the "2d" one.
+# way round), "vr" the VR bitmap (2048 px on the short side, as the master).
+# The "vr" file is only written when it would be larger than the "2d" one.
 IMAGE_RENDITIONS = {
-    "tile": ("-tile.webp", 720, 720),
+    "tile": ("-tile.webp", 1280, 720),
     "2d": ("-2d.webp", 1920, 1080),
-    "vr": ("-vr.webp", 2048, 2048),
+    "vr": ("-vr.webp", 4096, 2048),
 }
 IMAGE_RENDITION_QUALITY = 80
 # Published uploads and their derived siblings live here (see media_store).
@@ -364,9 +369,17 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
     elif stereo == "tb":
         vf_args = ["-vf", f"scale=-2:'2*trunc(min(ih,{STEREO_PROXY_LONG_SIDE})/2)'"]
     else:
-        target_h = min(height or 2160, 2160)
-        vf_args = ["-vf", f"scale=-2:{target_h}"] if target_h > 0 else []
-    # Capped CRF: a 2160 mono proxy peaks at 12 Mbps; a stereo proxy (up to
+        # *height* is the side of the pixel budget, capped at 2160²; never upscaled.
+        side = min(height or MONO_VIDEO_MAX_SIDE, MONO_VIDEO_MAX_SIDE)
+        info = probe_media_info(src) or {}
+        if side <= 0:
+            vf_args = []
+        elif info.get("width") and info.get("height"):
+            w, h = budget_size(info["width"], info["height"], side * side)
+            vf_args = ["-vf", f"scale={w}:{h},setsar=1"]
+        else:
+            vf_args = ["-vf", f"scale=-2:{side}"]
+    # Capped CRF: a 2160² mono proxy peaks at 12 Mbps; a stereo proxy (up to
     # 2048 px per eye, ~1.8x the pixels) at 20 Mbps.
     rate_args = ["-maxrate", "20M", "-bufsize", "40M"] if stereo else ["-maxrate", "12M", "-bufsize", "24M"]
 
@@ -401,23 +414,33 @@ def vr2k_path(src: str) -> Path:
 def vr2k_shrinks(width: int | None, height: int | None, stereo: str | None = None) -> bool:
     """True when the VR rendition of a width x height video would be smaller than it.
 
-    A source already VR2K_EYE_SIDE per eye or less would only be re-encoded
-    at its own size, so it gets no rendition. An unknown size counts as larger.
+    A source already within VR2K_EYE_SIDE² pixels per eye would only be
+    re-encoded at its own size, so it gets no rendition. An unknown size
+    counts as larger.
     """
     if not width or not height:
         return True
+    eyes = 2 if stereo in ("sbs", "tb") else 1
+    return width * height > eyes * VR2K_EYE_SIDE * VR2K_EYE_SIDE
+
+
+def vr2k_size(width: int, height: int, stereo: str | None = None) -> tuple[int, int]:
+    """Frame size of the VR rendition: each eye within VR2K_EYE_SIDE² pixels, even."""
+    budget = VR2K_EYE_SIDE * VR2K_EYE_SIDE
     if stereo == "sbs":
-        return width > 2 * VR2K_EYE_SIDE
+        w, h = budget_size(width // 2, height, budget)
+        return 2 * w, h
     if stereo == "tb":
-        return height > 2 * VR2K_EYE_SIDE
-    return max(width, height) > VR2K_EYE_SIDE
+        w, h = budget_size(width, height // 2, budget)
+        return w, 2 * h
+    return budget_size(width, height, budget)
 
 
 def make_vr2k_rendition(src: str, stereo: str | None = None) -> str | None:
     """Write the VR rendition of a video: HEVC (hvc1), faststart, 2048 px per eye.
 
-    Mono: long side at most VR2K_EYE_SIDE, ~8 Mbps peak. Stereo ("sbs" /
-    "tb"): the full frame, VR2K_EYE_SIDE per eye, ~14 Mbps peak. The player
+    Mono: at most VR2K_EYE_SIDE² pixels, ~8 Mbps peak. Stereo ("sbs" /
+    "tb"): the full frame, VR2K_EYE_SIDE² pixels per eye, ~14 Mbps peak. The player
     picks it over the master when the link is measured under 35 Mbps, in VR
     and in 2D (mono only).
     """
@@ -428,7 +451,11 @@ def make_vr2k_rendition(src: str, stereo: str | None = None) -> str | None:
             return str(dest)
     except OSError:
         return None
-    if stereo == "sbs":
+    info = probe_media_info(src) or {}
+    if info.get("width") and info.get("height"):
+        w, h = vr2k_size(info["width"], info["height"], stereo)
+        vf = f"scale={w}:{h},setsar=1"
+    elif stereo == "sbs":
         vf = f"scale='2*trunc(min(iw,{2 * VR2K_EYE_SIDE})/2)':-2"
     elif stereo == "tb":
         vf = f"scale=-2:'2*trunc(min(ih,{2 * VR2K_EYE_SIDE})/2)'"
@@ -736,10 +763,10 @@ def left_eye_crop(layout: str) -> str:
 
 
 def make_left_eye_rendition(src: str, layout: str) -> str | None:
-    """Write the square left eye of a stereo original next to it.
+    """Write the left eye of a stereo original next to it, in the eye's aspect.
 
-    Video: H.264 + AAC, faststart, at most MONO_VIDEO_MAX_SIDE square.
-    Image: same format as the source, at most MONO_IMAGE_MAX_SIDE square.
+    Video: H.264 + AAC, faststart, at most MONO_VIDEO_MAX_SIDE² pixels.
+    Image: same format as the source, at most MONO_IMAGE_MAX_SIDE² pixels.
     Returns the rendition path, or None when it could not be produced.
     """
     crop = left_eye_crop(layout)
@@ -753,8 +780,14 @@ def make_left_eye_rendition(src: str, layout: str) -> str | None:
     if Path(src).suffix.lstrip(".").lower() in IMAGE_EXTS:
         return _make_left_eye_still(src, layout, dest)
 
-    side = MONO_VIDEO_MAX_SIDE
-    vf = f"{crop},scale='2*trunc(min(iw,{side})/2)':'2*trunc(min(iw,{side})/2)'"
+    eye = _grid_source_size(src, crop)
+    if eye:
+        w, h = budget_size(*eye, MONO_VIDEO_MAX_SIDE * MONO_VIDEO_MAX_SIDE)
+        vf = f"{crop},scale={w}:{h},setsar=1"
+    else:
+        side = MONO_VIDEO_MAX_SIDE
+        vf = (f"{crop},scale='if(gte(iw,ih),2*trunc(min(iw,{side})/2),-2)'"
+              f":'if(gte(iw,ih),-2,2*trunc(min(ih,{side})/2))'")
     # Encode to a hidden temp file and rename: the feed treats any non-empty
     # -mono file as ready, and this runs in the background after publish.
     part = _part_path(dest)
@@ -789,8 +822,9 @@ def _make_left_eye_still(src: str, layout: str, dest: Path) -> str | None:
             w, h = img.size
             box = (0, 0, w // 2, h) if layout == "sbs" else (0, 0, w, h // 2)
             eye = img.crop(box)
-            if max(eye.size) > MONO_IMAGE_MAX_SIDE:
-                eye = eye.resize((MONO_IMAGE_MAX_SIDE, MONO_IMAGE_MAX_SIDE), Image.LANCZOS)
+            budget = MONO_IMAGE_MAX_SIDE * MONO_IMAGE_MAX_SIDE
+            if eye.width * eye.height > budget:
+                eye = eye.resize(budget_size(*eye.size, budget), Image.LANCZOS)
             fmt = (img.format or "").upper()
             ext = dest.suffix.lower()
             if ext in (".jpg", ".jpeg"):
@@ -815,59 +849,87 @@ def _sibling_is_fresh(sibling: Path, src: str) -> bool:
         return True
 
 
-def _sibling_matches_height(sibling: Path, height: int) -> bool:
-    """Check a cached sibling asset matches the target height (ffprobe).
+def tile_size(width: int, height: int, short: int = 720) -> tuple[int, int]:
+    """Explore tile size of a width x height frame: short side *short*, even.
 
-    Guarantees stale assets from an older resolution setting regenerate
-    instead of being served forever.
+    The long side stops at TILE_LONG_PER_SHORT x *short* (1280 for 720), so a
+    very wide or tall frame gets a smaller short side. Like the old
+    scale=-2:720, a small source is scaled up.
     """
-    cmd = [
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=height", "-of", "csv=p=0", str(sibling),
-    ]
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
-                           creationflags=_NO_WINDOW)
-        return int(p.stdout.strip()) == height
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return True  # unreadable — let the normal flow decide
+    long_ratio = max(width, height) / min(width, height)
+    long_side = min(short * TILE_LONG_PER_SHORT, short * long_ratio)
+    a, b = _even(round(long_side)), _even(round(long_side / long_ratio))
+    return (a, b) if width >= height else (b, a)
 
 
-def _sibling_is_square(sibling: Path) -> bool:
-    info = probe_media_info(str(sibling)) or {}
+def _even(n: int) -> int:
+    return max(2, n - n % 2)
+
+
+def _box_tile_filter(short: int) -> str:
+    """tile_size as an ffmpeg filter that needs no probe: fit the tile box either way round."""
+    long = round(short * TILE_LONG_PER_SHORT)
+    return (f"scale='if(gte(iw,ih),{long},{short})':'if(gte(iw,ih),{short},{long})'"
+            ":force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1")
+
+
+def _grid_source_size(src: str, crop: str | None = None) -> tuple[int, int] | None:
+    """Shown size of *src*, or of its left eye under a left_eye_crop *crop*."""
+    info = probe_media_info(src) or {}
     width, height = info.get("width"), info.get("height")
-    return not (width and height) or width == height
+    if not (width and height):
+        return None
+    if crop == left_eye_crop("sbs"):
+        return width // 2, height
+    if crop == left_eye_crop("tb"):
+        return width, height // 2
+    return width, height
 
 
-def _cached_grid_asset(dest: Path, src: str, height: int, crop: str | None) -> bool:
+def _cached_grid_asset(dest: Path, src: str, want: tuple[int, int] | None) -> bool:
     """True when a cached grid asset can be reused as is.
 
-    A *crop* (the left eye of a stereo original without its 2D rendition)
-    also requires a square cached file, so an older full 2:1 asset rebuilds.
+    It must be fresh and match *want*, the tile size of the source as shown
+    (the left eye under a crop): the same short side and an aspect within
+    ASPECT_TOLERANCE. An asset from an older size rule, or an older full 2:1
+    asset of a stereo original, rebuilds. Unknown sizes keep the cached file.
     """
     if not (dest.exists() and dest.stat().st_size > 0):
         return False
-    if not (_sibling_is_fresh(dest, src) and _sibling_matches_height(dest, height)):
+    if not _sibling_is_fresh(dest, src):
         return False
-    return crop is None or _sibling_is_square(dest)
+    info = probe_media_info(str(dest)) or {}
+    width, height = info.get("width"), info.get("height")
+    if not (want and width and height):
+        return True
+    return (min(width, height) == min(want)
+            and abs((width / height) / (want[0] / want[1]) - 1) <= ASPECT_TOLERANCE)
+
+
+def _tile_filter(src: str, height: int, crop: str | None) -> tuple[str, tuple[int, int] | None]:
+    """The ffmpeg filter of a grid tile of *src*, and its exact size when known."""
+    eye = _grid_source_size(src, crop)
+    want = tile_size(*eye, height) if eye else None
+    scale = f"scale={want[0]}:{want[1]},setsar=1" if want else f"scale=-2:{height}"
+    return (scale if crop is None else f"{crop},{scale}"), want
 
 
 def make_explore_preview(src: str, height: int = 720, crop: str | None = None) -> str | None:
     """Transcode a tiny muted H.264 preview for the Explore gallery grid.
 
-    720p, no audio, faststart — cheap enough to autoplay several tiles at
-    once. Cached on disk next to the source; regenerates when the source is
-    newer than the cached preview or the height setting changed. *crop* is an
-    ffmpeg crop filter applied first (see left_eye_crop).
+    720p (tile_size), no audio, faststart — cheap enough to autoplay several
+    tiles at once. Cached on disk next to the source; regenerates when the
+    source is newer than the cached preview or its size is stale. *crop* is
+    an ffmpeg crop filter applied first (see left_eye_crop).
     """
+    vf, want = _tile_filter(src, height, crop)
     try:
         dest = explore_preview_path(src)
-        if _cached_grid_asset(dest, src, height, crop):
+        if _cached_grid_asset(dest, src, want):
             return str(dest)
     except OSError:
         return None
 
-    vf = f"scale=-2:{height}" if crop is None else f"{crop},scale=-2:{height}"
     part = _part_path(dest)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
@@ -897,16 +959,16 @@ def make_explore_poster(src: str, height: int = 720, crop: str | None = None) ->
     decoded frame, no full re-encode), so the grid can paint instantly while
     preview videos generate in the background. Cached on disk next to the
     source; regenerates when the source is newer than the cached poster or
-    the height setting changed.
+    its size is stale. Sized like the preview (tile_size).
     """
+    vf, want = _tile_filter(src, height, crop)
     try:
         dest = explore_poster_path(src)
-        if _cached_grid_asset(dest, src, height, crop):
+        if _cached_grid_asset(dest, src, want):
             return str(dest)
     except OSError:
         return None
 
-    vf = f"scale=-2:{height}" if crop is None else f"{crop},scale=-2:{height}"
     part = _part_path(dest)
     # One MJPEG frame is a plain JPEG file; -f is needed for the .part name.
     jpeg_out = ["-q:v", "5", "-f", "mjpeg", str(part)]
@@ -1161,7 +1223,7 @@ def make_image_poster(src: str, height: int = 720) -> str | None:
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
         "-i", src,
-        "-vf", f"scale=-2:{height}",
+        "-vf", _box_tile_filter(height),
         "-q:v", "5",
         "-f", "mjpeg", str(part),
     ]
@@ -1187,7 +1249,9 @@ def image_rendition_size(size: tuple[int, int], name: str) -> tuple[int, int]:
     _suffix, long_max, short_max = IMAGE_RENDITIONS[name]
     w, h = size
     scale = min(1.0, long_max / max(w, h), short_max / max(1, min(w, h)))
-    return max(1, round(w * scale)), max(1, round(h * scale))
+    if scale == 1.0:
+        return w, h
+    return _even(round(w * scale)), _even(round(h * scale))
 
 
 def _srgb_image(img):

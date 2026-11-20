@@ -358,7 +358,8 @@ def budget_size(width, height, pixels):
     if width * height <= pixels:
         return _even_down(width), _even_down(height)
     scale = math.sqrt(pixels / (width * height))
-    return _even_down(math.floor(width * scale)), _even_down(math.floor(height * scale))
+    # The epsilon keeps a square exact: 2078 * sqrt(2048² / 2078²) is 2047.999...
+    return _even_down(math.floor(width * scale + 1e-6)), _even_down(math.floor(height * scale + 1e-6))
 
 
 def eye_aspect(width, height, layout="mono") -> float:

@@ -434,14 +434,23 @@ def test_a_video_of_2k_or_less_gets_no_vr_rendition(setup, tmp_path, monkeypatch
     assert [item["vr2k_url"] for item in payload] == [None]
 
 
-@pytest.mark.parametrize(("stereo", "scale", "maxrate"), [
-    (None, "2*trunc(min(iw,2048)/2)", "8M"),
-    ("sbs", "scale='2*trunc(min(iw,4096)/2)':-2", "14M"),
-    ("tb", "scale=-2:'2*trunc(min(ih,4096)/2)'", "14M"),
+@pytest.mark.parametrize(("stereo", "size", "scale", "maxrate"), [
+    (None, (4096, 4096), "scale=2048:2048,setsar=1", "8M"),
+    (None, (3840, 2160), "scale=2730:1536,setsar=1", "8M"),
+    (None, (2160, 3840), "scale=1536:2730,setsar=1", "8M"),
+    ("sbs", (8192, 4096), "scale=4096:2048,setsar=1", "14M"),
+    ("sbs", (7680, 2160), "scale=5460:1536,setsar=1", "14M"),
+    ("tb", (4096, 8192), "scale=2048:4096,setsar=1", "14M"),
+    # Unknown size (no ffprobe): the aspect-keeping expressions.
+    (None, None, "2*trunc(min(iw,2048)/2)", "8M"),
+    ("sbs", None, "scale='2*trunc(min(iw,4096)/2)':-2", "14M"),
+    ("tb", None, "scale=-2:'2*trunc(min(ih,4096)/2)'", "14M"),
 ])
-def test_vr_rendition_is_hevc_at_2048_per_eye(tmp_path, monkeypatch, stereo, scale, maxrate):
+def test_vr_rendition_is_hevc_at_2048_per_eye(tmp_path, monkeypatch, stereo, size, scale, maxrate):
     src = tmp_path / "clip.mp4"
     src.write_bytes(b"master")
+    info = {"duration_ms": 1000, "width": size[0], "height": size[1]} if size else None
+    monkeypatch.setattr(SM, "probe_media_info", lambda path: info)
     calls = []
 
     def run(cmd, **kwargs):
