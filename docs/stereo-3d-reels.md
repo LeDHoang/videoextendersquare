@@ -27,8 +27,8 @@ Let users post native stereoscopic video and images. Two layouts are supported, 
 |---|---|
 | `<stem>.<ext>` | Original stereo file. VR source (`stereo_url`). |
 | `<stem>-preview.mp4` | H.264 VR proxy. Made only when the source is not H.264 **or** its long side is over 4096. Capped at 4096 on the long side: SBS 4096×2048, TB 2048×4096. |
-| `<stem>-mono.mp4` / `<stem>-mono.<img ext>` | Left-eye square at most 2160². SBS: `crop=iw/2:ih:0:0`. TB: `crop=iw:ih/2:0:0`. This is the 2D `url`. |
-| `<stem>-mono-explore.mp4`, `<stem>-mono-poster.jpg` | Built by the existing explore preview and poster helpers **run on the mono file**, so they are square automatically. |
+| `<stem>-mono.mp4` / `<stem>-mono.<img ext>` | Left eye at its own aspect (1:1, 16:9 or 9:16), within 2160² pixels. SBS: `crop=iw/2:ih:0:0`. TB: `crop=iw:ih/2:0:0`. This is the 2D `url`. |
+| `<stem>-mono-explore.mp4`, `<stem>-mono-poster.jpg` | Built by the existing explore preview and poster helpers **run on the mono file**, so they keep the eye aspect automatically. |
 
 API fields on every post, card and feed item:
 - **`url`, `preview_url`, `poster_url`:** mono assets. Every 2D surface keeps working unchanged.

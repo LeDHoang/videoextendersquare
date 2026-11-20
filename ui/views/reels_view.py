@@ -235,7 +235,7 @@ def render(ctx: dict) -> None:
             st.info(f"🔗 Active Media Tunnel: `{st.session_state.get('sx.reels.media_tunnel')}`")
 
         st.divider()
-        st.caption("Re-encode all HEVC 4K master videos into ultra-sharp 3840×3840 H.264 streams for WebXR & browser playback.")
+        st.caption("Re-encode all HEVC 4K master videos into H.264 streams of at most 2160² pixels, in each video's own shape, for WebXR & browser playback.")
         if st.button("⚡ FORCE RE-TRANSCODE ALL 4K H.264 PROXIES", key="sx.reels.force_retranscode"):
             with st.spinner("Force re-encoding all 4K H.264 streams…"):
                 for item in raw_videos:
@@ -258,7 +258,7 @@ def render(ctx: dict) -> None:
         )
         return
 
-    # Render HTML5 1:1 Square Reels Component with 4K Master URLs
+    # Render HTML5 Reels Component (1:1, 16:9 and 9:16) with 4K Master URLs
     # Stable cache buster: uses webxr_vr.js file modification time.
     # Only changes when the JS file itself is updated → no unnecessary iframe reloads.
     vr_js_path = Path(__file__).parent.parent / "assets" / "webxr_vr.js"

@@ -2684,7 +2684,8 @@ def _gen_explore_assets(
         # The publish job is building these; the tile keeps its fallback.
         return rel, None, None, "pending"
     # A 3D original's grid assets come from its left-eye 2D rendition, so
-    # tiles stay square (the rendition only exists for stereo posts).
+    # tiles show one eye at its own aspect (the rendition only exists for
+    # stereo posts).
     # Before that rendition exists, crop the left eye of the original.
     mono, _stereo = SM.stereo_paths(str(p), files)
     crop = None
