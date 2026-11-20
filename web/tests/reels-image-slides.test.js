@@ -17,7 +17,10 @@ function block(name) {
 function fakeElement() {
   const element = {
     hidden: false,
-    style: {},
+    style: {
+      setProperty(name, value) { this[name] = String(value); },
+      removeProperty(name) { delete this[name]; },
+    },
     children: [],
     attributes: {},
     classList: {
@@ -49,6 +52,7 @@ function loadPlayer(items, { autoNext = true } = {}) {
     set(value) { this.setAttribute('src', value); },
   });
   image.getBoundingClientRect = () => ({ left: 0, right: 300 });
+  const backdrop = fakeElement();
   const wrap = fakeElement();
   wrap.getBoundingClientRect = () => ({ left: 0, right: 300 });
   const elements = { slideBar: fakeElement(), slidePrevBtn: fakeElement(), slideNextBtn: fakeElement() };
@@ -75,6 +79,8 @@ function loadPlayer(items, { autoNext = true } = {}) {
     blobUrlMap: {},
     blobSourceMap: {},
     reelsImage: image,
+    reelsBackdrop: backdrop,
+    frame: fakeElement(),
     videoWrap: wrap,
     isImageItem: (item) => !!item && item.media_type === 'image',
     resolveItemUrl: (item) => item.url,
@@ -85,7 +91,7 @@ function loadPlayer(items, { autoNext = true } = {}) {
     nextVideo: (reason) => calls.next.push(reason),
   };
   vm.createContext(context);
-  vm.runInContext(`${block('reels-stereo')}\n${block('reels-image-state')}\n${block('reels-image-slides')}
+  vm.runInContext(`${block('reels-stereo')}\n${block('reels-2d-fit')}\n${block('reels-image-state')}\n${block('reels-image-slides')}
     this.player = {
       start(item) { resetImagePost(item); showImageSlide(0); armImageTimer(); },
       pause: clearImageTimer,
@@ -108,7 +114,7 @@ function loadPlayer(items, { autoNext = true } = {}) {
     }
     now = until;
   };
-  return { player: context.player, advance, calls, image };
+  return { player: context.player, advance, calls, image, backdrop };
 }
 
 const post = (count, extra = {}) => ({
@@ -200,4 +206,16 @@ test('a post\'s own dwell_ms overrides the 15s default; LOOP replays from the fi
   assert.equal(calls.started, 1);
   assert.equal(player.slide(), 0);
   assert.equal(player.running(), true);
+});
+
+test('each slide carries its own shape and blurs the image on screen into the backdrop', () => {
+  const mixed = post(2);
+  mixed.images[0].aspect = 16 / 9;
+  const { player, image, backdrop } = loadPlayer([mixed]);
+  player.start(mixed);
+  assert.equal(image.style['--sx-media-ar'], String(16 / 9));
+  assert.equal(backdrop.style['--sx-backdrop'], 'url("/media/a0.png")');
+  player.step(1);
+  assert.equal(image.style['--sx-media-ar'], undefined);
+  assert.equal(backdrop.style['--sx-backdrop'], 'url("/media/a1.png")');
 });

@@ -29,6 +29,28 @@ standalone page at `/api/reels/player`.
 - On phones (`max-width:700px`) the PREV/NEXT chevrons sit on the left edge (the right edge is the action bar) and the
   comments sheet uses the whole frame.
 
+## Non-square posts (1:1, 16:9, 9:16)
+
+- **The slot stays square** (docked, phone and fs-docked). Video and images are `width:100%; height:100%;
+  object-fit:contain`, so the whole frame shows and nothing is cropped. Full-bleed fullscreen does the same over the
+  whole viewport. A 1:1 post fills the square exactly as before.
+- **Blurred backdrop.** `#reelsBackdrop` is the first child of `#videoWrap` (z-index -1 inside the wrap, so above its
+  black and below the media). Its `::before` paints `var(--sx-backdrop)` with `cover`, a CSS blur and dimming. JS sets
+  `--sx-backdrop` to the current image slide URL, or to the video's `poster_url`. No extra element per slide and no
+  canvas. The video path loads the poster once per post (the player did not fetch posters before).
+- **`--sx-media-ar`** is set on `#reelsFrame` once per post from `item.aspect` (slide 0, eye-adjusted, default 1) in
+  `loadVideo` via `setPostAspect()`. In a mixed slideshow the post keeps slide 0's shape and each image slide sets its
+  own `aspect` on `#reelsImage` (that slide contain-fits with letterbox). The helpers live between the
+  `<reels-2d-fit>` markers.
+- **Stereo crop.** Contain would show both eyes, so under `.stereo-crop-sbs/-tb` the media becomes an absolutely
+  centred box at the eye aspect (from `--sx-media-ar`) with `object-fit:cover` and the existing `object-position`
+  picking the left/top eye. Three sizings: percentages in the square slot, viewport units in full-bleed fullscreen
+  (frame has `.sx-fs-active`), and an `#sxReelsHost.sx-fs-docked` override back to the square sizing. The backdrop
+  uses the same eye via `background-position`.
+- **Pan is inert.** The media never overflows the frame, so `getMaxPan()` returns 0. The pan code stays in place.
+- **Skeleton stays square.** It matches the square slot, and no aspect is known before the payload arrives.
+- **No `@container` and no `@supports` in `reels.html`.** `_scope_css` drops other @-rules.
+
 ## Things that bite
 
 - `server/routers/reels.py::_scope_css` is a naive `}` splitter that prefixes every rule with `#sxReelsRoot`. Keep new CSS

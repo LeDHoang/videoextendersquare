@@ -92,8 +92,8 @@
      element itself, so the app fullscreens the frame's PARENT (host div
      in the SPA, body standalone) and centers the frame inside it — see
      fullBtn below. These rules stay as fallback. */
-  /* Fullscreen: Takes full height of the viewport (100dvh) with no top/bottom black bars.
-     The video maintains 1:1 square aspect ratio and can be panned horizontally left/right.
+  /* Fullscreen: the frame takes the whole viewport (100dvh) and the media contain-fits
+     inside it over the blurred backdrop: nothing is cropped so there is nothing to pan.
      The top bar, action rail, timeline, and overlays remain pinned to the screen edges. */
   .reels-phone-frame:fullscreen,
   .reels-phone-frame:-webkit-full-screen,
@@ -145,17 +145,14 @@
   .reels-phone-frame:-webkit-full-screen #reelsImage,
   .reels-phone-frame.sx-pseudo-fullscreen #reelsVideo,
   .reels-phone-frame.sx-pseudo-fullscreen #reelsImage {
+    width: 100% !important;
     height: 100% !important;
-    width: auto !important;
-    aspect-ratio: 1 / 1 !important;
     flex: 0 0 auto !important;
     min-width: 0 !important;
-    min-height: 100% !important;
+    min-height: 0 !important;
     max-width: none !important;
     max-height: none !important;
-    object-fit: cover !important;
-    will-change: transform;
-    cursor: grab;
+    object-fit: contain !important;
     user-select: none;
     -webkit-user-select: none;
   }
@@ -284,24 +281,46 @@
     pointer-events: none;
     z-index: 1;
   }
+  /* The slot stays square and the media contain-fits inside it (any shape: 1:1 16:9
+     9:16 or a native odd ratio). The letterbox shows the backdrop below. */
   .reels-video-wrap video {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
-    background: #000;
+    background: transparent;
   }
-  /* Single image tiles share the 1:1 frame; the <video> hides underneath. */
+  /* Single image tiles share the frame; the <video> hides underneath. */
   .reels-video-wrap img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
-    background: #000;
+    background: transparent;
+  }
+  /* Backdrop: the post's poster (or the image on screen) blurred and dimmed under the
+     media so the letterbox is not a flat black band. z-index -1 paints it above the
+     wrap's own black but below the media. Its image comes from --sx-backdrop which
+     setBackdrop() sets: the image on screen or the video's small poster. */
+  .reels-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .reels-backdrop::before {
+    content: '';
+    position: absolute;
+    inset: -10%;
+    background: var(--sx-backdrop, none) center / cover no-repeat;
+    filter: blur(28px) brightness(0.45);
   }
   /* Stereo posts without a left-eye 2D rendition yet play the raw stereo
-     file in 2D: cover-fit in the 1:1 frame, anchored to the left eye
-     (left half of side-by-side, top half of top-bottom). */
+     file in 2D. The media becomes an inner box at the eye aspect (--sx-media-ar
+     is eye-adjusted) contain-fit in the slot and cover-fit inside it anchored to
+     the left eye (left half of side-by-side / top half of top-bottom): the
+     left eye shows whole and undistorted. */
   .reels-video-wrap.stereo-crop-sbs video,
   .reels-video-wrap.stereo-crop-sbs img {
     object-position: 0% 50% !important;
@@ -309,6 +328,34 @@
   .reels-video-wrap.stereo-crop-tb video,
   .reels-video-wrap.stereo-crop-tb img {
     object-position: 50% 0% !important;
+  }
+  .reels-video-wrap.stereo-crop-sbs .reels-backdrop::before {
+    background-position: 0% 50%;
+  }
+  .reels-video-wrap.stereo-crop-tb .reels-backdrop::before {
+    background-position: 50% 0%;
+  }
+  /* The square slot: the eye box is 100% on its long side. */
+  #videoWrap.stereo-crop-sbs #reelsVideo,
+  #videoWrap.stereo-crop-sbs #reelsImage,
+  #videoWrap.stereo-crop-tb #reelsVideo,
+  #videoWrap.stereo-crop-tb #reelsImage {
+    position: absolute !important;
+    inset: 0 !important;
+    margin: auto !important;
+    width: calc(100% * min(1, var(--sx-media-ar, 1))) !important;
+    height: calc(100% / max(1, var(--sx-media-ar, 1))) !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    object-fit: cover !important;
+  }
+  /* Full-bleed fullscreen: the slot is the viewport (less the app's bottom nav). */
+  .reels-phone-frame.sx-fs-active #videoWrap.stereo-crop-sbs #reelsVideo,
+  .reels-phone-frame.sx-fs-active #videoWrap.stereo-crop-sbs #reelsImage,
+  .reels-phone-frame.sx-fs-active #videoWrap.stereo-crop-tb #reelsVideo,
+  .reels-phone-frame.sx-fs-active #videoWrap.stereo-crop-tb #reelsImage {
+    width: min(100vw, calc((100dvh - var(--sx-bottom-nav, 0px)) * var(--sx-media-ar, 1))) !important;
+    height: min(calc(100dvh - var(--sx-bottom-nav, 0px)), calc(100vw / var(--sx-media-ar, 1))) !important;
   }
   /* Image reels have no timeline — the scrubber hides during the dwell. */
   .reels-progress-wrap.image-hidden {
@@ -2164,10 +2211,18 @@
     overflow: hidden !important;
     overflow: clip !important;
   }
-  /* The square already fits the frame so there is nothing to pan. */
+  /* The media contain-fits the square so there is nothing to pan. */
   #sxReelsHost.sx-fs-docked #reelsVideo,
   #sxReelsHost.sx-fs-docked #reelsImage {
     cursor: auto;
+  }
+  /* The slot is square again: the stereo eye box goes back to the square sizes. */
+  #sxReelsHost.sx-fs-docked #videoWrap.stereo-crop-sbs #reelsVideo,
+  #sxReelsHost.sx-fs-docked #videoWrap.stereo-crop-sbs #reelsImage,
+  #sxReelsHost.sx-fs-docked #videoWrap.stereo-crop-tb #reelsVideo,
+  #sxReelsHost.sx-fs-docked #videoWrap.stereo-crop-tb #reelsImage {
+    width: calc(100% * min(1, var(--sx-media-ar, 1))) !important;
+    height: calc(100% / max(1, var(--sx-media-ar, 1))) !important;
   }
   #sxReelsHost.sx-fs-docked .reels-actions {
     right: 14px !important;
@@ -2238,6 +2293,7 @@
   </div>
 
   <div class="reels-video-wrap" id="videoWrap">
+    <div class="reels-backdrop" id="reelsBackdrop" aria-hidden="true"></div>
     <video id="reelsVideo" playsinline autoplay muted preload="auto" crossorigin="anonymous"></video>
     <img id="reelsImage" alt="" style="display:none;" />
     <div class="reels-slide-bar" id="slideBar" role="progressbar" aria-label="Image post progress" hidden></div>
@@ -2635,6 +2691,7 @@
     const frame = document.getElementById('reelsFrame');
     const video = document.getElementById('reelsVideo');
     const reelsImage = document.getElementById('reelsImage');
+    const reelsBackdrop = document.getElementById('reelsBackdrop');
     const videoWrap = document.getElementById('videoWrap');
     const packVisualCanvas = document.getElementById('packVisualCanvas');
     const packModeBar = document.getElementById('packModeBar');
@@ -2986,6 +3043,30 @@
     }
     // </reels-stereo>
 
+    // <reels-2d-fit>
+    // The 2D slot stays square and the media contain-fits inside it
+    // (docs/reels-2d-player-layout.md). --sx-media-ar on the frame is the
+    // post's shape: the payload's `aspect` (slide 0, eye-adjusted for
+    // stereo, 1 when unknown), set once per post. Only the stereo eye box
+    // reads it; an image slide of another shape carries its own on #reelsImage.
+    function aspectOf(entry) {
+      const aspect = Number(entry && entry.aspect);
+      return aspect > 0 ? aspect : 0;
+    }
+
+    function setPostAspect(item) {
+      if (frame) frame.style.setProperty('--sx-media-ar', String(aspectOf(item) || 1));
+    }
+
+    // The blurred backdrop under the media shows the image on screen, or a
+    // video post's poster (one small request per video post).
+    function setBackdrop(url) {
+      if (!reelsBackdrop) return;
+      if (url) reelsBackdrop.style.setProperty('--sx-backdrop', 'url("' + String(url).replace(/["\\\n]/g, encodeURIComponent) + '")');
+      else reelsBackdrop.style.removeProperty('--sx-backdrop');
+    }
+    // </reels-2d-fit>
+
     // <reels-image-slides>
     // Every image of an image post, in order (older payloads carry only url).
     function imageSlidesFor(item) {
@@ -3024,7 +3105,11 @@
       imageSlideIndex = Math.max(0, Math.min(imagePostSlides.length - 1, slideIndex));
       const url = resolveSlideUrl(item, imageSlideIndex);
       applyEntryStereo(playbackFor(imagePostSlides[imageSlideIndex], item));
+      const slideAspect = aspectOf(imagePostSlides[imageSlideIndex]);
+      if (slideAspect) reelsImage.style.setProperty('--sx-media-ar', String(slideAspect));
+      else reelsImage.style.removeProperty('--sx-media-ar');
       if (url && reelsImage.getAttribute('src') !== url) reelsImage.src = url;
+      setBackdrop(url);
       const label = (item && (item.title || item.filename)) || 'Image post';
       reelsImage.alt = imagePostSlides.length > 1
         ? label + ' — image ' + (imageSlideIndex + 1) + ' of ' + imagePostSlides.length
@@ -6155,6 +6240,8 @@
       pruneBlobCache(idx);
 
       const item = videoData[idx];
+      setPostAspect(item);
+      setBackdrop('');
       // Only a pack shows the chip, as its place in the pack; a feed reel's folder is not shown.
       metaFolder.hidden = !isPackMode;
       if (isPackMode) {
@@ -6221,6 +6308,7 @@
       const playUrl = resolveItemUrl({ url: playback.url, tunnel_url: item.tunnel_url });
       const itemUrl = blobFor(idx, playUrl) || playUrl;
       applyEntryStereo(playback);
+      setBackdrop(resolveItemUrl({ url: item.poster_url, tunnel_url: item.tunnel_url }));
       video.src = itemUrl;
       setCaptionTrack(item);
       noteSwitchStart(itemUrl);

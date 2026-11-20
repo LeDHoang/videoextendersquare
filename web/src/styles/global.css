@@ -3538,7 +3538,8 @@ code {
 
 /* Reels fullscreen host: the browser forces the :fullscreen element's
    own box, so the player fullscreens this wrapper (plain black stage)
-   and the 1:1 frame centers inside it via normal flex layout. */
+   and the frame centers inside it via normal flex layout. The media
+   contain-fits the frame over its blurred backdrop (ui/assets/reels.html). */
 #sxReelsHost:fullscreen,
 #sxReelsHost:-webkit-full-screen,
 #sxReelsHost.sx-pseudo-fullscreen {
@@ -3594,17 +3595,14 @@ code {
 #sxReelsHost:-webkit-full-screen #reelsImage,
 #sxReelsHost.sx-pseudo-fullscreen #reelsVideo,
 #sxReelsHost.sx-pseudo-fullscreen #reelsImage {
+  width: 100% !important;
   height: 100% !important;
-  width: auto !important;
-  aspect-ratio: 1 / 1 !important;
   flex: 0 0 auto !important;
   min-width: 0 !important;
-  min-height: 100% !important;
+  min-height: 0 !important;
   max-width: none !important;
   max-height: none !important;
-  object-fit: cover !important;
-  will-change: transform;
-  cursor: grab;
+  object-fit: contain !important;
   user-select: none;
   -webkit-user-select: none;
 }
