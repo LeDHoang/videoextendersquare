@@ -2971,8 +2971,9 @@
     }
 
     // Record what the element now shows and tell the VR engine how to
-    // sample it; in 2D a raw stereo file is cropped to the left eye.
-    function applyEntryStereo(playback) {
+    // sample it; in 2D a raw stereo file is cropped to the left eye. The
+    // post's aspect (eye-adjusted) shapes the VR screen for the whole post.
+    function applyEntryStereo(playback, item) {
       const crop = wantsStereoSource() ? '' : (playback.crop || '');
       activeVisualLayout = playback.layout;
       activeCropLayout = crop;
@@ -2982,6 +2983,9 @@
       }
       if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceStereo) {
         WebXRVR.setSourceStereo(activeVisualLayout);
+      }
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceAspect) {
+        WebXRVR.setSourceAspect(item && item.aspect);
       }
     }
     // </reels-stereo>
@@ -3023,7 +3027,7 @@
       if (!reelsImage || !imagePostSlides.length) return;
       imageSlideIndex = Math.max(0, Math.min(imagePostSlides.length - 1, slideIndex));
       const url = resolveSlideUrl(item, imageSlideIndex);
-      applyEntryStereo(playbackFor(imagePostSlides[imageSlideIndex], item));
+      applyEntryStereo(playbackFor(imagePostSlides[imageSlideIndex], item), item);
       if (url && reelsImage.getAttribute('src') !== url) reelsImage.src = url;
       const label = (item && (item.title || item.filename)) || 'Image post';
       reelsImage.alt = imagePostSlides.length > 1
@@ -3501,7 +3505,7 @@
       const playUrl = resolveItemUrl({ url: playback.url, tunnel_url: item.tunnel_url });
       const nextUrl = blobFor(idx, playUrl) || playUrl;
       if (video.getAttribute('src') === nextUrl) {
-        applyEntryStereo(playback);
+        applyEntryStereo(playback, item);
         // The VR button empties the preloader, and the next reel's variant
         // follows the VR state: re-warm unless it already holds the right one.
         const next = videoData[idx + 1];
@@ -3514,7 +3518,7 @@
       const resumeAt = typeof resumeOverride === 'number' ? resumeOverride : (video.currentTime || 0);
       stereoSwapResumeAt = resumeAt;
       const wasPlaying = !video.paused;
-      applyEntryStereo(playback);
+      applyEntryStereo(playback, item);
       video.src = nextUrl;
       video.muted = isMuted;
       // The element has the autoplay attribute, which would restart a paused
@@ -6220,7 +6224,7 @@
       const playback = playbackFor(item, item);
       const playUrl = resolveItemUrl({ url: playback.url, tunnel_url: item.tunnel_url });
       const itemUrl = blobFor(idx, playUrl) || playUrl;
-      applyEntryStereo(playback);
+      applyEntryStereo(playback, item);
       video.src = itemUrl;
       setCaptionTrack(item);
       noteSwitchStart(itemUrl);

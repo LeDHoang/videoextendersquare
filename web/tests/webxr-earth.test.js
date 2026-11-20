@@ -6287,6 +6287,51 @@ test('?vrstereoeye lowers the per-eye proxy for A/B', () => {
   renderer.stopPreview();
 });
 
+test('a 16:9 SBS source gets 16:9 eyes, scaled down to the GPU texture limit', () => {
+  // 7680x2160 SBS: 3840x2160 eyes. Two 3640x2048 eyes exceed the mock's 4096 limit.
+  const { renderer, api, frame } = stereoHarness(stereoVideo('sbs-169', 'sbs', 7680, 2160));
+  frame();
+  assert.equal(renderer.getScreenAspect(), 16 / 9);
+  assert.equal(api.getStereoState().canvas.join(','), '4096,1152');
+  renderer.stopPreview();
+});
+
+test('the host aspect hint shapes the screen and the mono proxy for the whole post', () => {
+  const { renderer, api, frame, setSource } = stereoHarness(stereoVideo('hint-1', 'mono', 1920, 1080));
+  // 0.5626 snaps to exactly 9:16; the hint wins over the element's 16:9 frame.
+  renderer.setSourceAspect(0.5626);
+  frame();
+  assert.equal(renderer.getScreenAspect(), 9 / 16);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '2048,3640');
+  // The same source keeps its shape even if the hint changes mid-post.
+  renderer.setSourceAspect(1);
+  frame();
+  assert.equal(renderer.getScreenAspect(), 9 / 16);
+  // A new source with no hint falls back to its own frame size.
+  renderer.setSourceAspect(null);
+  setSource(stereoVideo('hint-2', 'mono', 1920, 1080));
+  frame();
+  assert.equal(renderer.getScreenAspect(), 16 / 9);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '3640,2048');
+  // A square reel restores the square screen and proxy.
+  setSource(stereoVideo('hint-3', 'mono', 2160, 2160));
+  frame();
+  assert.equal(renderer.getScreenAspect(), 1);
+  assert.equal(api.getSceneInfo().screen.mapSize.join(','), '2048,2048');
+  renderer.stopPreview();
+});
+
+test('proxy sizes keep the short side at the cap and the long side at 4096', () => {
+  const api = loadRenderer().__test;
+  assert.equal(api.proxySizeFor(1, 2048).join(','), '2048,2048');
+  assert.equal(api.proxySizeFor(16 / 9, 2048).join(','), '3640,2048');
+  assert.equal(api.proxySizeFor(9 / 16, 2048).join(','), '2048,3640');
+  // 21:9 is long-side bound: 4096 wide, short side 4096 * 9 / 21.
+  assert.equal(api.proxySizeFor(21 / 9, 2048).join(','), '4096,1756');
+  assert.equal(api.stereoProxySize('sbs', 1).join(','), '4096,2048');
+  assert.equal(api.stereoProxySize('tb', 1).join(','), '2048,4096');
+});
+
 // ─── Direct VideoTexture default (v8.24) ────────────────────────────────
 
 function directHarness(initialSource) {

@@ -184,3 +184,20 @@ test('no curved vertex bends past a quarter turn on any shape', () => {
     }
   }
 });
+
+test('the square overlay maps to the central short-side square of any screen', () => {
+  const api = loadEngine().__test;
+  const uv = (u, v, a) => [...api.overlayUV(u, v, a)].map((x) => Number(x.toFixed(9)));
+  // 1:1 is the identity.
+  assert.deepEqual(uv(0.2, 0.7, 1), [0.2, 0.7]);
+  // 16:9: the centre column keeps v; the square's side edges land on u = 0 and 1.
+  assert.deepEqual(uv(0.5, 0.3, 16 / 9), [0.5, 0.3]);
+  assert.deepEqual(uv(0.5 - 0.5 * 9 / 16, 0.3, 16 / 9), [0, 0.3]);
+  assert.deepEqual(uv(0.5 + 0.5 * 9 / 16, 0.3, 16 / 9), [1, 0.3]);
+  // Outside the square is beyond [0, 1]: a miss for overlay hits.
+  assert.ok(api.overlayUV(0.05, 0.5, 16 / 9)[0] < 0);
+  // 9:16: the square spans the full width, centred vertically.
+  assert.deepEqual(uv(0.3, 0.5 + 0.5 * 9 / 16, 9 / 16), [0.3, 1]);
+  assert.deepEqual(uv(0.3, 0.5 - 0.5 * 9 / 16, 9 / 16), [0.3, 0]);
+  assert.ok(api.overlayUV(0.3, 0.95, 9 / 16)[1] > 1);
+});
