@@ -549,7 +549,7 @@ describe('UploadPage — image extender parity', () => {
       outpaintModel: 'fal-ai/image-apps-v2/outpaint',
       customOutpaintArgs: {},
       customUpscaleArgs: {},
-    })));
+    }), { target_aspect: '1:1' })); // Named shape: the server keeps the file's own shape.
   });
 
   it('shows the custom image outpaint panel when the sidebar sets one', async () => {

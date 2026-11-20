@@ -136,7 +136,9 @@ export function useImageExtendConfig(models) {
     upscaleLabel: falModel,
     parameters,
     // One file's /process parameters: an unpicked shape is that file's own nearest.
-    parametersFor: (meta) => (upscaleOnly ? parameters : { ...parameters, target_aspect: target.shapeFor(meta) }),
+    // Keep shape sends the file's nearest too: upscale_only with a named shape is
+    // the server's native-shape upscale (without one it squares, the legacy API).
+    parametersFor: (meta) => ({ ...parameters, target_aspect: upscaleOnly ? nearestOf(meta) : target.shapeFor(meta) }),
     byokOnlyFor(items) {
       const needsOutpaintCloud = items.some((item) => !matchesTarget(item, target.shapeFor(item)));
       return (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);
@@ -327,7 +329,9 @@ export function useVideoExtendConfig(models) {
     upscaleLabel: falUpscale,
     parameters,
     // One file's /process parameters: an unpicked shape is that file's own nearest.
-    parametersFor: (meta) => (upscaleOnly ? parameters : { ...parameters, target_aspect: target.shapeFor(meta) }),
+    // Keep shape sends the file's nearest too: upscale_only with a named shape is
+    // the server's native-shape upscale (without one it squares, the legacy API).
+    parametersFor: (meta) => ({ ...parameters, target_aspect: upscaleOnly ? nearestOf(meta) : target.shapeFor(meta) }),
     byokOnlyFor(items) {
       const needsOutpaintCloud = items.some((item) => !matchesTarget(item, target.shapeFor(item)));
       return (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);

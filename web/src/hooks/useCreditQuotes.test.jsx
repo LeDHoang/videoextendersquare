@@ -75,6 +75,21 @@ describe('useCreditQuotes', () => {
     expect(mocks.estimate.mock.calls.at(-1)[2]).toEqual(typed);
   });
 
+  it('prices each item with its own parameters and re-prices when one changes', async () => {
+    const wide = { ...BASE, target_aspect: '16:9' };
+    const tall = { ...BASE, target_aspect: '9:16' };
+    const { rerender } = renderHook((props) => useCreditQuotes(props), {
+      initialProps: { kind: 'video', items: [{ stage_id: 'st-1', parameters: wide }, { stage_id: 'st-2', parameters: tall }], parameters: BASE, enabled: true },
+    });
+    await settle();
+    expect(mocks.estimate.mock.calls.map((call) => [call[1], call[2]])).toEqual([['st-1', wide], ['st-2', tall]]);
+
+    rerender({ kind: 'video', items: [{ stage_id: 'st-1', parameters: wide }, { stage_id: 'st-2', parameters: wide }], parameters: BASE, enabled: true });
+    await settle();
+    expect(mocks.estimate).toHaveBeenCalledTimes(4);
+    expect(mocks.estimate.mock.calls.at(-1)[2]).toEqual(wide);
+  });
+
   it('retries by itself after a rate limit', async () => {
     mocks.estimate.mockRejectedValueOnce(Object.assign(new Error('slow down'), { status: 429 }));
     const { result } = renderHook((props) => useCreditQuotes(props), {
