@@ -76,6 +76,32 @@ def test_vr2k_size_budgets_each_eye(size, stereo, out):
     assert media.vr2k_size(*size, stereo) == out
 
 
+@pytest.mark.parametrize("size, scale", [
+    ((3840, 3840), "scale=2160:2160,setsar=1"),
+    # A 2048² master stays 2048² (the old scale=-2:2160 scaled it up to 2160²).
+    ((2048, 2048), "scale=2048:2048,setsar=1"),
+    ((3840, 2160), "scale=2880:1620,setsar=1"),
+    ((2160, 3840), "scale=1620:2880,setsar=1"),
+    ((1920, 1080), "scale=1920:1080,setsar=1"),
+])
+def test_web_preview_scale_per_shape(tmp_path, monkeypatch, size, scale):
+    cmds = []
+
+    def run(cmd, **_kwargs):
+        cmds.append(cmd)
+        Path(cmd[-1]).write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    src = tmp_path / "reel.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(media, "get_video_codec", lambda path: "hevc")
+    monkeypatch.setattr(media, "probe_media_info", lambda path: {"duration_ms": 1000, "width": size[0], "height": size[1]})
+    monkeypatch.setattr(media.subprocess, "run", run)
+    monkeypatch.setattr(media, "_commit_part", lambda part, dest: str(dest))
+    assert media.make_web_preview(str(src))
+    assert cmds[0][cmds[0].index("-vf") + 1] == scale
+
+
 # ─── Encodes ────────────────────────────────────────────────────────────────
 
 
