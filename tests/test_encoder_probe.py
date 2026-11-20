@@ -1,7 +1,7 @@
 """ENCODER probe / pick_encoder must smoke-test at the real master size.
 
 A 64x64 frame never reaches hardware encoder resolution/level limits, so the
-probe could report an encoder that then rejects every 3840x3840 master. ffmpeg
+probe could report an encoder that then rejects every 4096x2048 master. ffmpeg
 is never required here: tooling.run and shutil.which are mocked.
 """
 
@@ -59,19 +59,21 @@ def fake_ffmpeg(monkeypatch):
     return state
 
 
-def test_smoke_encode_encodes_one_master_size_frame(fake_ffmpeg):
+def test_smoke_encode_encodes_one_frame_per_master_orientation(fake_ffmpeg):
     name, opts = tooling.HEVC_CANDIDATES[0]
 
     assert tooling.smoke_encode(name, opts) is True
 
-    (smoke,) = fake_ffmpeg["smokes"]
-    args = smoke["args"]
-    assert tooling.SMOKE_ENCODE_SIZE == "3840x3840"
-    assert "testsrc=d=0.1:s=3840x3840" in args
-    i = args.index("-c:v")
-    assert args[i:i + 2 + len(opts)] == ["-c:v", name, *opts]
-    assert args[-5:] == ["-frames:v", "1", "-f", "null", "-"]
-    assert smoke["timeout"] == 40
+    wide, tall = fake_ffmpeg["smokes"]
+    assert tooling.SMOKE_ENCODE_SIZES == ("4096x2048", "2048x4096")
+    assert "testsrc=d=0.1:s=4096x2048" in wide["args"]
+    assert "testsrc=d=0.1:s=2048x4096" in tall["args"]
+    for smoke in (wide, tall):
+        args = smoke["args"]
+        i = args.index("-c:v")
+        assert args[i:i + 2 + len(opts)] == ["-c:v", name, *opts]
+        assert args[-5:] == ["-frames:v", "1", "-f", "null", "-"]
+        assert smoke["timeout"] == 40
 
 
 def test_smoke_encode_fails_on_error_or_timeout(fake_ffmpeg, monkeypatch):
@@ -88,11 +90,13 @@ def test_pick_encoder_skips_candidate_failing_at_master_size(fake_ffmpeg):
     name, opts = tooling.pick_encoder()
 
     assert (name, opts) == tooling.HEVC_CANDIDATES[1]
-    assert [s["codec"] for s in fake_ffmpeg["smokes"]] == [FIRST, SECOND]
-    assert all("testsrc=d=0.1:s=3840x3840" in s["args"] for s in fake_ffmpeg["smokes"])
+    # FIRST stops at its first failing size; SECOND passes both.
+    assert [s["codec"] for s in fake_ffmpeg["smokes"]] == [FIRST, SECOND, SECOND]
+    assert "testsrc=d=0.1:s=4096x2048" in fake_ffmpeg["smokes"][0]["args"]
+    assert "testsrc=d=0.1:s=2048x4096" in fake_ffmpeg["smokes"][2]["args"]
     # Cached per process: no second round of smoke encodes.
     assert tooling.pick_encoder() == (name, opts)
-    assert len(fake_ffmpeg["smokes"]) == 2
+    assert len(fake_ffmpeg["smokes"]) == 3
 
 
 def test_encoder_probe_matches_pick_encoder(fake_ffmpeg):
@@ -102,7 +106,8 @@ def test_encoder_probe_matches_pick_encoder(fake_ffmpeg):
 
     assert enc.ok and enc.detail == SECOND
     assert enc.detail == tooling.pick_encoder()[0]
-    assert all("testsrc=d=0.1:s=3840x3840" in s["args"] for s in fake_ffmpeg["smokes"])
+    sizes = {a for s in fake_ffmpeg["smokes"] for a in s["args"] if a.startswith("testsrc=")}
+    assert sizes == {"testsrc=d=0.1:s=4096x2048", "testsrc=d=0.1:s=2048x4096"}
 
 
 def test_encoder_probe_blocks_when_nothing_encodes_master_size(fake_ffmpeg):
@@ -113,6 +118,6 @@ def test_encoder_probe_blocks_when_nothing_encodes_master_size(fake_ffmpeg):
     enc = out["encoder"]
     assert not enc.ok and enc.severity == "block"
     assert enc.detail == "none working"
-    assert "3840x3840 smoke test" in enc.fix
+    assert "4096x2048 / 2048x4096 smoke test" in enc.fix
     assert enc in probes.blockers(out, need_video=True)
     assert [s["codec"] for s in fake_ffmpeg["smokes"]] == NAMES

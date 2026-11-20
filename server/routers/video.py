@@ -10,9 +10,11 @@ from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
 from pipeline.utils import (
+    TARGET_ASPECTS,
     calculate_square_padding,
     get_video_dimensions_and_duration,
     log_pipeline_execution,
+    needs_extend,
 )
 from core import models as _models
 from core.pricing import PricingError, validate_outpaint_source
@@ -164,10 +166,11 @@ def upload_video(
 
     STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context), file.filename)
 
-    w, h, dur = get_video_dimensions_and_duration(dest_path)
-    # Stereo layout follows the frame as shown (rotation applied): ffmpeg
-    # decodes rotated, so the left-eye crop sees display orientation too.
-    shown_w, shown_h, _ = get_video_dimensions_and_duration(dest_path, display=True)
+    # Dims, padding and the stereo layout follow the frame as shown (rotation
+    # applied): ffmpeg decodes rotated, so the left-eye crop sees display
+    # orientation too, and the quote prices that shape.
+    w, h, dur = get_video_dimensions_and_duration(dest_path, display=True)
+    shown_w, shown_h = w, h
     top, bottom, left, right = calculate_square_padding(w, h)
     orientation = "LANDSCAPE" if w > h else ("PORTRAIT" if h > w else "SQUARE")
     upload_log.record(
@@ -198,6 +201,8 @@ def start_video_process(
     stage_id: str = Form(...),
     prompt: str = Form(""),
     upscale_only: bool = Form(False),
+    # None: a legacy caller that names no shape keeps today's square behaviour.
+    target_aspect: str | None = Form(None),
     upscale_engine: str = Form("fast"),
     sharpening: float = Form(0.0),
     # Empty: the same default the quote used (billing/parameters.py model_defaults).
@@ -242,6 +247,8 @@ def start_video_process(
         bytedance_target_res, bytedance_target_fps, bytedance_tier,
         trim_start, trim_duration, ltx_guidance,
     )
+    if target_aspect is not None and target_aspect not in TARGET_ASPECTS:
+        raise HTTPException(status_code=400, detail="Invalid target_aspect")
     if luma_resolution not in {"540p", "720p", "1080p"}:
         raise HTTPException(status_code=400, detail="Invalid luma_resolution")
     if minimax_resolution not in {"480p", "768p", "1080p"}:
@@ -269,13 +276,15 @@ def start_video_process(
     # A foreign stage gets the same error as a missing one (no oracle).
     if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
         raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
-    width, height, _duration = get_video_dimensions_and_duration(src_path)
+    width, height, _duration = get_video_dimensions_and_duration(src_path, display=True)
     submit_fingerprint = stage_fingerprint(src_path, width=width, height=height, duration=_duration)
-    cloud_required = ((not upscale_only) and width != height) or upscale_engine.casefold() == "fal"
+    extend = (not upscale_only) and needs_extend(width, height, target_aspect or "1:1")
+    cloud_required = extend or upscale_engine.casefold() == "fal"
     kill_switch.require_open(db, paid=cloud_required)
     params = video_parameters({
         "prompt": prompt,
         "upscale_only": upscale_only,
+        "target_aspect": target_aspect,
         "upscale_engine": upscale_engine,
         "sharpening": sharpening,
         "outpaint_model": outpaint_model,
@@ -305,7 +314,7 @@ def start_video_process(
         "custom_upscale_args": custom_upscale,
     }, model_defaults(db))
 
-    if cloud_required and not params["upscale_only"] and width != height:
+    if cloud_required and extend:
         # Ray 3.2 reframe rejects sources over 10 s; refuse before the
         # reservation or any fal call (BYOK jobs never pass a quote).
         try:
@@ -333,7 +342,7 @@ def start_video_process(
                 require_billing_secrets()
                 fal_key = resolve_fal_key(db, user_id=owner_id, payment_source=payment_source)
                 stage_specs = []
-                if not upscale_only and width != height:
+                if extend:
                     stage_specs.append(("outpaint", params["outpaint_model"]))
                 if params["upscale_engine"] == "fal":
                     stage_specs.append(("upscale", params["upscale_model"]))
@@ -374,6 +383,7 @@ def start_video_process(
         "outpaint_model": params["outpaint_model"],
         "upscale_model": params["upscale_model"],
         "upscale_only": params["upscale_only"],
+        "target_aspect": params["target_aspect"],
         "sharpening": params["sharpening"],
         "upscale_engine": params["upscale_engine"],
         "ltx_resolution": params["ltx_resolution"],

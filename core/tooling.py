@@ -108,23 +108,28 @@ def run(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess | Non
         return None
 
 
-# Every 4K-square master (fast, fal and studio paths) is encoded at this size.
-SMOKE_ENCODE_SIZE = "3840x3840"
+# Every master (fast, fal and studio paths) fits inside these sizes: the long
+# side is capped at 4096 in either orientation (pipeline.utils.MASTER_LONG_CAP).
+SMOKE_ENCODE_SIZES = ("4096x2048", "2048x4096")
 
 
-def smoke_encode(name: str, opts: list[str], size: str = SMOKE_ENCODE_SIZE) -> bool:
-    """Encode one frame at the real master size to /dev/null. Presence in
+def smoke_encode(name: str, opts: list[str], sizes: tuple[str, ...] = SMOKE_ENCODE_SIZES) -> bool:
+    """Encode one frame at each largest master size to /dev/null. Presence in
     -encoders is NOT enough: hevc_nvenc lists fine but dies on 'Cannot load
     nvcuda.dll' with no NVIDIA GPU. A tiny frame is not enough either:
     hardware encoders have per-chip resolution/level limits that 64x64 never
-    reaches. One 3840x3840 frame costs ~0.4s on VideoToolbox, ~1s on libx265.
+    reaches. Both orientations are tried, since a chip's width and height
+    limits can differ. Every size must pass.
     """
-    p = run([
-        "ffmpeg", "-hide_banner", "-v", "error",
-        "-f", "lavfi", "-i", f"testsrc=d=0.1:s={size}",
-        "-c:v", name, *opts, "-frames:v", "1", "-f", "null", "-",
-    ], timeout=40)
-    return bool(p and p.returncode == 0)
+    for size in sizes:
+        p = run([
+            "ffmpeg", "-hide_banner", "-v", "error",
+            "-f", "lavfi", "-i", f"testsrc=d=0.1:s={size}",
+            "-c:v", name, *opts, "-frames:v", "1", "-f", "null", "-",
+        ], timeout=40)
+        if not (p and p.returncode == 0):
+            return False
+    return True
 
 
 # Cached per-process, guarded by a lock so concurrent jobs can't all spawn the

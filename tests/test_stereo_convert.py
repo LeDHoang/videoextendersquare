@@ -262,7 +262,7 @@ def test_needs_sign_in_and_ownership(client, tmp_path):
 
 
 @pytest.mark.parametrize("make,code", [
-    (lambda tmp_path, user: _stage(tmp_path, user, "wide", size=(128, 96)), "NOT_SQUARE"),
+    (lambda tmp_path, user: _stage(tmp_path, user, "wide", size=(128, 96)), "UNSUPPORTED_SHAPE"),
     (lambda tmp_path, user: _stage(tmp_path, user, "tiny", size=(66, 66)), "TOO_SMALL"),
 ])
 def test_rejects_wrong_images(client, tmp_path, make, code):
@@ -270,6 +270,26 @@ def test_rejects_wrong_images(client, tmp_path, make, code):
     response = _convert(client, {"kind": "image", "stage_id": make(tmp_path, user)})
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == code
+    with job_manager._lock:
+        assert not [rec for rec in job_manager._jobs.values() if rec.owner_id == user["id"]]
+
+
+@pytest.mark.parametrize("size", [(192, 108), (108, 192)])
+def test_wide_and_tall_images_convert(client, tmp_path, size):
+    user = _register(client, f"convert_{size[0]}x{size[1]}")
+    response = _convert(client, {"kind": "image", "stage_id": _stage(tmp_path, user, "shaped", size=size)})
+    assert response.status_code == 200, response.text
+    assert _wait(response.json()["job_id"]).status == JobStatus.COMPLETE
+
+
+def test_depth_pack_skips_other_shapes_without_a_job(client, tmp_path):
+    user = _register(client, "spatial_skip")
+    stage = _stage(tmp_path, user, "wide", size=(128, 96))
+    response = _convert(client, {"kind": "image", "stage_id": stage, "depth_pack": True})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["job_id"] is None and body["status"] == "skipped"
+    assert body["code"] == "UNSUPPORTED_SHAPE"
     with job_manager._lock:
         assert not [rec for rec in job_manager._jobs.values() if rec.owner_id == user["id"]]
 

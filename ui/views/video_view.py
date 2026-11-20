@@ -58,7 +58,7 @@ def render(ctx: dict) -> None:
     blocked = H.blockers(probes, need_video=True)
     studio_ok = H.studio_available(probes)
 
-    C.hero("Square Extender 2K", "VIDEO · 1:1 · 3840×3840 · OUTPAINT + UPSCALE")
+    C.hero("Square Extender 2K", "VIDEO · 1:1 · 2048×2048 · OUTPAINT + UPSCALE")
 
     if blocked:
         C.blocking_banner(
@@ -80,7 +80,7 @@ def render(ctx: dict) -> None:
                 ("SOURCE", f"{meta['w']}×{meta['h']}",
                  f"{meta['orientation']} · {M.human_bytes(meta['bytes'])}"),
                 ("DURATION", f"{meta['dur']:.2f}s", ""),
-                ("TARGET", "3840×3840", "1:1 SQUARE"),
+                ("TARGET", "2048×2048", "1:1 SQUARE"),
                 ("PAD", f"L {l}  R {r}", f"T {t}  B {b}"),
             ])
             if meta["dur"] > M.DURATION_SOFT_LIMIT:
@@ -97,7 +97,7 @@ def render(ctx: dict) -> None:
             C.spec_row([
                 ("BATCH", f"{count} VIDEOS", M.human_bytes(total_bytes)),
                 ("TOTAL DUR", f"{total_dur:.1f}s", f"Avg {total_dur/count:.1f}s"),
-                ("TARGET", "3840×3840 EACH", "1:1 SQUARE"),
+                ("TARGET", "2048×2048 EACH", "1:1 SQUARE"),
                 ("PARALLEL", "AUTO-QUEUED", "RESOURCES"),
             ])
             cols = st.columns(min(count, 4))
@@ -454,7 +454,7 @@ def render(ctx: dict) -> None:
         )
 
         st.markdown("")
-        btn_label = f"▶  RENDER {len(items or [])} VIDEO(S) 4K SQUARE" if items else "▶  RENDER 4K SQUARE"
+        btn_label = f"▶  RENDER {len(items or [])} VIDEO(S) 2K SQUARE" if items else "▶  RENDER 2K SQUARE"
 
         go = st.button(btn_label, type="primary", disabled=disabled,
                        key=S.wkey(NS, "go"), width="stretch")
@@ -556,12 +556,12 @@ def render(ctx: dict) -> None:
 
     if not results:
         C.empty_state("NO RENDER YET",
-                      "Configure the pipeline and render to produce 3840×3840 video masters.")
+                      "Configure the pipeline and render to produce 2048×2048 video masters.")
         return
 
     C.result_header(
         "03 / RESULT",
-        f"{len(results)} ITEM(S) PROCESSED · 3840×3840 · HEVC MP4",
+        f"{len(results)} ITEM(S) PROCESSED · 2048×2048 · HEVC MP4",
     )
 
     selected_result = results[0]
@@ -615,7 +615,7 @@ def render(ctx: dict) -> None:
             file_name=fname, mime="video/mp4",
             type="primary", width="stretch", key=S.wkey(NS, f"dl_{selected_result['path']}"),
         )
-        st.caption("Full 4K · 3840×3840 · HEVC/H.265 Master")
+        st.caption("Full 2K · 2048×2048 · HEVC/H.265 Master")
     with d2:
         if selected_result.get("preview"):
             st.download_button(
