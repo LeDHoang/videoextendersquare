@@ -52,6 +52,7 @@ from server.social.services import (
     rerecord_media_files,
     scoped_media_paths,
     slide_media_paths,
+    post_aspect,
     stereo_fields,
 )
 
@@ -1561,6 +1562,7 @@ def _build_payload_entries(
         base["vr2k_url"] = None if _is_image_item(item) else _sibling_media_url(
             src_path, SM.vr2k_path(src_path), output_root, files)
         base["stereo_layout"] = stereo["stereo_layout"]
+        base["aspect"] = post_aspect(meta.get("width"), meta.get("height"), stereo["stereo_layout"])
         base["stereo_url"] = stereo["stereo_url"]
         base["stereo_crop"] = stereo["stereo_crop"]
         base["depth_url"] = stereo["depth_url"]
@@ -1715,6 +1717,7 @@ def _pack_feed_data(
             "duration_ms": card.get("duration_ms"),
             "width": card.get("width"),
             "height": card.get("height"),
+            "aspect": card.get("aspect") or 1,
             "stereo_layout": card.get("stereo_layout") or "mono",
             "stereo_url": card.get("stereo_url"),
             "stereo_crop": bool(card.get("stereo_crop")),

@@ -230,6 +230,79 @@ def get_video_frame_metadata(video_path):
         raise ValueError(f"Could not read video frame metadata from {video_path}: {exc}") from exc
 
 
+# Output shapes a creator can extend (outpaint) to. "Keep shape" stores any
+# other ratio as it is (docs/multi-format.md).
+TARGET_ASPECTS = ("1:1", "16:9", "9:16")
+# A source within 1% of a target counts as that shape. This absorbs coded
+# sizes such as 1920x1088; the exact master scale removes the residue.
+ASPECT_TOLERANCE = 0.01
+MASTER_SHORT = 2048
+MASTER_LONG_CAP = 4096
+
+
+def parse_aspect(target) -> float:
+    """'16:9' -> 1.777..., '1:1' -> 1.0. Raises ValueError for anything else."""
+    if target not in TARGET_ASPECTS:
+        raise ValueError(f"unsupported target aspect: {target!r}")
+    w, h = target.split(":")
+    return int(w) / int(h)
+
+
+def aspect_matches(width, height, target) -> bool:
+    """True when width:height is within ASPECT_TOLERANCE of *target*."""
+    want = parse_aspect(target)
+    return abs((width / height) / want - 1) <= ASPECT_TOLERANCE
+
+
+def nearest_aspect(width, height) -> str:
+    """The target shape closest to width:height (log-ratio distance)."""
+    import math
+
+    have = math.log(width / height)
+    return min(TARGET_ASPECTS, key=lambda t: abs(math.log(parse_aspect(t)) - have))
+
+
+def needs_extend(width, height, target, extend=True) -> bool:
+    """One predicate for "this job outpaints": extend on and shape mismatched."""
+    return bool(extend) and not aspect_matches(width, height, target)
+
+
+def aspect_canvas(width, height, target):
+    """Smallest even canvas at *target* that holds width x height unscaled."""
+    want = parse_aspect(target)
+    if width / height > want:
+        cw, ch = width, width / want
+    else:
+        cw, ch = height * want, height
+    import math
+
+    return _even_up(math.ceil(cw - 1e-6)), _even_up(math.ceil(ch - 1e-6))
+
+
+def _even_up(n) -> int:
+    n = int(n)
+    return n + (n % 2)
+
+
+def _even_down(n) -> int:
+    n = int(n)
+    return max(2, n - (n % 2))
+
+
+def calculate_aspect_padding(width, height, target):
+    """Symmetric (top, bottom, left, right) padding that brings the frame to *target*."""
+    cw, ch = aspect_canvas(width, height, target)
+    if (width / height) / parse_aspect(target) - 1 > ASPECT_TOLERANCE:
+        dy = max(0, ch - height)
+        top = dy // 2
+        return top, dy - top, 0, 0
+    if 1 - (width / height) / parse_aspect(target) > ASPECT_TOLERANCE:
+        dx = max(0, cw - width)
+        left = dx // 2
+        return 0, 0, left, dx - left
+    return 0, 0, 0, 0
+
+
 def calculate_square_padding(width, height):
     """
     Calculates symmetric padding required to pad the shorter dimension 
@@ -261,6 +334,43 @@ def calculate_square_padding(width, height):
         top = bottom = left = right = 0
         
     return top, bottom, left, right
+
+
+def master_size(width, height, target=None):
+    """Master frame size: short side MASTER_SHORT, long side <= MASTER_LONG_CAP, even.
+
+    *target* (a TARGET_ASPECTS key) sets the ratio; None keeps width:height.
+    Square stays 2048x2048, 16:9 is 3640x2048 and 9:16 is 2048x3640.
+    """
+    ratio = parse_aspect(target) if target else width / height
+    long_ratio = max(ratio, 1 / ratio)
+    long_side = min(MASTER_LONG_CAP, MASTER_SHORT * long_ratio)
+    short_side = long_side / long_ratio
+    if ratio >= 1:
+        return _even_down(round(long_side)), _even_down(round(short_side))
+    return _even_down(round(short_side)), _even_down(round(long_side))
+
+
+def budget_size(width, height, pixels):
+    """Even size at width:height with at most *pixels* pixels; never upscales."""
+    import math
+
+    if width * height <= pixels:
+        return _even_down(width), _even_down(height)
+    scale = math.sqrt(pixels / (width * height))
+    return _even_down(math.floor(width * scale)), _even_down(math.floor(height * scale))
+
+
+def eye_aspect(width, height, layout="mono") -> float:
+    """Shown aspect of one eye: SBS halves the width, TB halves the height. 1 if unknown."""
+    if not width or not height:
+        return 1.0
+    if layout == "sbs":
+        return (width / 2) / height
+    if layout == "tb":
+        return width / (height / 2)
+    return width / height
+
 
 def has_audio_stream(video_path):
     """

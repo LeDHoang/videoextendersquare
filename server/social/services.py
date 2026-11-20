@@ -416,6 +416,7 @@ def _load_reel_records(db: Session, normalized: list[str], include_comments: boo
             "duration_ms": post.duration_ms,
             "width": post.width,
             "height": post.height,
+            "aspect": post_aspect(post.width, post.height, post.stereo_layout),
             "stereo_layout": post.stereo_layout or "mono",
             "media_files": post.media_files,
             **post_image_fields(post, slides_by_post.get(post.id, [])),
@@ -558,6 +559,17 @@ def _output_url(path: Path) -> str | None:
         return None
 
 
+def post_aspect(width, height, layout: str | None = "mono") -> float:
+    """Shown width/height of one eye of a post's first slide; 1 when dims are unknown.
+
+    The single aspect every surface reads (docs/multi-format.md): grids,
+    the 2D player and the VR screen size themselves from it.
+    """
+    from pipeline.utils import eye_aspect
+
+    return round(eye_aspect(width, height, layout or "mono"), 4)
+
+
 def stereo_fields(media_path: str, layout: str | None, files: dict | None = None) -> dict:
     """Playback fields for a post's stereo layout (docs/stereo-3d-reels.md).
 
@@ -646,6 +658,7 @@ def _image_entry(
         "vr_url": renditions.get("vr") or display_url,
         "width": width,
         "height": height,
+        "aspect": post_aspect(width, height, stereo["stereo_layout"]),
         "stereo_layout": stereo["stereo_layout"],
         "stereo_url": stereo["stereo_url"],
         "stereo_crop": stereo["stereo_crop"],
@@ -1052,6 +1065,7 @@ def post_card(
         "duration_ms": post.duration_ms,
         "width": post.width,
         "height": post.height,
+        "aspect": post_aspect(post.width, post.height, post.stereo_layout),
         **post_image_fields(post),
         "author_name": post.owner.username,
         "creator": creator,
