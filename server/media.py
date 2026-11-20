@@ -203,7 +203,8 @@ def get_video_codec(src: str) -> str:
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=5,
                            creationflags=_NO_WINDOW)
-        codec = p.stdout.strip().lower()
+        # A rotated stream's side data adds trailing CSV fields ("h264,").
+        codec = p.stdout.strip().split(",")[0].strip().lower()
     except Exception:
         codec = "unknown"
 

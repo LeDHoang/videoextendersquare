@@ -400,7 +400,8 @@ def get_video_codec(video_path):
              "-show_entries", "stream=codec_name", "-of", "csv=p=0", video_path],
             capture_output=True, text=True, timeout=5,
         )
-        return result.stdout.strip().lower() or "unknown"
+        # A rotated stream's side data adds trailing CSV fields ("h264,").
+        return result.stdout.strip().split(",")[0].strip().lower() or "unknown"
     except Exception:
         return "unknown"
 

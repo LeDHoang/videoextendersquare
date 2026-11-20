@@ -260,6 +260,17 @@ def test_rotated_video_reports_display_dims(tmp_path):
     assert not video_worker._is_rotated(str(tmp_path / "phone-coded.mp4"))
 
 
+@needs_ffmpeg
+def test_rotated_video_codec_has_no_side_data_residue(tmp_path):
+    # ffprobe's csv writer appends a comma for the display-matrix side data.
+    from pipeline import utils as pipeline_utils
+    from server import media
+
+    clip = rotated_video(tmp_path / "phone.mp4", "256x144", 90)
+    assert pipeline_utils.get_video_codec(str(clip)) == "h264"
+    assert media.get_video_codec(str(clip)) == "h264"
+
+
 def _stream(path) -> str:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
