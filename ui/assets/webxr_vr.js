@@ -49,6 +49,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Non-square screens: the long edge stays within this angle of the eye
   // (default size and distance) by bending the long axis less.
   const LONG_EDGE_MAX_DEG = 60;
+  // Locked mode follows lazily: the screen holds still while the gaze stays
+  // within this fraction of its angular half-extent and drags only past it.
+  // 0 is the old hard lock (the screen copies the head pose every frame).
+  const LAZY_FOLLOW_EDGE = 1;
 
   // ─── State ──────────────────────────────────────────────────────────
   let videoElement = null;
@@ -70,6 +74,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   let curvatureMode = 1; // 1: DOME, 2: SQ CURVE, 0: FLAT
   // Applied screen shape (width/height of one eye); 1 = the square screen.
   let screenAspect = 1;
+  // How much further the applied screen's edges bulge toward the eye than
+  // the square screen's (local z, short-side 2.4 units).
+  let screenBulgeExtra = 0;
   let isCurved = true;
   let stereoMode = false;
   let lockToViewer = false;
@@ -194,6 +201,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let screenQuat = null; // THREE.Quaternion once Three loads (identity until then)
   let screenScale = DEFAULT_SCALE;
   let screenDistance = -DEFAULT_POS.z; // 2.24
+  let followAngles = null; // lazy-follow { yaw, pitch } of the locked screen; null snaps to the gaze
   let isInitialPoseSet = false;
   let controlsVisible = true;
 
@@ -1835,6 +1843,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   const GROUND_PIN_H = 0.12;
   const GROUND_BEAM_H = 0.28; // short enough that beam and tag stay well below the dome video's lower edge (~43° down)
   const GROUND_TAG_LIFT = 0.33; // tag centre above the place, m: the tag sits on the beam's top
+  // A portrait screen's lower edge reaches ~60° down: a shorter beam drops
+  // the tag below it, and the globe fades while the screen hangs past its top.
+  const GROUND_BEAM_H_TALL = 0.14;
+  const GROUND_SCREEN_FADE_DEG = 5; // overlap over which the globe fades out
   const GROUND_TAG_W_M = 0.4;
   let groundGlobe = null; // { mesh, rim }
   let groundGlobeTexture = null;
@@ -1850,6 +1862,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let groundHighlightTarget = 0;
   let groundTag = null; // { mesh, ctx, texture, key }
   let groundLastT = -1;
+  let groundScreenFade = 1; // groundFadeUnderScreen, once a frame
   let groundEyeY = null; // smoothed live eye height; null until the first frame
 
   // Pose that brings (lat, lon) to the resting point with north pointing away.
@@ -2059,7 +2072,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     const mat = mesh.material;
     if (mat.map) mat.color.setRGB(k, k, k);
     else { mat.color.set(earthPalette().sea); mat.color.multiplyScalar(k); }
-    if (groundGlobe.rim) groundGlobe.rim.material.opacity = earthRimOpacity * k;
+    groundScreenFade = groundFadeUnderScreen();
+    const transparent = groundScreenFade < 1;
+    if (mat.transparent !== transparent) { mat.transparent = transparent; mat.needsUpdate = true; }
+    mat.opacity = groundScreenFade;
+    if (groundGlobe.rim) groundGlobe.rim.material.opacity = earthRimOpacity * k * groundScreenFade;
     const step = reducedMotion ? 1 : dt / GROUND_FADE_MS;
     groundHighlightAlpha = groundHighlightAlpha < groundHighlightTarget
       ? Math.min(groundHighlightTarget, groundHighlightAlpha + step)
@@ -2067,8 +2084,27 @@ window.WebXRVR = window.WebXRVR || (function () {
     applyGroundHighlight(now);
   }
 
+  // Portrait only: 1 while the screen's lowest point stays above the globe's
+  // top as seen from the eye, falling to 0 over GROUND_SCREEN_FADE_DEG of
+  // overlap. A video faded out by looking down gives the globe back.
+  function groundFadeUnderScreen() {
+    if (screenAspect >= 1 || !screenMesh || !screenMesh.visible) return 1;
+    const head = getHeadPosition();
+    const low = screenLowestElevation(head);
+    if (low === null) return 1;
+    const drop = head.y - groundGlobe.mesh.position.y;
+    const top = Math.asin(Math.min(1, GROUND_GLOBE_R / drop)) - Math.PI / 2;
+    const t = Math.max(0, Math.min(1, (top - low) / (GROUND_SCREEN_FADE_DEG * Math.PI / 180)));
+    return 1 - t * t * (3 - 2 * t) * screenLookFade;
+  }
+
+  // The portrait beam is GROUND_BEAM_H_TALL; the tag still sits on its top.
+  function groundTagLift() {
+    return screenAspect < 1 ? GROUND_TAG_LIFT - GROUND_BEAM_H + GROUND_BEAM_H_TALL : GROUND_TAG_LIFT;
+  }
+
   function applyGroundHighlight(now) {
-    const a = groundHighlightAlpha;
+    const a = groundHighlightAlpha * groundScreenFade;
     const parts = groundHighlight && groundHighlight.userData;
     if (parts && parts.pin) {
       groundHighlight.visible = a > 0.001;
@@ -2077,6 +2113,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       parts.ring.scale.setScalar(1 + 1.2 * phase);
       parts.ring.material.opacity = a * 0.9 * (1 - phase);
       parts.beam.material.uniforms.uOpacity.value = a * 0.55;
+      parts.beam.scale.y = screenAspect < 1 ? GROUND_BEAM_H_TALL / GROUND_BEAM_H : 1;
     }
     if (!groundTag) return;
     groundTag.mesh.visible = a > 0.001 && !!groundHighlight;
@@ -2093,13 +2130,16 @@ window.WebXRVR = window.WebXRVR || (function () {
   function groundTagCentre() {
     const local = groundHighlight.position;
     const n = vNorm(qRotate(groundQuat, { x: local.x, y: local.y, z: local.z }));
-    const r = GROUND_GLOBE_R + GROUND_TAG_LIFT;
+    const r = GROUND_GLOBE_R + groundTagLift();
     return { x: n.x * r, y: n.y * r + groundGlobe.mesh.position.y, z: n.z * r };
   }
 
   // Looking down at the ground globe fades the head-locked video out, so it
   // never draws over the globe; looking back up brings it back. Runs after
   // applySceneVisibility, which resets the meshes' visibility every frame.
+  // Keyed on the screen's bottom edge: the angles are the square screen's
+  // centre pitch, and a taller screen (lower bottom edge) fades sooner. A
+  // lazily following screen uses its own pitch, not the head's.
   const SCREEN_FADE_FROM_DEG = 30;
   const SCREEN_FADE_TO_DEG = 40;
   let screenLookFade = 1;
@@ -2109,7 +2149,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       const q = getHeadQuaternion();
       if (q) {
         const fwd = qRotate(q, { x: 0, y: 0, z: -1 });
-        const down = -Math.asin(Math.max(-1, Math.min(1, fwd.y))) * 180 / Math.PI;
+        const pitch = followAngles ? followAngles.pitch : Math.asin(Math.max(-1, Math.min(1, fwd.y)));
+        const d = lockDistance();
+        const lower = Math.atan2(screenScale * screenSpan(screenAspect).h / 2, d) - Math.atan2(screenScale / 2, d);
+        const down = -(pitch - lower) * 180 / Math.PI;
         const t = Math.max(0, Math.min(1, (down - SCREEN_FADE_FROM_DEG) / (SCREEN_FADE_TO_DEG - SCREEN_FADE_FROM_DEG)));
         f = 1 - t * t * (3 - 2 * t);
       }
@@ -2442,6 +2485,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       commentsScale: CPANEL_SCALE_FACTOR,
       guideScale: GUIDE_SCALE_FACTOR,
       longEdgeMaxDeg: LONG_EDGE_MAX_DEG,
+      lazyFollowEdge: LAZY_FOLLOW_EDGE,
     };
   }
   let layoutTuning = defaultLayoutTuning();
@@ -2544,6 +2588,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Head-locked screen mode (upstream applyLockToViewer, Three.js port):
   // keeps the screen at screenDistance in front of the face, perpendicular
   // to the view direction, so the user always looks into the center.
+  // With lazyFollowEdge > 0 the screen holds still (level, no roll) while
+  // the gaze stays inside it and drags only as far as the gaze crosses its edge.
+  let scratchEuler = null;
   function applyLockToViewer() {
     const head = getHeadPosition();
     const q = getHeadQuaternion();
@@ -2556,14 +2603,58 @@ window.WebXRVR = window.WebXRVR || (function () {
         fx = scratchVec.x; fy = scratchVec.y; fz = scratchVec.z;
       } catch (e) {}
     }
+    const dist = lockDistance();
+    const edge = layoutTuning.lazyFollowEdge;
+    if (edge > 0) {
+      const flat = Math.hypot(fx, fz);
+      const gazePitch = Math.atan2(fy, flat);
+      // Straight up or down the yaw is noise: hold the screen's.
+      const gazeYaw = flat > 1e-4 ? Math.atan2(-fx, -fz) : (followAngles ? followAngles.yaw : 0);
+      const span = screenSpan(screenAspect);
+      followAngles = followAngles
+        ? lazyFollowAngles(followAngles.yaw, followAngles.pitch, gazeYaw, gazePitch,
+          edge * Math.atan2(screenScale * span.w / 2, dist), edge * Math.atan2(screenScale * span.h / 2, dist))
+        : { yaw: gazeYaw, pitch: gazePitch };
+      // A screen faded by looking down rises with the gaze, so looking back up brings it back.
+      if (screenLookFade < 1 && gazePitch > followAngles.pitch) followAngles.pitch = gazePitch;
+      const cp = Math.cos(followAngles.pitch);
+      fx = -Math.sin(followAngles.yaw) * cp;
+      fy = Math.sin(followAngles.pitch);
+      fz = -Math.cos(followAngles.yaw) * cp;
+    } else {
+      followAngles = null;
+    }
     screenPos = {
-      x: head.x + fx * screenDistance,
-      y: head.y + fy * screenDistance,
-      z: head.z + fz * screenDistance,
+      x: head.x + fx * dist,
+      y: head.y + fy * dist,
+      z: head.z + fz * dist,
     };
     if (screenQuat && q) {
-      try { screenQuat.copy(q); } catch (e) {}
+      try {
+        if (followAngles) {
+          if (!scratchEuler) scratchEuler = new THREE.Euler();
+          screenQuat.setFromEuler(scratchEuler.set(followAngles.pitch, followAngles.yaw, 0, 'YXZ'));
+        } else {
+          screenQuat.copy(q);
+        }
+      } catch (e) {}
     }
+  }
+
+  // Lazy follow, pure (radians; yaw about +Y from −Z, pitch up): each axis
+  // moves only by how far the gaze sits past the screen's half-extent.
+  function lazyFollowAngles(screenYaw, screenPitch, gazeYaw, gazePitch, halfYaw, halfPitch) {
+    let dy = gazeYaw - screenYaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    const over = (d, h) => (d > h ? d - h : (d < -h ? d + h : 0));
+    return { yaw: screenYaw + over(dy, halfYaw), pitch: screenPitch + over(gazePitch - screenPitch, halfPitch) };
+  }
+
+  // Locked distance: a wide curved screen reaches nearer the eye than the
+  // square one, so its floor rises by the extra bulge. Clamped here at use,
+  // so one wide post never moves the stored distance.
+  function lockDistance() {
+    return Math.max(screenDistance, MIN_DIST + screenBulgeExtra * screenScale / 2.4);
   }
 
   // Pure pose math for the locked screen (head pos + head forward unit
@@ -2620,7 +2711,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
   function groundDockPose(headPos) {
     const a = GROUND_REST_DEG * Math.PI / 180;
-    const r = GROUND_GLOBE_R + GROUND_TAG_LIFT;
+    const r = GROUND_GLOBE_R + groundTagLift();
     const tag = { x: 0, y: groundGlobe.mesh.position.y + r * Math.cos(a), z: -r * Math.sin(a) };
     // Room-fixed like the globe: the smoothed eye over the globe's axis, so
     // head sway does not shake the dock.
@@ -2638,7 +2729,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     // edge; it shrinks further when needed so its top stays a gap below the video.
     const gap = GROUND_DOCK_GAP_DEG * Math.PI / 180;
     const floor = Math.atan2(dy, flat) + Math.atan(tagH / 2 / d) + gap;
-    const videoLow = screenLowestElevation({ x: hx, y: hy, z: hz });
+    // A portrait screen reaches down to the tag: its dock keeps full size
+    // and floats in front of the lower video instead of squeezing between.
+    const videoLow = screenAspect >= 1 ? screenLowestElevation({ x: hx, y: hy, z: hz }) : null;
     let k = d / SHELL_MAIN_RADIUS;
     if (videoLow !== null) {
       const room = videoLow - gap - floor;
@@ -2679,7 +2772,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const navTop = a.y - SHELL_MAIN_DROP - SHELL_MAIN_SIZE.h / 2 - SHELL_NAV_DROP - navH / 2;
       pos = { x: a.x, y: navTop + fit.h - full.h / 2, z: -SHELL_MAIN_RADIUS };
     } else {
-      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
+      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale * screenSpan(screenAspect).h / 2 - layoutTuning.dockGap, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
     // Room-fixed like the globe: the smoothed eye over the globe's axis, so
@@ -2704,41 +2797,73 @@ window.WebXRVR = window.WebXRVR || (function () {
   function getCommentsPanelLayout() {
     const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = commentsPanelTargetSize(base);
+    const half = sidePanelHalf(base);
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x - base / 2 - size.w / 2 - layoutTuning.panelSideGap,
+        x: a.x - half - size.w / 2 - layoutTuning.panelSideGap,
         y: a.y,
         z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: -base / 2 - size.w / 2 - layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
+        x: -half - size.w / 2 - layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
-    return { center, w: size.w, h: size.h };
+    return pullSidePanel({ center, w: size.w, h: size.h });
   }
 
   function getGuidePanelLayout() {
     const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = guideTargetSize(base);
+    const half = sidePanelHalf(base);
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x + base / 2 + size.w / 2 + layoutTuning.panelSideGap,
+        x: a.x + half + size.w / 2 + layoutTuning.panelSideGap,
         y: a.y,
         z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: base / 2 + size.w / 2 + layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
+        x: half + size.w / 2 + layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
-    return { center, w: size.w, h: size.h };
+    return pullSidePanel({ center, w: size.w, h: size.h });
+  }
+
+  // Side panels flank the square screen, or a narrower portrait one. A
+  // wider screen reaches past them, so they keep the square layout's angles
+  // and angular size but come in toward the eye, nearer than any point of
+  // the screen (which sits at or beyond its distance).
+  const PANEL_PULL_MARGIN = 0.9;
+  function sidePanelHalf(base) {
+    return base * Math.min(1, screenSpan(screenAspect).w) / 2;
+  }
+  function pullSidePanel(layout) {
+    if (screenSpan(screenAspect).w <= 1 + 1e-9) return layout;
+    let eye;
+    let dist;
+    if (lockToViewer) {
+      const a = getLockedAnchor();
+      eye = { x: a.x, y: a.y, z: 0 };
+      dist = lockDistance();
+    } else {
+      eye = getHeadPosition();
+      dist = Math.hypot(screenPos.x - eye.x, screenPos.y - eye.y, screenPos.z - eye.z);
+    }
+    const c = layout.center;
+    const r = Math.hypot(c.x - eye.x, c.y - eye.y, c.z - eye.z) || 1;
+    const f = Math.min(1, PANEL_PULL_MARGIN * dist / r);
+    return {
+      center: { x: eye.x + (c.x - eye.x) * f, y: eye.y + (c.y - eye.y) * f, z: eye.z + (c.z - eye.z) * f },
+      w: layout.w * f,
+      h: layout.h * f,
+    };
   }
 
   function getHeadPosition() {
@@ -9103,6 +9228,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     // centered on the simulated gaze (upstream parity).
     if (sceneMode === 'reels' && lockApplies() && previewCameraMode === 'headset' && !isPackExperience()) {
       applyLockToViewer();
+    } else {
+      followAngles = null; // the next lock snaps to the gaze
     }
     commitScreenTransform();
     layoutControlsDock();
@@ -10260,6 +10387,13 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Rebuilds the screen, stereo eye, overlay and glow meshes for a curvature
   // mode and screen aspect. Shared by setCurvatureMode and the per-post
   // aspect change (applied at texture commit, never mid-post).
+  function maxLocalZ(geo) {
+    const pos = geo.attributes.position;
+    let z = -Infinity;
+    for (let i = 0; i < pos.count; i++) z = Math.max(z, pos.getZ(i));
+    return z;
+  }
+
   function rebuildScreenGeometries(mode, aspect) {
     curvatureMode = mode;
     isCurved = (curvatureMode !== 0);
@@ -10267,6 +10401,12 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (screenMesh) {
       if (screenMesh.geometry) screenMesh.geometry.dispose();
       screenMesh.geometry = createScreenGeometry(curvatureMode, screenAspect);
+      screenBulgeExtra = 0;
+      if (screenAspect !== 1) {
+        const square = createScreenGeometry(curvatureMode, 1);
+        screenBulgeExtra = Math.max(0, maxLocalZ(screenMesh.geometry) - maxLocalZ(square));
+        square.dispose();
+      }
       // Stereo eye meshes share the screen's geometry.
       if (eyeMeshL) eyeMeshL.geometry = screenMesh.geometry;
       if (eyeMeshR) eyeMeshR.geometry = screenMesh.geometry;
@@ -11945,6 +12085,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     isInitialPoseSet = false;
     sessionEyeY = null;
     groundEyeY = null;
+    followAngles = null;
     lockToViewer = !isPackExperience();
     controlsVisible = false;
     commentsPanelVisible = false;
@@ -12197,9 +12338,11 @@ window.WebXRVR = window.WebXRVR || (function () {
           // Head lock: the screen follows the gaze every frame
           // (skipped under ?lock=0 for bisection).
           if (lockApplies()) applyLockToViewer();
+          else followAngles = null; // the next lock snaps to the gaze
           // Paused reels reveal the dock (upstream parity).
           if (getVisualSource().paused && !controlsVisible) showControls();
         } else {
+          followAngles = null;
           advanceEarthZoom(time);
           advanceEarthSpin(time);
           updateEarthDressing(time);
@@ -13035,6 +13178,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           seeking: !!groundSeek,
           spinning: groundSpinning,
           highlight: groundHighlightAlpha,
+          screenFade: groundScreenFade,
           highlightVisible: !!(groundHighlight && groundHighlight.visible),
           placeText: groundPlace ? groundPlace.text : null,
           pinColor: parts && parts.pin ? parts.pin.material.color.getHexString() : null,
@@ -13087,6 +13231,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       getCommentsPanelLayout,
       getGuidePanelLayout,
       applyLockToViewer,
+      lazyFollowAngles,
+      lockDistance,
+      getFollowAngles: () => (followAngles ? { ...followAngles } : null),
       commitScreenTransform,
       lockApplies,
       pickPointerSource,

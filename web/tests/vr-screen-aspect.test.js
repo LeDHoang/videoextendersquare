@@ -201,3 +201,22 @@ test('the square overlay maps to the central short-side square of any screen', (
   assert.deepEqual(uv(0.3, 0.5 - 0.5 * 9 / 16, 9 / 16), [0.3, 0]);
   assert.ok(api.overlayUV(0.3, 0.95, 9 / 16)[1] > 1);
 });
+
+test('lazy follow moves each axis only by the overshoot past the half-extent', () => {
+  const api = loadEngine().__test;
+  const f = (...args) => { const r = api.lazyFollowAngles(...args); return { yaw: r.yaw, pitch: r.pitch }; };
+  // Inside the screen: nothing moves.
+  assert.deepEqual(f(0.1, -0.2, 0.3, 0.1, 0.5, 0.4), { yaw: 0.1, pitch: -0.2 });
+  // Past an edge: the screen is dragged so the gaze sits on that edge.
+  const out = f(0, 0, 0.7, -0.6, 0.5, 0.4);
+  closeTo(out.yaw, 0.2, 1e-12, 'yaw');
+  closeTo(out.pitch, -0.2, 1e-12, 'pitch');
+  // Yaw takes the short way across ±π.
+  const wrap = f(3.0, 0, -3.0, 0, 0.1, 0.4);
+  closeTo(wrap.yaw, 3.0 + (2 * Math.PI - 6.0) - 0.1, 1e-12, 'wrap');
+});
+
+test('a 1:1 lock keeps the screen at the set distance', () => {
+  const api = loadEngine().__test;
+  assert.equal(api.lockDistance(), api.getScreenState().distance);
+});

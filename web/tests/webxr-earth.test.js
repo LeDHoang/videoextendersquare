@@ -2524,6 +2524,29 @@ test('head lock poses the live screen perpendicular and centered', () => {
   renderer.stopPreview();
 });
 
+test('lazy follow snaps on lock, holds inside the screen, drags at the edge and holds yaw at the pole', () => {
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl });
+  renderer.init(null, {});
+  renderer.startPreview(makePreviewCanvas(gl));
+  const api = renderer.__test;
+  api.setScreenState({ locked: true });
+  const half = Math.atan2(2, 2.24); // 1:1 half-extent at the default size and distance
+  const lookAt = (yaw, pitch) => { api.setPreviewLook(yaw, pitch); api.applyLockToViewer(); return api.getFollowAngles(); };
+  let a = lookAt(0.3, 0);
+  closeTo(a.yaw, 0.3);
+  closeTo(a.pitch, 0);
+  a = lookAt(0.3 + half - 0.05, 0.2);
+  closeTo(a.yaw, 0.3);
+  closeTo(a.pitch, 0);
+  a = lookAt(0.3 + half + 0.1, 0);
+  closeTo(a.yaw, 0.4);
+  a = lookAt(1.0, Math.PI / 2);
+  closeTo(a.yaw, 0.4);
+  closeTo(a.pitch, Math.PI / 2 - half);
+  renderer.stopPreview();
+});
+
 test('grip plus stick Y scales the screen up and down', () => {
   const renderer = loadRenderer();
   renderer.init(null, {});
@@ -3100,6 +3123,7 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
     commentsScale: 0.432,
     guideScale: 0.314,
     longEdgeMaxDeg: 60,
+    lazyFollowEdge: 1,
   });
   const before = api.getCommentsPanelLayout();
   const tuned = renderer.setLayoutTuning({ dockWidth: 0.7, panelSideGap: 0.5, screenScale: 20, bogus: 1 });
@@ -7595,6 +7619,7 @@ test('the globe top follows the live eye 1.6 m down: sitting glides, a nod does 
 
 test('looking down past 30° fades the video out, and looking up brings it back', () => {
   const { renderer, api, run } = startGround([KYOTO]);
+  renderer.setLayoutTuning({ lazyFollowEdge: 0 }); // the hard lock: the screen rides the gaze
   const look = (deg) => { api.setPreviewLook(0, -deg * Math.PI / 180); run(100); };
   look(20);
   assert.deepEqual({ ...api.screenFadeState() }, { fade: 1, opacity: 1, transparent: false, depthWrite: true, visible: true });
@@ -7612,5 +7637,21 @@ test('looking down past 30° fades the video out, and looking up brings it back'
   renderer.setSceneMode('earth');
   look(60);
   assert.equal(api.screenFadeState().fade, 1, 'Earth view never fades its screen');
+  renderer.stopPreview();
+});
+
+test('with lazy follow the video fades only once a look down drags the screen past 30°', () => {
+  const { renderer, api, run } = startGround([KYOTO]);
+  const look = (deg) => { api.setPreviewLook(0, -deg * Math.PI / 180); run(300); };
+  look(0); // the lock snaps to the first gaze
+  look(35);
+  assert.equal(api.screenFadeState().fade, 1, 'a 35° glance stays inside the screen');
+  closeTo(api.getFollowAngles().pitch, 0);
+  look(85);
+  assert.equal(api.screenFadeState().fade, 0, 'the dragged screen passes 40°');
+  assert.ok(api.getFollowAngles().pitch < -40 * Math.PI / 180);
+  look(0);
+  assert.deepEqual({ ...api.screenFadeState() }, { fade: 1, opacity: 1, transparent: false, depthWrite: true, visible: true });
+  closeTo(api.getFollowAngles().pitch, 0); // the faded screen rose with the gaze
   renderer.stopPreview();
 });
