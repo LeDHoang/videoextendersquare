@@ -41,6 +41,41 @@ describe('stageLayout', () => {
     expect(layout.padLabel).toBe('NONE');
   });
 
+  it('sizes the 1:1 stage by the long side', () => {
+    const layout = stageLayout({ width: 1080, height: 1920 });
+    expect([layout.stageWidth, layout.stageHeight]).toEqual([1920, 1920]);
+  });
+
+  it('fills a square source out to 16:9 with left/right bands as a share of the stage width', () => {
+    const layout = stageLayout({ width: 900, height: 900 }, '16:9');
+    expect([layout.stageWidth, layout.stageHeight]).toEqual([1600, 900]);
+    expect(layout.source).toEqual({ left: '21.875%', top: '0%', width: '56.25%', height: '100%' });
+    expect(layout.zones.map((zone) => [zone.side, zone.px, zone.style.width])).toEqual([
+      ['left', 350, '21.875%'],
+      ['right', 350, '21.875%'],
+    ]);
+  });
+
+  it('fills a square source out to 9:16 with top/bottom bands as a share of the stage height', () => {
+    const layout = stageLayout({ width: 900, height: 900 }, '9:16');
+    expect([layout.stageWidth, layout.stageHeight]).toEqual([900, 1600]);
+    expect(layout.source).toEqual({ left: '0%', top: '21.875%', width: '100%', height: '56.25%' });
+    expect(layout.padLabel).toBe('350px [T/B]');
+  });
+
+  it('ignores the server square padding for another target', () => {
+    const layout = stageLayout({ width: 1600, height: 900, padding: { top: 350, bottom: 350, left: 0, right: 0 } }, '16:9');
+    expect(layout.square).toBe(true);
+    expect(layout.zones).toEqual([]);
+  });
+
+  it('keeps the file shape for a null target', () => {
+    const layout = stageLayout({ width: 1500, height: 1200, padding: { top: 150, bottom: 150, left: 0, right: 0 } }, null);
+    expect([layout.stageWidth, layout.stageHeight]).toEqual([1500, 1200]);
+    expect(layout.square).toBe(true);
+    expect(layout.source).toEqual({ left: '0%', top: '0%', width: '100%', height: '100%' });
+  });
+
   it('returns null without dimensions', () => {
     expect(stageLayout(null)).toBeNull();
     expect(stageLayout({ width: 0, height: 100 })).toBeNull();

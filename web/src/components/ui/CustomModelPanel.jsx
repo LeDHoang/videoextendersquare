@@ -17,7 +17,8 @@ import { AccentBlock } from './primitives.jsx';
 const RESOLUTION_LIKE = ['resolution', 'target_resolution', 'output_resolution'];
 const PIPELINE_PROVIDED = ['video_url', 'image_url', 'prompt'];
 
-export default function CustomModelPanel({ model, kind = 'upscale', entry, onArgs }) {
+// `aspect`: the picked output shape ('16:9' ...); aspect_ratio follows it until set by hand.
+export default function CustomModelPanel({ model, kind = 'upscale', entry, onArgs, aspect }) {
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -69,6 +70,11 @@ export default function CustomModelPanel({ model, kind = 'upscale', entry, onArg
       setDrop((d) => ({ ...next, ...d }));
     }
   }, [editable, info, model, aspectField, resField]);
+
+  useEffect(() => {
+    if (!editable || !aspect || touched.aspect_ratio || !(aspectField?.options || []).includes(aspect)) return;
+    setDrop((d) => (d.aspect_ratio === aspect ? d : { ...d, aspect_ratio: aspect }));
+  }, [editable, aspect, aspectField, touched.aspect_ratio]);
 
   const composed = useMemo(() => {
     let extra = {};

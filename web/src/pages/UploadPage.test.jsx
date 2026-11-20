@@ -113,9 +113,9 @@ const meta = (name, width, height, extra = {}) => {
 };
 
 const META = {
-  'portrait.mp4': meta('portrait.mp4', 1080, 1920, { duration: 12.5 }),
+  'portrait.mp4': meta('portrait.mp4', 1080, 1350, { duration: 12.5 }),
   'square.mp4': meta('square.mp4', 480, 480, { duration: 2 }),
-  'wide.png': meta('wide.png', 1600, 900),
+  'wide.png': meta('wide.png', 1500, 1200),
   'square.png': meta('square.png', 512, 512),
   'sbs.mp4': meta('sbs.mp4', 3840, 1920, { duration: 4, stereo: { candidate: 'sbs', detected: true, method: 'content', score: 0.91 } }),
   'tb.png': meta('tb.png', 1024, 2048, { stereo: { candidate: 'tb', detected: true, method: 'metadata', score: null } }),
@@ -125,7 +125,11 @@ const META = {
   'a.png': meta('a.png', 400, 400),
   'b.png': meta('b.png', 400, 400),
   'c.png': meta('c.png', 400, 400),
-  'tall.png': meta('tall.png', 900, 1600),
+  'hd.png': meta('hd.png', 1920, 1080),
+  'cinema.png': meta('cinema.png', 2100, 1200),
+  'phone.png': meta('phone.png', 1200, 2100),
+  'pair.png': meta('pair.png', 2304, 2048),
+  'tall.png': meta('tall.png', 1200, 1500),
 };
 
 const fileOf = (name) => new File(['x'], name, { type: name.endsWith('.mp4') ? 'video/mp4' : 'image/png' });
@@ -152,7 +156,7 @@ async function pick(names) {
 }
 
 const radio = (group, name) => within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name });
-const renderButton = () => screen.getByRole('button', { name: /^(Make|Retry quote & make) .*square|^(Upscale|Retry quote & upscale)/ });
+const renderButton = () => screen.getByRole('button', { name: /^(Fill|Retry quote & fill)|^(Upscale|Retry quote & upscale)/ });
 const postButton = () => screen.getByRole('button', { name: 'POST' });
 const button = (name) => screen.getByRole('button', { name });
 const MINE = { items: [], stages: [], retention: { stage_seconds: 6 * 3600, result_seconds: 30 * 86400 } };
@@ -190,9 +194,9 @@ describe('UploadPage — video extender parity', () => {
   it('maps a portrait clip onto the square stage with its outpaint bands', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    expect(await screen.findByText('1080×1920 ➔ 2048×2048')).toBeInTheDocument();
-    expect(screen.queryByText('PAD: 420px [L/R]')).toBeNull();
-    expect(screen.getAllByText('+420px OUTPAINT')).toHaveLength(2);
+    expect(await screen.findByText('1080×1350 ➔ 2048×2048')).toBeInTheDocument();
+    expect(screen.queryByText('PAD: 135px [L/R]')).toBeNull();
+    expect(screen.getAllByText('+135px OUTPAINT')).toHaveLength(2);
     // The stage stays uncluttered: no zone names, telemetry box or spec grid.
     expect(screen.queryByText(/GENERATIVE ZONE/)).toBeNull();
     expect(screen.queryByText(/BOUNDARIES/)).toBeNull();
@@ -202,11 +206,11 @@ describe('UploadPage — video extender parity', () => {
     expect(document.querySelectorAll('.sx-studio-zone')).toHaveLength(2);
   });
 
-  it('drops the cloud outpainting warning when the clip is only stretched', async () => {
+  it('drops the cloud outpainting warning when the clip keeps its shape', async () => {
     renderPage();
     await pick(['portrait.mp4']);
     expect(await screen.findByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeInTheDocument();
-    fireEvent.click(radio('Video Pipeline Mode', 'Stretch to fit'));
+    fireEvent.click(radio('Video Pipeline Mode', 'Keep shape'));
     expect(screen.queryByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeNull();
   });
 
@@ -214,7 +218,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v1' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
 
     fireEvent.click(radio('Outpaint Model', /LTX 2\.3 Quality \+ LoRA/));
     const addLora = () => fireEvent.click(screen.getByRole('button', { name: '+ ADD LoRA' }));
@@ -250,6 +254,7 @@ describe('UploadPage — video extender parity', () => {
     const [path, fd] = mocks.form.mock.calls[0];
     expect(path).toBe('/api/video/process');
     expect(formObject(fd)).toEqual(expectedForm('st-portrait.mp4', videoBillingParameters({
+      targetAspect: '1:1',
       prompt: 'neon city',
       upscaleOnly: false,
       falPicked: true,
@@ -286,7 +291,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v2' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     const group = screen.getByRole('group', { name: 'Bytedance upscaler settings' });
     fireEvent.change(within(group).getByLabelText('TARGET RESOLUTION'), { target: { value: '2k' } });
@@ -298,6 +303,7 @@ describe('UploadPage — video extender parity', () => {
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
     expect(formObject(mocks.form.mock.calls[0][1])).toEqual(expectedForm('st-portrait.mp4', videoBillingParameters({
+      targetAspect: '1:1',
       prompt: VID_PROMPT_DEFAULT,
       upscaleOnly: false,
       falPicked: true,
@@ -330,7 +336,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, vapoursynth: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeInTheDocument();
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
@@ -355,7 +361,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, ffms2: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
@@ -365,7 +371,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, cas: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeDisabled();
     expect(screen.getByText('CAS FILTER UNAVAILABLE — SHARPENING WILL BE SKIPPED')).toBeInTheDocument();
   });
@@ -381,7 +387,7 @@ describe('UploadPage — video extender parity', () => {
     };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     expect(radio('FAL Upscale Model', /CUSTOM \(my-upscaler\)/)).toHaveAttribute('aria-checked', 'true');
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
@@ -397,7 +403,7 @@ describe('UploadPage — video extender parity', () => {
     };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     const values = (select) => within(select).getAllByRole('option').map((node) => node.value);
     const ltx = screen.getByLabelText('OUTPUT RESOLUTION TIER');
     expect(values(ltx)).toEqual(['1080p', '480p']);
@@ -411,6 +417,7 @@ describe('UploadPage — video extender parity', () => {
 
 describe('UploadPage — H3 Max and LTX 2.5 reframe settings', () => {
   const settingsOf = (overrides) => videoBillingParameters({
+    targetAspect: '1:1',
     prompt: VID_PROMPT_DEFAULT,
     upscaleOnly: false,
     falPicked: false,
@@ -442,7 +449,7 @@ describe('UploadPage — H3 Max and LTX 2.5 reframe settings', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-h3' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Outpaint Model', /MiniMax H3 Max Reframe/));
     const group = screen.getByRole('group', { name: 'MiniMax H3 Max settings' });
     const values = (select) => within(select).getAllByRole('option').map((node) => node.value);
@@ -466,7 +473,7 @@ describe('UploadPage — H3 Max and LTX 2.5 reframe settings', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-ltx25' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Outpaint Model', /LTX 2\.5 Reframe/));
     expect(screen.queryByLabelText('NEGATIVE PROMPT FILTER')).toBeNull();
     expect(screen.queryByLabelText('OUTPUT RESOLUTION TIER')).toBeNull();
@@ -490,8 +497,8 @@ describe('UploadPage — image extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i1' });
     renderPage();
     await pick(['wide.png']);
-    expect(await screen.findByText('1600×900 ➔ 2048×2048')).toBeInTheDocument();
-    expect(screen.queryByText('PAD: 350px [T/B]')).toBeNull();
+    expect(await screen.findByText('1500×1200 ➔ 2048×2048')).toBeInTheDocument();
+    expect(screen.queryByText('PAD: 150px [T/B]')).toBeNull();
     const engines = within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio').map((node) => node.textContent.trim());
     expect(engines).toEqual(['Fast', 'Cloud AI']);
     fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
@@ -508,6 +515,7 @@ describe('UploadPage — image extender parity', () => {
     const [path, fd] = mocks.form.mock.calls[0];
     expect(path).toBe('/api/image/process');
     expect(formObject(fd)).toEqual(expectedForm('st-wide.png', imageBillingParameters({
+      targetAspect: '1:1',
       prompt: IMG_PROMPT_DEFAULT,
       upscaleOnly: false,
       sharpening: 0.5,
@@ -520,13 +528,14 @@ describe('UploadPage — image extender parity', () => {
 
   });
 
-  it('keeps UPSCALE ONLY + FAST local and flags the stretch to 1:1', async () => {
+  it('keeps KEEP SHAPE + FAST local and upscales the file in its own shape', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i2' });
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('1600×900 ➔ 2048×2048');
-    fireEvent.click(radio('Pipeline Mode', 'Stretch to fit'));
-    expect(screen.getByText('UPSCALE ONLY · STRETCHED TO 1:1')).toBeInTheDocument();
+    await screen.findByText('1500×1200 ➔ 2048×2048');
+    fireEvent.click(radio('Pipeline Mode', 'Keep shape'));
+    expect(screen.getByText('1500×1200 ➔ 2560×2048')).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Shape' })).toBeNull();
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
     expect(screen.queryByLabelText('OUTPAINT EXTENSION PROMPT')).toBeNull();
     fireEvent.click(renderButton());
@@ -547,7 +556,7 @@ describe('UploadPage — image extender parity', () => {
     mocks.models = { ...MODELS, outpaint_img: 'me/my-outpaint' };
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('1600×900 ➔ 2048×2048');
+    await screen.findByText('1500×1200 ➔ 2048×2048');
     expect(screen.getAllByText(/CUSTOM OUTPAINT \(my-outpaint\)|CUSTOM \(my-outpaint\)/).length).toBeGreaterThan(0);
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
   });
@@ -575,15 +584,15 @@ describe('UploadPage — image extender parity', () => {
   it('keeps each kind\'s settings when another file is staged', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     fireEvent.change(screen.getByLabelText('OUTPAINT EXTENSION PROMPT'), { target: { value: 'video prompt' } });
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     await pick(['wide.png']);
-    await screen.findByText('1600×900 ➔ 2048×2048');
+    await screen.findByText('1500×1200 ➔ 2048×2048');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue(IMG_PROMPT_DEFAULT);
     expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'true');
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue('video prompt');
     expect(radio('Upscale Engine', 'Studio')).toHaveAttribute('aria-checked', 'true');
   });
@@ -620,34 +629,64 @@ describe('UploadPage — posting', () => {
     renderPage();
     await pick(['square.mp4']);
     await screen.findByText('ALREADY 1:1');
-    expect(radio('Square file', 'Keep as is')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Ready file', 'Keep as is')).toHaveAttribute('aria-checked', 'true');
     // Kept as it is: no target size is promised.
     expect(screen.getByText('480×480')).toBeInTheDocument();
-    fireEvent.click(radio('Square file', 'Upscale'));
+    fireEvent.click(radio('Ready file', 'Upscale'));
     expect(screen.getByText('480×480 ➔ 2048×2048')).toBeInTheDocument();
-    // Nothing to fill or stretch on a square file.
-    expect(screen.queryByRole('radiogroup', { name: 'Video Pipeline Mode' })).toBeNull();
+    // A square file can still be filled to another shape.
+    expect(radio('Video Pipeline Mode', 'Fill with AI')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Video Shape', '1:1')).toHaveAttribute('aria-checked', 'true');
     // Unpicking the quality leaves nothing to do.
     fireEvent.click(radio('Upscale Engine', 'Fast'), { detail: 1 });
     expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'false');
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
     expect(renderButton()).toHaveAccessibleDescription('PICK A QUALITY TO UPSCALE, OR KEEP THE FILE AS IT IS');
-    fireEvent.click(radio('Square file', 'Keep as is'));
+    fireEvent.click(radio('Ready file', 'Keep as is'));
     expect(screen.getByLabelText('TITLE')).toHaveValue('square');
   });
 
-  it('makes a clip square with no upscale when the quality is unpicked', async () => {
+  it('fills a clip with no upscale when the quality is unpicked', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-none' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1920 ➔ 2048×2048');
+    await screen.findByText('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Fast'), { detail: 1 });
-    expect(screen.getByText('1080×1920')).toBeInTheDocument();
-    fireEvent.click(radio('Video Pipeline Mode', 'Stretch to fit'));
-    expect(screen.getByText('1080×1920 ➔ 1920×1920')).toBeInTheDocument();
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
-    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ upscale_engine: 'none', upscale_only: 'true' });
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ upscale_engine: 'none', upscale_only: 'false', target_aspect: '1:1' });
+  });
+
+  it('posts a clip as it is under Keep shape with no upscale', async () => {
+    mocks.post.mockResolvedValue({ meta: { title: 'portrait' }, rel_path: 'uploads/p.mp4', media_url: '/m' });
+    renderPage();
+    await pick(['portrait.mp4']);
+    await screen.findByText('1080×1350 ➔ 2048×2048');
+    fireEvent.click(radio('Upscale Engine', 'Fast'), { detail: 1 });
+    fireEvent.click(radio('Video Pipeline Mode', 'Keep shape'));
+    // Nothing is filled or upscaled: the file is ready and goes to the post form.
+    fireEvent.click(await screen.findByRole('button', { name: 'POST' }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'video', stage_id: 'st-portrait.mp4' });
+    expect(mocks.post.mock.calls[0][1].job_id).toBeUndefined();
+    expect(mocks.form).not.toHaveBeenCalled();
+  });
+
+  it('posts a 16:9 file as it is, and fills it to another shape once one is picked', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-hd' });
+    renderPage();
+    await pick(['hd.png']);
+    expect(await screen.findByText('ALREADY 16:9')).toBeInTheDocument();
+    expect(radio('Ready file', 'Keep as is')).toHaveAttribute('aria-checked', 'true');
+    expect(button('Open hd.png').closest('li')).toHaveClass('sx-ready');
+    fireEvent.click(radio('Ready file', 'Upscale'));
+    expect(radio('Shape', '16:9')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(radio('Shape', '1:1'));
+    expect(await screen.findByText('1920×1080 ➔ 2048×2048')).toBeInTheDocument();
+    expect(button('Open hd.png').closest('li')).toHaveClass('sx-needs');
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-hd.png', upscale_only: 'false', target_aspect: '1:1' });
   });
 
   it('makes a square image square again, shows the result on the stage, then posts the result', async () => {
@@ -656,18 +695,18 @@ describe('UploadPage — posting', () => {
     renderPage();
     await pick(['square.png']);
     await screen.findByText('ALREADY 1:1');
-    fireEvent.click(radio('Square file', 'Upscale'));
+    fireEvent.click(radio('Ready file', 'Upscale'));
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
     expect(formObject(mocks.form.mock.calls[0][1]).payment_source).toBeUndefined();
     expect(radio('Stage view', 'EXTENDED')).toBeDisabled();
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sq' }));
-    expect(await screen.findByAltText('Rendered square result for square.png')).toHaveAttribute('src', '/api/jobs/job-sq/download');
+    expect(await screen.findByAltText('Rendered result for square.png')).toHaveAttribute('src', '/api/jobs/job-sq/download');
     expect(radio('Stage view', 'EXTENDED')).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(radio('Stage view', 'ORIGINAL'));
     expect(screen.getByAltText('square.png')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Download the 2K square' })).toHaveAttribute('href', '/api/jobs/job-sq/download');
+    expect(screen.getByRole('link', { name: 'Download the 2K file' })).toHaveAttribute('href', '/api/jobs/job-sq/download');
     fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', job_id: 'job-sq' });
@@ -697,7 +736,7 @@ describe('UploadPage — posting', () => {
     mocks.post.mockResolvedValue({ meta: { title: 'a' }, rel_path: 'uploads/a.png', media_url: '/m' });
     renderPage();
     await pick(['a.png', 'wide.png']);
-    fireEvent.click(await screen.findByRole('button', { name: /^Make square/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Fill/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-wide' }));
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select wide.png' }));
     fireEvent.click(button('Post 2 as one'));
@@ -729,7 +768,7 @@ describe('UploadPage — posting', () => {
     await pick(['a.png', 'wide.png']);
     fireEvent.click(await screen.findByRole('button', { name: 'Discard wide.png' }));
     expect(screen.queryByRole('button', { name: 'Open wide.png' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: /Needs square/ })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /To make/ })).toBeNull();
     expect(button('Open a.png')).toBeInTheDocument();
   });
 });
@@ -742,18 +781,18 @@ describe('UploadPage — several files at once', () => {
     mocks.post.mockResolvedValue({ meta: { title: 'portrait' }, rel_path: 'uploads/p.mp4', media_url: '/m' });
     renderPage();
     await pick(['wide.png', 'portrait.mp4', 'square.mp4']);
-    const make = await screen.findByRole('button', { name: /^Make 2 square/ });
+    const make = await screen.findByRole('button', { name: /^Fill 2/ });
     // The square clip is already postable; it is not made square.
     expect(button('Open square.mp4').closest('li')).toHaveClass('sx-ready');
-    await waitFor(() => expect(renderButton()).toHaveTextContent('Make 2 square · 6 credits'));
+    await waitFor(() => expect(renderButton()).toHaveTextContent('Fill 2 · 6 credits'));
     fireEvent.click(make);
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(2));
     expect(mocks.form.mock.calls.map(([path]) => path)).toEqual(['/api/image/process', '/api/video/process']);
-    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-wide.png', payment_source: 'credits', quote_id: 'q-st-wide.png' });
-    expect(formObject(mocks.form.mock.calls[1][1])).toMatchObject({ stage_id: 'st-portrait.mp4', payment_source: 'credits', quote_id: 'q-st-portrait.mp4' });
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-wide.png', payment_source: 'credits', quote_id: 'q-st-wide.png', target_aspect: '1:1' });
+    expect(formObject(mocks.form.mock.calls[1][1])).toMatchObject({ stage_id: 'st-portrait.mp4', payment_source: 'credits', quote_id: 'q-st-portrait.mp4', target_aspect: '1:1' });
     expect(await screen.findByText('Stage expired for wide')).toBeInTheDocument();
     expect(button('Open wide.png').closest('li')).toHaveClass('sx-needs');
-    expect(within(button('Open wide.png').closest('li')).getByRole('img', { name: 'Could not be made square. Try again.' })).toBeInTheDocument();
+    expect(within(button('Open wide.png').closest('li')).getByRole('img', { name: 'Could not be made. Try again.' })).toBeInTheDocument();
     expect(button('Open portrait.mp4').closest('li')).toHaveClass('sx-working');
 
     fireEvent.click(button('FINISH job-b2'));
@@ -764,6 +803,24 @@ describe('UploadPage — several files at once', () => {
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'video', job_id: 'job-b2' });
   });
 
+  it('fills each file to its own nearest shape until one shape is picked', async () => {
+    mocks.form.mockImplementation(async (_path, fd) => ({ job_id: `job-${fd.get('stage_id')}` }));
+    renderPage();
+    await pick(['cinema.png', 'phone.png', 'wide.png']);
+    await screen.findByRole('button', { name: /^Fill 3/ });
+    fireEvent.click(button('Options'));
+    // The files would be made in different shapes, so no shape shows as picked.
+    for (const shape of ['1:1', '16:9', '9:16']) expect(radio('Shape', shape)).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(button('Close'));
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(3));
+    expect(mocks.form.mock.calls.map(([, fd]) => [fd.get('stage_id'), fd.get('target_aspect')])).toEqual([
+      ['st-cinema.png', '16:9'],
+      ['st-phone.png', '9:16'],
+      ['st-wide.png', '1:1'],
+    ]);
+  });
+
   it('waits when the server is busy and starts the rest by itself when a job ends', async () => {
     mocks.form
       .mockResolvedValueOnce({ job_id: 'job-q1' })
@@ -772,11 +829,11 @@ describe('UploadPage — several files at once', () => {
       .mockResolvedValueOnce({ job_id: 'job-q3' });
     renderPage();
     await pick(['wide.png', 'tall.png', 'portrait.mp4']);
-    fireEvent.click(await screen.findByRole('button', { name: /^Make 3 square/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Fill 3/ }));
     expect(await screen.findByText(/Waiting for a free slot/)).toBeInTheDocument();
     // The refused file and the one after it were not marked as failed, and stay checked.
     expect(mocks.form).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole('img', { name: 'Could not be made square. Try again.' })).toBeNull();
+    expect(screen.queryByRole('img', { name: 'Could not be made. Try again.' })).toBeNull();
     expect(screen.getByRole('checkbox', { name: 'Select tall.png' })).toBeChecked();
     fireEvent.click(button('FINISH job-q1'));
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(4));
@@ -790,7 +847,7 @@ describe('UploadPage — several files at once', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-one' });
     renderPage();
     await pick(['wide.png', 'tall.png', 'portrait.mp4']);
-    await screen.findByRole('button', { name: /^Make 3 square/ });
+    await screen.findByRole('button', { name: /^Fill 3/ });
     fireEvent.click(button('Options'));
     expect(radio('Options for', 'IMAGES')).toHaveAttribute('aria-checked', 'true');
     expect(within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio')).toHaveLength(2);
@@ -800,7 +857,7 @@ describe('UploadPage — several files at once', () => {
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select tall.png' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select portrait.mp4' }));
-    await waitFor(() => expect(renderButton()).toHaveTextContent('Make square · 3 credits'));
+    await waitFor(() => expect(renderButton()).toHaveTextContent('Fill · 3 credits'));
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
     expect(formObject(mocks.form.mock.calls[0][1]).stage_id).toBe('st-wide.png');
@@ -827,9 +884,9 @@ describe('UploadPage — gallery and saved results', () => {
     expect(within(tile).getByRole('img', { name: '27 days left' })).toBeInTheDocument();
     expect(tile.querySelector('img')).toHaveAttribute('src', 'https://media.test/job-far-poster.jpg');
     fireEvent.click(open);
-    expect(await screen.findByAltText('Rendered square result for beach.png')).toHaveAttribute('src', 'https://media.test/job-far.png');
+    expect(await screen.findByAltText('Rendered result for beach.png')).toHaveAttribute('src', 'https://media.test/job-far.png');
     // No upload on this server to redo from.
-    expect(screen.queryByRole('button', { name: 'Make square again' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Make again' })).toBeNull();
     fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', title: 'beach', job_id: 'job-far' });
@@ -936,6 +993,24 @@ describe('UploadPage — 3D stereo posts', () => {
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ stage_id: 'st-screen21.mp4', stereo_layout: 'sbs' });
   });
 
+  it('lets a 9:8 frame be posted in 3D only by hand, with the eye layout picked', async () => {
+    mocks.post.mockResolvedValue({ meta: { title: 'pair' }, rel_path: 'uploads/pair.png', media_url: '/m' });
+    renderPage();
+    await pick(['pair.png']);
+    expect(await screen.findByText('9:8 FRAME — IS THIS 3D')).toBeInTheDocument();
+    const toggle = () => screen.getByLabelText(/STEREOSCOPIC 3D/);
+    expect(toggle()).not.toBeChecked();
+    expect(button('Open pair.png').closest('li')).toHaveClass('sx-needs');
+    fireEvent.click(toggle());
+    expect(radio('Eye layout', /SIDE-BY-SIDE|SBS/)).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(radio('Eye layout', /TOP-BOTTOM|TB/));
+    expect(radio('Eye layout', /TOP-BOTTOM|TB/)).toHaveAttribute('aria-checked', 'true');
+    expect(button('Open pair.png').closest('li')).toHaveClass('sx-ready');
+    fireEvent.click(postButton());
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'image', stage_id: 'st-pair.png', stereo_layout: 'tb' });
+  });
+
   it('offers no 3D choice for ordinary aspect ratios', async () => {
     renderPage();
     await pick(['wide.png']);
@@ -1019,11 +1094,11 @@ describe('UploadPage — MAKE 3D', () => {
     answer('job-3d-ext');
     renderPage();
     await pick(['wide.png']);
-    fireEvent.click(await screen.findByRole('button', { name: /^Make square/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Fill/ }));
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('button', { name: 'Make 3D' })).toBeNull();
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-ext' }));
-    expect(await screen.findByAltText('Rendered square result for wide.png')).toBeInTheDocument();
+    expect(await screen.findByAltText('Rendered result for wide.png')).toBeInTheDocument();
 
     fireEvent.click(make3d());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', job_id: 'job-ext' }));
@@ -1151,7 +1226,7 @@ describe('UploadPage — depth version for VR', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-ext' });
     renderPage();
     await pick(['wide.png']);
-    fireEvent.click(await screen.findByRole('button', { name: /^Make square/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Fill/ }));
     expect(convertCalls()).toHaveLength(0);
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-ext' }));
     await waitFor(() => expect(convertCalls()).toHaveLength(1));
