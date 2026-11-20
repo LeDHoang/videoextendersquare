@@ -134,6 +134,21 @@ def test_a_cached_tile_of_another_shape_rebuilds(tmp_path):
 
 
 @needs_ffmpeg
+def test_a_left_eye_tile_matches_the_eye_aspect(tmp_path):
+    src = _clip(tmp_path / "pair.mp4", "640x180")
+    crop = media.left_eye_crop("sbs")
+    poster = Path(media.make_explore_poster(str(src), height=72, crop=crop))
+    assert _size(poster) == (128, 72)
+    before = poster.stat().st_mtime_ns
+    assert media.make_explore_poster(str(src), height=72, crop=crop) == str(poster)
+    assert poster.stat().st_mtime_ns == before
+    # A cached tile of the full 32:9 frame is not the 16:9 eye: it rebuilds.
+    Image.new("RGB", (256, 72)).save(poster, "JPEG")
+    os.utime(poster, ns=(before + 10**9, before + 10**9))
+    assert _size(media.make_explore_poster(str(src), height=72, crop=crop)) == (128, 72)
+
+
+@needs_ffmpeg
 @pytest.mark.parametrize("layout, size, eye", [
     ("sbs", "256x128", (128, 128)),
     ("sbs", "640x180", (320, 180)),
