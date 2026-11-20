@@ -68,6 +68,7 @@ def preview_cmds(monkeypatch, tmp_path):
         return Done()
 
     monkeypatch.setattr(media, "get_video_codec", lambda src: "hevc")
+    monkeypatch.setattr(media, "probe_media_info", lambda src: {"duration_ms": 1000, "width": 3840, "height": 3840})
     monkeypatch.setattr(media.subprocess, "run", fake_run)
     monkeypatch.setattr(media, "_commit_part", lambda part, dest: str(dest))
     return cmds
@@ -83,6 +84,7 @@ def test_mono_preview_is_capped_at_12_mbps(preview_cmds, tmp_path):
     assert media.make_web_preview(str(src)).endswith("reel-preview.mp4")
     assert _rate(preview_cmds[0]) == ("12M", "24M")
     assert preview_cmds[0][preview_cmds[0].index("-crf") + 1] == "20"
+    assert preview_cmds[0][preview_cmds[0].index("-vf") + 1] == "scale=2160:2160,setsar=1"
 
 
 def test_stereo_proxy_is_capped_at_20_mbps(preview_cmds, tmp_path):
