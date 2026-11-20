@@ -191,36 +191,21 @@ test('in VR downloads served from the HTTP cache do not count as link speed', ()
   assert.equal(playbackFor(mono, mono).url, mono.url);
 });
 
-test('entering VR swaps a mono post from its 2k rendition to the master in place', () => {
-  const mono = { media_type: 'video', url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
-  const { syncStereoSource, engine, context } = loadStereo([mono], { hevc: true });
-  syncStereoSource();
-  assert.equal(context.video.src, mono.vr2k_url);
-  context.video.currentTime = 7;
-  context.video.paused = false;
-  engine.presenting = true;
-  syncStereoSource();
-  assert.equal(context.video.src, mono.url);
-  context.video.fire('loadedmetadata');
-  assert.equal(context.video.currentTime, 7);
-  assert.equal(context.video.paused, false);
-  // Leaving VR goes back to the 2k rendition.
-  engine.presenting = false;
-  syncStereoSource();
-  assert.equal(context.video.src, mono.vr2k_url);
-});
-
-test('2D plays the 2k rendition of a mono post where HEVC decodes', () => {
+test('2D plays the full-resolution file, and the 2k rendition of a mono post on a slow link', () => {
   const { playbackFor, noteDownload, engine } = loadStereo([], { hevc: true });
   const mono = { url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
+  // Not measured yet: the master.
+  assert.deepEqual({ ...playbackFor(mono, mono) }, { url: mono.url, layout: 'mono', crop: '' });
+  // 10 MB in 2 s = 40 Mbps: still the master.
+  for (const name of ['b', 'c', 'd']) noteDownload(`/media/${name}.mp4`, 10e6, 2000);
+  assert.equal(playbackFor(mono, mono).url, mono.url);
+  // 5 MB in 1.25 s = 32 Mbps: once the median is under 35 Mbps, the rendition.
+  for (const name of ['e', 'f', 'g']) noteDownload(`/media/${name}.mp4`, 5e6, 1250);
   assert.deepEqual({ ...playbackFor(mono, mono) }, { url: mono.vr2k_url, layout: 'mono', crop: '' });
-  // A fast link does not bring back the master in 2D.
-  for (const name of ['b', 'c', 'd']) noteDownload(`/media/${name}.mp4`, 10e6, 1000);
-  assert.equal(playbackFor(mono, mono).url, mono.vr2k_url);
   // No rendition yet: the url.
   const plain = { url: '/media/p.mp4', stereo_layout: 'mono', vr2k_url: null };
   assert.equal(playbackFor(plain, plain).url, plain.url);
-  // The 2160p H.264 proxy the feed hands out by default is heavier: the 2k wins.
+  // On a slow link the 2k also wins over a 2160p H.264 proxy url.
   const proxied = { ...mono, url: '/media/a-preview.mp4', is_proxy: true };
   assert.equal(playbackFor(proxied, proxied).url, mono.vr2k_url);
   // A stereo post's 2k file holds both eyes: 2D keeps the left-eye rendition.
@@ -233,7 +218,8 @@ test('2D plays the 2k rendition of a mono post where HEVC decodes', () => {
 
 test('a 2k rendition that fails in 2D falls back to the post url', () => {
   const mono = { media_type: 'video', url: '/media/a.mp4', stereo_layout: 'mono', vr2k_url: '/media/a-2k.mp4' };
-  const { syncStereoSource, handleVr2kFailure, playbackFor, context } = loadStereo([mono], { hevc: true });
+  const { syncStereoSource, handleVr2kFailure, playbackFor, noteDownload, context } = loadStereo([mono], { hevc: true });
+  for (const name of ['b', 'c', 'd']) noteDownload(`/media/${name}.mp4`, 5e6, 8000);
   syncStereoSource();
   assert.equal(context.video.src, mono.vr2k_url);
   context.video.currentTime = 4;

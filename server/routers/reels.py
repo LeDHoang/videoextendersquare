@@ -1557,7 +1557,7 @@ def _build_payload_entries(
         # Auto captions (<stem>.vtt) of a video's original; the 2D rendition and stereo file share its audio.
         base["captions_url"] = None if _is_image_item(item) else _sibling_media_url(
             src_path, SM.captions_path(src_path), output_root, files)
-        # 2k rendition (<stem>-2k.mp4): the player picks it over the master in 2D where HEVC decodes, and in VR on links measured under 35 Mbps.
+        # 2k rendition (<stem>-2k.mp4): the player picks it over the master on links measured under 35 Mbps (in 2D only where HEVC decodes).
         base["vr2k_url"] = None if _is_image_item(item) else _sibling_media_url(
             src_path, SM.vr2k_path(src_path), output_root, files)
         base["stereo_layout"] = stereo["stereo_layout"]

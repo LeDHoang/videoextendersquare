@@ -418,8 +418,8 @@ def make_vr2k_rendition(src: str, stereo: str | None = None) -> str | None:
 
     Mono: long side at most VR2K_EYE_SIDE, ~8 Mbps peak. Stereo ("sbs" /
     "tb"): the full frame, VR2K_EYE_SIDE per eye, ~14 Mbps peak. The player
-    picks it over the master in 2D (mono only), and in VR when the link is
-    measured under 35 Mbps.
+    picks it over the master when the link is measured under 35 Mbps, in VR
+    and in 2D (mono only).
     """
     stereo = stereo if stereo in ("sbs", "tb") else None
     dest = vr2k_path(src)

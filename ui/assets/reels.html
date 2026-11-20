@@ -2903,16 +2903,19 @@
       const sorted = vrLinkSamples.slice().sort((a, b) => a - b);
       return sorted[(sorted.length - 1) >> 1];
     }
-    function wantsVr2k(entry) {
+    function linkIsSlow() {
       const mbps = vrLinkMbps();
-      if (!entry.vr2k_url || mbps === 0 || mbps >= VR_MASTER_MIN_MBPS) return false;
+      return mbps > 0 && mbps < VR_MASTER_MIN_MBPS;
+    }
+    function wantsVr2k(entry) {
+      if (!entry.vr2k_url || !linkIsSlow()) return false;
       try { return typeof WebXRVR !== 'undefined' && !!(WebXRVR.isPresenting && WebXRVR.isPresenting()); } catch (e) { return false; }
     }
-    // 2D viewers play the 2k rendition too: a 654 px player gains nothing
-    // from a 3840 px master or the 2160p H.264 proxy the feed hands out by
-    // default. Mono posts only (a stereo post's 2k file holds both eyes), and
-    // since it is HEVC only where this browser decodes HEVC. One that fails
-    // to load falls back to `url` (handleVr2kFailure).
+    // 2D viewers follow the same link rule: the full-resolution file unless
+    // the link is measured below VR_MASTER_MIN_MBPS, then the 2k rendition.
+    // Mono posts only (a stereo post's 2k file holds both eyes), and since it
+    // is HEVC only where this browser decodes HEVC. One that fails to load
+    // falls back to `url` (handleVr2kFailure).
     let hevcPlayable = null;
     function canPlayHevc() {
       if (hevcPlayable === null) {
@@ -2922,7 +2925,7 @@
       return hevcPlayable;
     }
     function wantsVr2kIn2d(entry, item) {
-      return !!entry.vr2k_url && !(item && item.vr2kFailed) && canPlayHevc();
+      return !!entry.vr2k_url && !(item && item.vr2kFailed) && linkIsSlow() && canPlayHevc();
     }
 
     // What to load for a post or slide right now: {url, layout, crop}.
