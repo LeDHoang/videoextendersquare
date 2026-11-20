@@ -78,7 +78,7 @@ def build_probes() -> dict[str, Probe]:
     out["encoder"] = Probe(
         "encoder", "ENCODER", bool(enc_name), "block",
         enc_name or "none working",
-        f"No HEVC encoder passed a {tooling.SMOKE_ENCODE_SIZE} smoke test. "
+        f"No HEVC encoder passed a {' / '.join(tooling.SMOKE_ENCODE_SIZES)} smoke test. "
         "libx265 is the software fallback.",
     )
 

@@ -10,6 +10,7 @@ from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from typing import Any
 
 from core import models
+from pipeline.utils import aspect_canvas, aspect_matches, needs_extend
 
 CREDIT_USD = Decimal("0.01")
 PRICE_MULTIPLIER = Decimal("1.35")
@@ -110,6 +111,24 @@ def validate_outpaint_source(duration: float, params: dict[str, Any]) -> None:
     )
     entry = _catalog_entry(outpaint_model, models.VIDEO_OUTPAINT)
     check_outpaint_source_seconds(entry, float(_effective_duration(duration, params)))
+    check_outpaint_aspect(entry, target_aspect(params))
+
+
+def target_aspect(params: dict[str, Any]) -> str:
+    """The shape an extend job fills; a legacy caller that names none gets 1:1."""
+    return str(params.get("target_aspect") or "1:1")
+
+
+def check_outpaint_aspect(entry: dict | None, target: str) -> None:
+    """Refuse a shape the outpaint model's aspect_ratio enum does not offer."""
+    allowed = (entry or {}).get("aspect_ratios")
+    if allowed is not None and target not in allowed:
+        raise PricingError(f"{entry.get('label', 'This model')} cannot output {target}; pick another model or shape.")
+
+
+def _ratio_shape(target: str) -> tuple[int, int]:
+    width, height = target.split(":")
+    return int(width), int(height)
 
 
 def _frames(duration: Decimal, fps: int, *, minimum: int, maximum: int) -> int:
@@ -156,6 +175,8 @@ def quote_video(
     stages: list[StageCost] = []
     upscale_only = bool(params.get("upscale_only", False))
     is_square = int(width) == int(height)
+    target = target_aspect(params)
+    extend = not upscale_only and needs_extend(int(width), int(height), target)
     outpaint_model = models.normalize_model_id(
         str(params.get("outpaint_model") or models.DEFAULT_VIDEO_MODELS["outpaint_vid"])
     )
@@ -164,9 +185,10 @@ def quote_video(
     outpaint_fps = None
     seedvr_approximate = False
 
-    if not upscale_only and not is_square:
+    if extend:
         if not outpaint_entry:
             raise PricingError("Custom video outpainting models require a personal Fal key.")
+        check_outpaint_aspect(outpaint_entry, target)
         model_lower = outpaint_model.casefold()
         if "ltx-2.3-quality" in model_lower:
             resolution = str(params.get("ltx_resolution") or outpaint_entry.get("default_resolution", "720p"))
@@ -176,7 +198,8 @@ def quote_video(
             outpaint_fps = 24
             low, high = models.frame_limits(outpaint_model, (9, 481))
             outpaint_frames = _frames(effective, outpaint_fps, minimum=low, maximum=high)
-            generated_mp = math.ceil((side * side * outpaint_frames) / 1_000_000)
+            canvas_w, canvas_h = models.ltx_canvas(resolution, target, side)
+            generated_mp = math.ceil((canvas_w * canvas_h * outpaint_frames) / 1_000_000)
             cost = _decimal(outpaint_entry["unit_price_usd"]) * generated_mp
             stages.append(
                 _stage(
@@ -186,8 +209,8 @@ def quote_video(
                     duration_seconds=float(effective),
                     frames=outpaint_frames,
                     fps=outpaint_fps,
-                    output_width=side,
-                    output_height=side,
+                    output_width=canvas_w,
+                    output_height=canvas_h,
                     billed_megapixels=generated_mp,
                     resolution=resolution,
                 )
@@ -218,7 +241,7 @@ def quote_video(
                     duration_seconds=float(effective),
                     billed_seconds=int(billed_seconds),
                     resolution=resolution,
-                    aspect_ratio="1:1",
+                    aspect_ratio=target,
                     **({"approximate": True} if over_limit else {}),
                 )
             )
@@ -238,7 +261,7 @@ def quote_video(
                     duration_seconds=float(effective),
                     billed_seconds=int(billed_seconds),
                     resolution=resolution,
-                    aspect_ratio="1:1",
+                    aspect_ratio=target,
                 )
             )
         else:
@@ -288,7 +311,7 @@ def quote_video(
             else:
                 if not (source_fps and source_frames):
                     raise PricingError("SeedVR credit quotes require source frame metadata.")
-                chained = not upscale_only and not is_square
+                chained = extend
                 if chained and not estimate:
                     raise PricingError("Reframe-to-SeedVR chaining is BYOK-only because output frame count is not deterministic.")
                 fps = float(source_fps)
@@ -300,14 +323,9 @@ def quote_video(
                 if chained:
                     # Estimate only: assume the reframe model returns the source frame rate.
                     seedvr_approximate = True
-            if not upscale_only or is_square:
-                out_w = out_h = side
-            elif width >= height:
-                out_h = side
-                out_w = math.ceil(side * width / max(1, height))
-            else:
-                out_w = side
-                out_h = math.ceil(side * height / max(1, width))
+            # After an extend the upscaler gets the target canvas, else the source shape.
+            shape = _ratio_shape(target) if extend else (int(width), int(height))
+            out_w, out_h = models.short_side_dims(side, *shape)
             generated_mp = _decimal(out_w * out_h * frame_count) / MICRO_USD
             cost = _decimal(entry["unit_price_usd"]) * generated_mp
             stages.append(
@@ -330,31 +348,47 @@ def quote_video(
 
     return _quote_payload(
         "video", stages, effective_duration=float(effective), square_input=is_square,
-        source_fps=source_fps, source_frames=source_frames,
+        target_aspect=target, extend=extend, source_fps=source_fps, source_frames=source_frames,
     )
 
 
-def image_work_dimensions(width: int, height: int) -> tuple[int, int, float]:
+def image_work_dimensions(width: int, height: int, target: str = "1:1") -> tuple[int, int, float]:
     width = max(1, int(width))
     height = max(1, int(height))
     longest = max(width, height)
     scale = min(1.0, IMAGE_OUTPAINT_MAX_SIDE / longest)
+    if target != "1:1" and not aspect_matches(width, height, target):
+        # The total expand also stays within IMAGE_OUTPAINT_MAX_SIDE; the slack
+        # absorbs the even round-up of the canvas after the resize.
+        canvas_w, canvas_h = aspect_canvas(width, height, target)
+        expand = (canvas_w - width) + (canvas_h - height)
+        scale = min(scale, (IMAGE_OUTPAINT_MAX_SIDE - 4) / expand)
     return max(1, round(width * scale)), max(1, round(height * scale)), scale
+
+
+def image_canvas(work_w: int, work_h: int, target: str = "1:1") -> tuple[int, int]:
+    """Outpainted image size: square keeps today's longest-side canvas."""
+    if target == "1:1":
+        side = max(work_w, work_h)
+        return side, side
+    return aspect_canvas(work_w, work_h, target)
 
 
 def quote_image(*, width: int, height: int, params: dict[str, Any]) -> dict[str, Any]:
     stages: list[StageCost] = []
     upscale_only = bool(params.get("upscale_only", False))
     is_square = int(width) == int(height)
-    work_w, work_h, scale = image_work_dimensions(width, height)
+    target = target_aspect(params)
+    extend = not upscale_only and needs_extend(int(width), int(height), target)
+    work_w, work_h, scale = image_work_dimensions(width, height, target)
+    canvas_w, canvas_h = image_canvas(work_w, work_h, target)
 
-    if not upscale_only and not is_square:
+    if extend:
         model_id = models.normalize_model_id(str(params.get("outpaint_model") or models.IMAGE_MODELS["outpaint_img"]))
         entry = _catalog_entry(model_id, models.IMAGE_OUTPAINT)
         if not entry:
             raise PricingError("Custom image outpainting models require a personal Fal key.")
-        side = max(work_w, work_h)
-        output_mp = _decimal(side * side) / MICRO_USD
+        output_mp = _decimal(canvas_w * canvas_h) / MICRO_USD
         cost = _decimal(entry["unit_price_usd"]) * output_mp
         stages.append(
             _stage(
@@ -366,8 +400,8 @@ def quote_image(*, width: int, height: int, params: dict[str, Any]) -> dict[str,
                 work_width=work_w,
                 work_height=work_h,
                 work_scale=scale,
-                output_width=side,
-                output_height=side,
+                output_width=canvas_w,
+                output_height=canvas_h,
                 output_megapixels=float(output_mp),
             )
         )
@@ -380,8 +414,8 @@ def quote_image(*, width: int, height: int, params: dict[str, Any]) -> dict[str,
         if not entry.get("credit_enabled"):
             raise PricingError(f"{entry['label']} requires a personal Fal key.")
         factor = _decimal(entry.get("default_factor", 2))
-        if not upscale_only and not is_square:
-            input_w = input_h = max(work_w, work_h)
+        if extend:
+            input_w, input_h = canvas_w, canvas_h
         else:
             input_w, input_h = int(width), int(height)
         output_mp = _decimal(input_w * input_h) * factor * factor / MICRO_USD
@@ -398,7 +432,7 @@ def quote_image(*, width: int, height: int, params: dict[str, Any]) -> dict[str,
             )
         )
 
-    return _quote_payload("image", stages, square_input=is_square)
+    return _quote_payload("image", stages, square_input=is_square, target_aspect=target, extend=extend)
 
 
 def _quote_payload(kind: str, stages: list[StageCost], **details: Any) -> dict[str, Any]:

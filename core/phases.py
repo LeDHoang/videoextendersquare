@@ -16,7 +16,7 @@ PHASES: list[tuple[str, str, float]] = [
     ("Uploading", "UPLOAD TO CDN", 0.10),
     ("Submitting", "SUBMIT JOB", 0.15),
     ("Queued", "QUEUED AT FAL", 0.20),
-    ("already square", "SKIP OUTPAINT", 0.55),
+    ("Skipping outpainting", "SKIP OUTPAINT", 0.55),
     ("Outpainting: Completed", "OUTPAINT COMPLETE", 0.60),
     ("Outpainting", "OUTPAINTING", 0.40),
     ("Downloading", "DOWNLOAD RESULT", 0.70),

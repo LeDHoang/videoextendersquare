@@ -14,7 +14,7 @@ from core import models as _models
 from server.billing.parameters import image_parameters, model_defaults
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
 from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
-from pipeline.utils import calculate_square_padding, get_image_dimensions, shown_image_size
+from pipeline.utils import TARGET_ASPECTS, calculate_square_padding, get_image_dimensions, needs_extend, shown_image_size
 from server import media as SM
 from server import output
 from server import kill_switch, quotas, render_index, trust, upload_log
@@ -88,10 +88,12 @@ def upload_image(
         except OSError:
             pass
         raise HTTPException(status_code=413, detail=f"Image dimensions are too large: {ex}") from ex
+    # Dims, padding and the stereo layout follow the still as shown (EXIF
+    # orientation applied), the shape the quote prices.
+    w, h = shown_image_size(dest_path, w, h)
+    shown_w, shown_h = w, h
     top, bottom, left, right = calculate_square_padding(w, h)
     orientation = "LANDSCAPE" if w > h else ("PORTRAIT" if h > w else "SQUARE")
-    # Stereo layout follows the still as shown (EXIF orientation applied).
-    shown_w, shown_h = shown_image_size(dest_path, w, h)
     upload_log.record(
         stage_id, "upload", kind="image", user_id=context.user.id, filename=file.filename,
         size_bytes=size_bytes, width=w, height=h, ms=round((time.monotonic() - started) * 1000),
@@ -117,6 +119,8 @@ def start_image_process(
     stage_id: str = Form(...),
     prompt: str = Form(""),
     upscale_only: bool = Form(False),
+    # None: a legacy caller that names no shape keeps today's square behaviour.
+    target_aspect: str | None = Form(None),
     sharpening: float = Form(0.0),
     upscale_engine: str = Form("fast"),
     # Empty: the same default the quote used (billing/parameters.py model_defaults).
@@ -135,6 +139,8 @@ def start_image_process(
     billing; Fal-backed work additionally needs an owned billing record.
     """
     validate_origin(request)
+    if target_aspect is not None and target_aspect not in TARGET_ASPECTS:
+        raise HTTPException(status_code=400, detail="Invalid target_aspect")
     try:
         custom_outpaint = _models.parse_custom_args(custom_outpaint_args)
     except ValueError as ex:
@@ -151,13 +157,15 @@ def start_image_process(
     if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
         raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
 
-    width, height = get_image_dimensions(src_path)
+    width, height = shown_image_size(src_path, *get_image_dimensions(src_path))
     submit_fingerprint = stage_fingerprint(src_path, width=width, height=height)
-    cloud_required = ((not upscale_only) and width != height) or upscale_engine.casefold() == "fal"
+    extend = (not upscale_only) and needs_extend(width, height, target_aspect or "1:1")
+    cloud_required = extend or upscale_engine.casefold() == "fal"
     kill_switch.require_open(db, paid=cloud_required)
     params = image_parameters({
         "prompt": prompt,
         "upscale_only": upscale_only,
+        "target_aspect": target_aspect,
         "sharpening": sharpening,
         "upscale_engine": upscale_engine,
         "upscale_model": upscale_model,
@@ -186,7 +194,7 @@ def start_image_process(
                 require_billing_secrets()
                 fal_key = resolve_fal_key(db, user_id=owner_id, payment_source=payment_source)
                 stage_specs = []
-                if not upscale_only and width != height:
+                if extend:
                     stage_specs.append(("outpaint", params["outpaint_model"]))
                 if params["upscale_engine"] == "fal":
                     stage_specs.append(("upscale", params["upscale_model"]))
@@ -225,6 +233,7 @@ def start_image_process(
         "prompt": params["prompt"],
         "fal_key": fal_key,
         "upscale_only": params["upscale_only"],
+        "target_aspect": params["target_aspect"],
         "sharpening": params["sharpening"],
         "upscale_engine": params["upscale_engine"],
         "upscale_model": params["upscale_model"],

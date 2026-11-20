@@ -1,5 +1,6 @@
-"""MAKE 3D — turn a square 2D upload or extend render into a side-by-side
-stereo (2:1) result with the local W8T converter (pipeline/spatial_worker.py).
+"""MAKE 3D — turn a 1:1, 16:9 or 9:16 2D upload or extend render into a
+side-by-side stereo result (one eye per half, each the source's shape) with
+the local W8T converter (pipeline/spatial_worker.py).
 
 The job is an ordinary image/video job: progress, cancel, result and download
 use the /api/{kind}/jobs/{id} routes, and publish takes its job_id with
@@ -21,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from pipeline import spatial_worker as sw
+from pipeline.utils import aspect_matches
 from server import media as SM
 from server import kill_switch, output, quotas, render_index, trust, upload_log
 from server.features import feature_enabled, stereo_convert_installed
@@ -37,7 +39,7 @@ CONVERTS_PER_HOUR = 10
 
 class ConvertRequest(BaseModel):
     kind: Literal["image", "video"]
-    # Exactly one: a staged square upload or a finished extend job.
+    # Exactly one: a staged upload or a finished extend job.
     stage_id: str | None = None
     job_id: str | None = None
     # The spatial version (colour + depth, layout "sbsd") instead of a baked right eye.
@@ -48,6 +50,11 @@ def _reject(code: str, message: str) -> HTTPException:
     return HTTPException(status_code=400, detail={"code": code, "message": message})
 
 
+def _eye_shape_ok(width: int, height: int) -> bool:
+    """A square source stays exact; 16:9 / 9:16 take the usual aspect tolerance."""
+    return width == height or aspect_matches(width, height, "16:9") or aspect_matches(width, height, "9:16")
+
+
 @router.post("/convert")
 def convert_to_3d(
     req: ConvertRequest,
@@ -55,7 +62,10 @@ def convert_to_3d(
     context: AuthContext = Depends(require_auth_csrf),
     db: Session = Depends(get_db),
 ):
-    """Queue a 2D-to-3D conversion of one square image or video (≤ 60 s)."""
+    """Queue a 2D-to-3D conversion of one 1:1 / 16:9 / 9:16 image or video (≤ 60 s).
+
+    A depth_pack request for another shape answers status "skipped" with no job.
+    """
     if req.depth_pack:
         enabled = feature_enabled("SX_SPATIAL_DEFAULT_ENABLED")
     else:
@@ -77,11 +87,16 @@ def convert_to_3d(
     width, height = info.get("width"), info.get("height")
     if not width or not height:
         raise _reject("UNREADABLE_SOURCE", "This file could not be read.")
-    if width != height:
-        # A square frame is never a stereo pair here (those are exactly 2:1 or 1:2).
-        raise _reject("NOT_SQUARE", f"MAKE 3D needs a square (1:1) source; got {width}x{height}. Extend it first.")
-    rw, _rh, crop = sw.eye_geometry(width, height)
-    if rw - 2 * crop < 64:
+    if not _eye_shape_ok(width, height):
+        # Each eye keeps the source's shape: 1:1, 16:9 or 9:16 only.
+        message = f"MAKE 3D needs a 1:1, 16:9 or 9:16 source; got {width}x{height}. Extend it first."
+        if req.depth_pack:
+            # depth_pack is asked for every slide of a post, so another shape is skipped, not an error.
+            return {"job_id": None, "status": "skipped", "kind": req.kind,
+                    "code": "UNSUPPORTED_SHAPE", "message": message}
+        raise _reject("UNSUPPORTED_SHAPE", message)
+    rw, rh, crop = sw.eye_geometry(width, height)
+    if min(rw, rh) - 2 * crop < 64:
         raise _reject("TOO_SMALL", "MAKE 3D needs a source of at least 68x68.")
     if req.kind == "video" and not 0 < (info.get("duration_ms") or 0) <= sw.MAX_VIDEO_SECONDS * 1000:
         raise _reject("SOURCE_TOO_LONG", f"MAKE 3D takes videos up to {sw.MAX_VIDEO_SECONDS}s.")

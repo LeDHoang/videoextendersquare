@@ -192,7 +192,7 @@ def _check_stereo_pointer(req: "PublishRequest", context: AuthContext) -> None:
 
 
 def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
-    """Every file of a stereo post must hold the layout: one square per eye."""
+    """Every file of a stereo post must hold the layout: one 1:1, 16:9 or 9:16 image per eye."""
     layout = req.stereo_layout
     if layout == "mono":
         return
@@ -203,9 +203,9 @@ def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"3D {_STEREO_NAMES[layout]} needs an exact "
-                    f"{'2:1' if layout == 'sbs' else '1:2'} frame with one square per eye; "
-                    f"got {width or '?'}x{height or '?'}."
+                    f"3D {_STEREO_NAMES[layout]} needs a "
+                    f"{'2:1, 32:9 or 9:8' if layout == 'sbs' else '1:2, 9:32 or 8:9'} frame "
+                    f"(one 1:1, 16:9 or 9:16 image per eye); got {width or '?'}x{height or '?'}."
                 ),
             )
         eye_w, eye_h = eye_size(layout, width, height)

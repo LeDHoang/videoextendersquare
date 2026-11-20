@@ -57,7 +57,7 @@ def render(ctx: dict) -> None:
     probes = ctx["probes"]
     blocked = H.blockers(probes, need_video=False)
 
-    C.hero("Square Extender 2K", "1:1 · 3840×3840 · OUTPAINT + UPSCALE")
+    C.hero("Square Extender 2K", "1:1 · 2048×2048 · OUTPAINT + UPSCALE")
 
     if blocked:
         C.blocking_banner(
@@ -79,7 +79,7 @@ def render(ctx: dict) -> None:
             C.spec_row([
                 ("SOURCE", f"{meta['w']}×{meta['h']}",
                  f"{meta['orientation']} · {M.human_bytes(meta['bytes'])}"),
-                ("TARGET", "3840×3840", "1:1 SQUARE"),
+                ("TARGET", "2048×2048", "1:1 SQUARE"),
                 ("PAD", f"L {l}  R {r}", f"T {t}  B {b}"),
             ])
             st.image(items[0]["bytes"], width=260)
@@ -87,7 +87,7 @@ def render(ctx: dict) -> None:
             total_bytes = sum(it["meta"]["bytes"] for it in items)
             C.spec_row([
                 ("BATCH", f"{count} IMAGES", M.human_bytes(total_bytes)),
-                ("TARGET", "3840×3840 EACH", "1:1 SQUARE"),
+                ("TARGET", "2048×2048 EACH", "1:1 SQUARE"),
                 ("PARALLEL", "AUTO-SCALED", "CPU QUEUE"),
             ])
             cols = st.columns(min(count, 5))
@@ -168,7 +168,7 @@ def render(ctx: dict) -> None:
         disabled = bool(blocked) or missing_key or S.get(NS, "running", False)
 
         st.markdown("")
-        btn_label = f"▶  RENDER {len(items or [])} IMAGE(S) 4K SQUARE" if items else "▶  RENDER 4K SQUARE"
+        btn_label = f"▶  RENDER {len(items or [])} IMAGE(S) 2K SQUARE" if items else "▶  RENDER 2K SQUARE"
         go = st.button(btn_label, type="primary",
                        disabled=disabled, key=S.wkey(NS, "go"),
                        width="stretch")
@@ -232,11 +232,11 @@ def render(ctx: dict) -> None:
 
     if not results:
         C.empty_state("NO RENDER YET",
-                      "Configure the pipeline and render to produce 3840×3840 masters.")
+                      "Configure the pipeline and render to produce 2048×2048 masters.")
         return
 
     C.result_header("03 / RESULT",
-                    f"{len(results)} ITEM(S) PROCESSED · 3840×3840 · PNG")
+                    f"{len(results)} ITEM(S) PROCESSED · 2048×2048 · PNG")
 
     # Item selector if multiple results
     selected_result = results[0]
@@ -263,7 +263,7 @@ def render(ctx: dict) -> None:
             C.eyebrow("SOURCE")
             st.image(src_bytes, width="stretch")
         with b:
-            C.eyebrow("4K SQUARE")
+            C.eyebrow("2K SQUARE")
             st.image(selected_result["path"], width="stretch")
     else:
         st.image(selected_result["path"], width="stretch")

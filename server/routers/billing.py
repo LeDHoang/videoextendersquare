@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core import models as model_catalog
-from pipeline.utils import get_image_dimensions, get_video_dimensions_and_duration, get_video_frame_metadata
+from pipeline.utils import get_image_dimensions, get_video_dimensions_and_duration, get_video_frame_metadata, shown_image_size
 from server.billing.crypto import FalKeyConfigurationError, encrypt_fal_key, key_hint
 from server.billing.parameters import image_parameters, model_defaults, video_parameters
 from server.billing.service import (
@@ -100,7 +100,8 @@ def _staged_metadata(kind: str, stage_id: str, request: Request, context: AuthCo
         if not path or not os.path.exists(path) or not stage_owner_matches(owner, request, context):
             raise HTTPException(status_code=400, detail={"code": "INVALID_STAGE", "message": "Upload is invalid or expired."})
         try:
-            width, height = _cached_probe(f"img:{stage_id}", path, lambda: get_image_dimensions(path))
+            # Display dims (EXIF orientation applied): the shape the job fills.
+            width, height = _cached_probe(f"img:{stage_id}", path, lambda: shown_image_size(path, *get_image_dimensions(path)))
         except ValueError as ex:
             raise HTTPException(status_code=413, detail={"code": "IMAGE_DIMENSIONS_TOO_LARGE", "message": str(ex)}) from ex
         return path, width, height, None, None, None
@@ -112,7 +113,7 @@ def _staged_metadata(kind: str, stage_id: str, request: Request, context: AuthCo
         owner = staged[2] if staged and len(staged) > 2 else None
         if not path or not os.path.exists(path) or not stage_owner_matches(owner, request, context):
             raise HTTPException(status_code=400, detail={"code": "INVALID_STAGE", "message": "Upload is invalid or expired."})
-        width, height, duration = _cached_probe(f"vid:{stage_id}", path, lambda: get_video_dimensions_and_duration(path))
+        width, height, duration = _cached_probe(f"vid:{stage_id}", path, lambda: get_video_dimensions_and_duration(path, display=True))
         fps, frames = _cached_probe(f"frames:{stage_id}", path, lambda: get_video_frame_metadata(path))
         return path, width, height, duration, fps, frames
     raise HTTPException(status_code=422, detail={"code": "INVALID_KIND", "message": "kind must be image or video."})

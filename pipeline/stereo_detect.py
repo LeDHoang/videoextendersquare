@@ -1,9 +1,13 @@
 """Detect full side-by-side (SBS) and full top-bottom (TB) stereoscopic media.
 
-A stereo post keeps one square image per eye:
+A stereo post keeps one image per eye, each 1:1, 16:9 or 9:16
+(STEREO_FRAME_SHAPES):
 
-* ``sbs`` — width == 2 * height, left eye in the left half.
-* ``tb``  — height == 2 * width, left eye in the top half.
+* ``sbs`` — left eye in the left half: a 2:1, 32:9 or 9:8 frame.
+* ``tb``  — left eye in the top half: a 1:2, 9:32 or 8:9 frame.
+
+Detection only proposes 2:1, 32:9, 1:2 and 9:32. A near-square 9:8 / 8:9
+frame is an ordinary photo far more often, so those stay manual-only.
 
 Detection runs in two passes:
 
@@ -33,10 +37,27 @@ from statistics import median
 
 from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
 
+from pipeline.utils import ASPECT_TOLERANCE, parse_aspect
+
 STEREO_LAYOUTS = ("mono", "sbs", "tb")
 
-# Edge length of each eye patch the content check compares.
+# (layout, eye shape) -> tolerance on the eye's aspect. Square eyes stay an
+# exact 2:1 / 1:2 frame; the other shapes absorb coded sizes such as 1088.
+STEREO_FRAME_SHAPES = {
+    ("sbs", "1:1"): 0.0,
+    ("sbs", "16:9"): ASPECT_TOLERANCE,
+    ("sbs", "9:16"): ASPECT_TOLERANCE,  # 9:8 frame: manual only
+    ("tb", "1:1"): 0.0,
+    ("tb", "16:9"): ASPECT_TOLERANCE,  # 8:9 frame: manual only
+    ("tb", "9:16"): ASPECT_TOLERANCE,
+}
+# The shapes detection may propose on its own.
+_AUTO_SHAPES = (("sbs", "1:1"), ("sbs", "16:9"), ("tb", "1:1"), ("tb", "9:16"))
+
+# Edge length of each eye patch the content check compares (the short side
+# for 16:9 / 9:16 eyes, whose patch keeps the eye's shape).
 PATCH = 128
+EYE_PATCHES = {"1:1": (PATCH, PATCH), "16:9": (228, PATCH), "9:16": (PATCH, 228)}
 # Horizontal shifts (in patch pixels) tried when aligning the two eyes.
 MAX_SHIFT = 12
 # Content score at or above which a candidate counts as stereo. Calibrated
@@ -69,18 +90,35 @@ _MKV_STEREO_MODES = {
 _MKV_INVERTED_MODES = {"right_left", "11", "bottom_top", "2"}
 
 
-def candidate_layout(width: int | None, height: int | None) -> str | None:
-    """Return the stereo layout an exact 2:1 / 1:2 frame could be, else None."""
+def _frame_holds(layout: str, eye: str, w: int, h: int) -> bool:
+    """True when a w x h frame holds two *eye*-shaped eyes in *layout*."""
+    tolerance = STEREO_FRAME_SHAPES[(layout, eye)]
+    if tolerance == 0.0:
+        num, den = (int(n) for n in eye.split(":"))
+        return w * den == 2 * h * num if layout == "sbs" else 2 * w * den == h * num
+    eye_w, eye_h = (w / 2, h) if layout == "sbs" else (w, h / 2)
+    return abs((eye_w / eye_h) / parse_aspect(eye) - 1) <= tolerance
+
+
+def frame_eye_shape(layout: str, width: int | None, height: int | None) -> str | None:
+    """The eye shape ("1:1" / "16:9" / "9:16") a frame holds in *layout*, else None."""
     try:
         w, h = int(width or 0), int(height or 0)
     except (TypeError, ValueError):
         return None
     if w <= 0 or h <= 0:
         return None
-    if w == 2 * h:
-        return "sbs"
-    if h == 2 * w:
-        return "tb"
+    for frame_layout, eye in STEREO_FRAME_SHAPES:
+        if frame_layout == layout and _frame_holds(layout, eye, w, h):
+            return eye
+    return None
+
+
+def candidate_layout(width: int | None, height: int | None) -> str | None:
+    """Return the stereo layout a 2:1 / 32:9 / 1:2 / 9:32 frame could be, else None."""
+    for layout, eye in _AUTO_SHAPES:
+        if frame_eye_shape(layout, width, height) == eye:
+            return layout
     return None
 
 
@@ -88,7 +126,7 @@ def layout_matches(layout: str, width: int | None, height: int | None) -> bool:
     """True when a frame of width x height can hold the given stereo layout."""
     if layout == "mono":
         return True
-    return candidate_layout(width, height) == layout
+    return frame_eye_shape(layout, width, height) is not None
 
 
 def eye_size(layout: str, width: int, height: int) -> tuple[int, int]:
@@ -198,14 +236,14 @@ def eye_halves(image: Image.Image, layout: str) -> tuple[Image.Image, Image.Imag
     raise ValueError(f"not a stereo layout: {layout!r}")
 
 
-def _detail_patch(eye: Image.Image) -> Image.Image:
+def _detail_patch(eye: Image.Image, size: tuple[int, int] = (PATCH, PATCH)) -> Image.Image:
     """Small grayscale patch with the low frequencies removed.
 
     Removing the blur keeps edges/texture (what two eyes share) and drops
     broad gradients (sky above ground), which the two halves of an ordinary
     wide frame also share.
     """
-    gray = ImageOps.grayscale(eye).resize((PATCH, PATCH), Image.BILINEAR)
+    gray = ImageOps.grayscale(eye).resize(size, Image.BILINEAR)
     blur = gray.filter(ImageFilter.GaussianBlur(4))
     detail = ImageChops.subtract(gray, blur, scale=1.0, offset=128)
     # A light blur on top tolerates sub-pixel disparity between the eyes.
@@ -214,24 +252,26 @@ def _detail_patch(eye: Image.Image) -> Image.Image:
 
 def _shift_diff(a: Image.Image, b: Image.Image, shift: int) -> float:
     """Mean absolute difference of a vs b moved `shift` pixels to the right."""
+    w, h = a.size
     if shift >= 0:
-        a_box = (shift, 0, PATCH, PATCH)
-        b_box = (0, 0, PATCH - shift, PATCH)
+        a_box = (shift, 0, w, h)
+        b_box = (0, 0, w - shift, h)
     else:
-        a_box = (0, 0, PATCH + shift, PATCH)
-        b_box = (-shift, 0, PATCH, PATCH)
+        a_box = (0, 0, w + shift, h)
+        b_box = (-shift, 0, w, h)
     diff = ImageChops.difference(a.crop(a_box), b.crop(b_box))
     return ImageStat.Stat(diff).mean[0]
 
 
-def pair_match(left: Image.Image, right: Image.Image) -> tuple[float, int] | None:
+def pair_match(left: Image.Image, right: Image.Image, eye: str = "1:1") -> tuple[float, int] | None:
     """(similarity in [0, 1], best shift) of two eye images; None when too flat.
 
     1.0 means the right eye is the left eye shifted horizontally; ~0 means
-    the two halves are unrelated. The shift is in patch pixels.
+    the two halves are unrelated. The shift is in patch pixels. *eye* is
+    the eye's shape, which the patch keeps.
     """
-    a = _detail_patch(left)
-    b = _detail_patch(right)
+    a = _detail_patch(left, EYE_PATCHES[eye])
+    b = _detail_patch(right, EYE_PATCHES[eye])
     spread = min(ImageStat.Stat(a).stddev[0], ImageStat.Stat(b).stddev[0])
     if spread < MIN_DETAIL:
         return None
@@ -247,21 +287,22 @@ def pair_score(left: Image.Image, right: Image.Image) -> float | None:
     return None if match is None else match[0]
 
 
-def image_match(image: Image.Image, layout: str) -> tuple[float, int] | None:
+def image_match(image: Image.Image, layout: str, eye: str = "1:1") -> tuple[float, int] | None:
     left, right = eye_halves(image.convert("RGB"), layout)
-    return pair_match(left, right)
+    return pair_match(left, right, eye)
 
 
-def image_score(image: Image.Image, layout: str) -> float | None:
-    match = image_match(image, layout)
+def image_score(image: Image.Image, layout: str, eye: str = "1:1") -> float | None:
+    match = image_match(image, layout, eye)
     return None if match is None else match[0]
 
 
-def _video_frames(src: str, duration: float | None, layout: str) -> list[Image.Image]:
+def _video_frames(src: str, duration: float | None, layout: str, eye: str = "1:1") -> list[Image.Image]:
     """Grab up to three small frames (15/50/85% through the clip)."""
     points = [0.15, 0.5, 0.85] if duration and duration > 0 else [None]
-    # Keep 2 * PATCH * 2 on the long axis so each eye still has >= PATCH px.
-    scale = f"scale={PATCH * 4}:{PATCH * 2}" if layout == "sbs" else f"scale={PATCH * 2}:{PATCH * 4}"
+    # Keep twice the eye patch per eye, so each eye still has >= its patch in px.
+    pw, ph = EYE_PATCHES[eye]
+    scale = f"scale={pw * 4}:{ph * 2}" if layout == "sbs" else f"scale={pw * 2}:{ph * 4}"
     frames: list[Image.Image] = []
     for point in points:
         seek = ["-ss", f"{duration * point:.3f}"] if point is not None else []
@@ -294,7 +335,7 @@ def detect_stereo(
 
     Returns ``{"candidate", "detected", "method", "score"}``:
 
-    * candidate — "sbs" / "tb" when the frame is exactly 2:1 / 1:2, else None.
+    * candidate — "sbs" for a 2:1 / 32:9 frame, "tb" for 1:2 / 9:32, else None.
     * detected  — True when metadata or content says the file is stereo.
     * method    — "metadata" / "content" when detected; "spherical" or
       "inverted" when metadata rules stereo out (no content pass);
@@ -306,6 +347,8 @@ def detect_stereo(
     result = {"candidate": candidate, "detected": False, "method": None, "score": None}
     if candidate is None:
         return result
+    # The content compare runs at the eye's own shape.
+    eye = frame_eye_shape(candidate, width, height)
 
     if kind == "video":
         meta = probe_metadata(src)
@@ -326,14 +369,14 @@ def detect_stereo(
     shifts: list[int] = []
     try:
         if kind == "video":
-            frames = _video_frames(src, duration, candidate)
+            frames = _video_frames(src, duration, candidate, eye)
         else:
             with Image.open(src) as img:
                 img.draft("RGB", (PATCH * 4, PATCH * 4))
                 # Split the still as shown, like the left-eye crop does.
                 frames = [ImageOps.exif_transpose(img).convert("RGB")]
         for frame in frames:
-            match = image_match(frame, candidate)
+            match = image_match(frame, candidate, eye)
             if match is not None:
                 scores.append(match[0])
                 shifts.append(match[1])

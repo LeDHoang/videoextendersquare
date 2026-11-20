@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from sqlalchemy.orm import Session
 
 from core import models
+from pipeline.utils import TARGET_ASPECTS
 from server.social.models import AppSetting
 
 # app_settings key of the administrator's model overrides (PUT /api/config/models).
@@ -51,10 +52,16 @@ def _text(value: Any, default: str = "") -> str:
     return str(value if value is not None else default)
 
 
+def _aspect(value: Any) -> str | None:
+    # None is a legacy caller that names no shape: today's square behaviour.
+    return value if value in TARGET_ASPECTS else None
+
+
 def image_parameters(raw: Mapping[str, Any], defaults: Mapping[str, str] = CATALOG_DEFAULTS) -> dict[str, Any]:
     return {
         "prompt": _text(raw.get("prompt")),
         "upscale_only": _bool(raw.get("upscale_only")),
+        "target_aspect": _aspect(raw.get("target_aspect")),
         "sharpening": _float(raw.get("sharpening"), 0.0),
         "upscale_engine": _text(raw.get("upscale_engine"), "fast").casefold(),
         "upscale_model": _model(raw, "upscale_model", defaults["upscale_img"]),
@@ -69,6 +76,7 @@ def video_parameters(raw: Mapping[str, Any], defaults: Mapping[str, str] = CATAL
     return {
         "prompt": _text(raw.get("prompt")),
         "upscale_only": _bool(raw.get("upscale_only")),
+        "target_aspect": _aspect(raw.get("target_aspect")),
         "upscale_engine": _text(raw.get("upscale_engine"), "fast").casefold(),
         "sharpening": _float(raw.get("sharpening"), 0.0),
         "outpaint_model": _model(raw, "outpaint_model", defaults["outpaint_vid"]),

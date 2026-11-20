@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 from decimal import Decimal
 
@@ -59,7 +60,11 @@ VIDEO_OUTPAINT = [
         "constraints": {"fps": 24, "min_frames": 9, "max_frames": 481, "resolutions": ["480p", "720p", "1080p"]},
         "resolutions": {"480p": 480, "720p": 720, "1080p": 1080},
         "default_resolution": "720p",
-        "fal_fields": {"output_resolution": ["resolutions", "constraints.resolutions"]},
+        "aspect_ratios": ["1:1", "16:9", "9:16"],
+        "fal_fields": {
+            "output_resolution": ["resolutions", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios"],
+        },
         "fal_frames": "num_frames",
     },
     {
@@ -78,7 +83,11 @@ VIDEO_OUTPAINT = [
         "constraints": {"fps": 24, "min_frames": 9, "max_frames": 481, "resolutions": ["480p", "720p", "1080p"], "max_loras": 3},
         "resolutions": {"480p": 480, "720p": 720, "1080p": 1080},
         "default_resolution": "720p",
-        "fal_fields": {"output_resolution": ["resolutions", "constraints.resolutions"]},
+        "aspect_ratios": ["1:1", "16:9", "9:16"],
+        "fal_fields": {
+            "output_resolution": ["resolutions", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios"],
+        },
         "fal_frames": "num_frames",
     },
     {
@@ -171,6 +180,29 @@ VIDEO_OUTPAINT = [
         },
     },
 ]
+
+
+# ESTIMATED, pending the approved LTX 2.3 probe jobs: the canvas LTX 2.3
+# renders per output_resolution and aspect_ratio. Square is side x side as
+# billed today; the wide and tall sizes assume the short side stays at the
+# resolution and the long side rounds up to a multiple of 32.
+LTX_23_CANVAS = {
+    "480p": {"1:1": (480, 480), "16:9": (864, 480), "9:16": (480, 864)},
+    "720p": {"1:1": (720, 720), "16:9": (1280, 720), "9:16": (720, 1280)},
+    "1080p": {"1:1": (1080, 1080), "16:9": (1920, 1080), "9:16": (1080, 1920)},
+}
+
+
+def ltx_canvas(resolution: str, aspect: str, side: int) -> tuple[int, int]:
+    """(width, height) LTX 2.3 renders at *resolution* and *aspect*; side x side if unknown."""
+    return LTX_23_CANVAS.get(resolution, {}).get(aspect, (side, side))
+
+
+def short_side_dims(side: int, width: int, height: int) -> tuple[int, int]:
+    """(width, height) with the short side at *side* and the shape of width x height."""
+    if width >= height:
+        return math.ceil(side * width / max(1, height)), side
+    return side, math.ceil(side * height / max(1, width))
 
 
 # ---------------------------------------------------------------------------
@@ -529,7 +561,7 @@ def custom_entry(model_id: str, kind: str) -> dict:
             "credit_enabled": False,
             "cost_note": "Estimate only — pull live pricing via MODEL INFO before rendering.",
             "requirements": "A saved personal Fal key; source clip is uploaded by the pipeline.",
-            "expects": "Sends {video_url, prompt, aspect_ratio: '1:1'}; expects a video URL back. "
+            "expects": "Sends {video_url, prompt, aspect_ratio: <the chosen shape>}; expects a video URL back. "
                        "Models with a different input schema may reject the job — check MODEL INFO.",
         }
     if kind == "image_upscale":
@@ -641,7 +673,9 @@ def _estimate_entries(catalog: list[dict], mid: str) -> list[dict]:
     return exact or [entry for entry in catalog if entry["model"].lower() in mid or mid in entry["model"].lower()]
 
 
-def estimate_outpaint_cost(model_id: str, *, duration: float, resolution: str | None = None) -> tuple[str, float]:
+def estimate_outpaint_cost(
+    model_id: str, *, duration: float, resolution: str | None = None, aspect: str = "1:1",
+) -> tuple[str, float]:
     """Return (label, estimated USD) for a video outpaint job.
 
     Mirrors pipeline/video_worker.py's inline math but from this single
@@ -656,9 +690,10 @@ def estimate_outpaint_cost(model_id: str, *, duration: float, resolution: str | 
                 rate = float(rates.get(resolution or entry.get("default_resolution"), rate))
             return entry["label"], (duration if duration > 0 else 5.0) * rate
         # per_mp
-        w = entry["resolutions"].get(resolution or entry.get("default_resolution"), 720)
+        res = resolution or entry.get("default_resolution")
+        w, h = ltx_canvas(res, aspect, entry["resolutions"].get(res, 720))
         frames = int(duration * 24) if duration > 0 else 121
-        mp = (w * w * frames) / 1000000.0
+        mp = (w * h * frames) / 1000000.0
         return entry["label"], mp * entry["price"]
     # Generic fallback matching the worker's default branch. Unknown ids are
     # user-supplied customs — label them as such so metrics stay truthful.
@@ -677,8 +712,12 @@ def estimate_upscale_cost(
     bytedance_res: str = "4k",
     bytedance_fps: str = "30fps",
     bytedance_tier: str = "fast",
+    shape: tuple[int, int] = (1, 1),
 ) -> tuple[str, float]:
-    """Return (label, estimated USD) for a video fal.ai upscale job."""
+    """Return (label, estimated USD) for a video fal.ai upscale job.
+
+    *shape* is (width, height) of the clip sent to the upscaler.
+    """
     mid = (model_id or "").lower()
     for entry in _estimate_entries(VIDEO_UPSCALE, mid):
         if entry["pricing_kind"] == "per_second":
@@ -689,9 +728,9 @@ def estimate_upscale_cost(
             dur_calc = duration if duration > 0 else 5.0
             return entry["label"], dur_calc * entry["price"]
         # per_mp (SeedVR)
-        w = entry["resolutions"].get(seedvr_target, 1080)
+        w, h = short_side_dims(entry["resolutions"].get(seedvr_target, 1080), *shape)
         frames = int(duration * 24) if duration > 0 else 121
-        mp = (w * w * frames) / 1000000.0
+        mp = (w * h * frames) / 1000000.0
         return entry["label"], mp * entry["price"]
     dur_calc = duration if duration > 0 else 5.0
     if model_id and model_id.strip():
