@@ -24,7 +24,7 @@ const FOV_PRESETS = { 'DESKTOP 70°': 70, 'QUEST 3S 90°': 90, 'QUEST 3 96°': 9
 
 // [tuning key, label, min, max, step]. Ranges cover the engine clamps.
 const TUNING_SLIDERS = [
-  ['screenScale', 'SCREEN SIZE (M)', 1, 10, 0.05],
+  ['screenScale', 'SCREEN SHORT SIDE (M)', 1, 10, 0.05],
   ['screenDistance', 'SCREEN DISTANCE (M)', 1.2, 6, 0.01],
   ['screenHeight', 'ANCHOR HEIGHT (M)', 0.8, 2.4, 0.01],
   ['dockWidth', 'DOCK WIDTH (× SCREEN)', 0.4, 1.2, 0.01],
@@ -33,6 +33,8 @@ const TUNING_SLIDERS = [
   ['panelFwdOffset', 'PANEL FORWARD (M)', -0.6, 0.3, 0.01],
   ['commentsScale', 'COMMENTS SIZE (× SCREEN)', 0.2, 0.8, 0.002],
   ['guideScale', 'GUIDE SIZE (× SCREEN)', 0.2, 0.8, 0.002],
+  ['longEdgeMaxDeg', 'LONG EDGE MAX (°)', 40, 85, 1],
+  ['lazyFollowEdge', 'LAZY FOLLOW (0 = HARD LOCK)', 0, 1, 0.05],
 ];
 
 // The shipped source lines in ui/assets/webxr_vr.js for the current tuning.
@@ -46,6 +48,8 @@ function formatTuningConstants(t) {
     `const CPANEL_SCALE_FACTOR = ${n(t.commentsScale)};`,
     `const GUIDE_SCALE_FACTOR = ${n(t.guideScale)};`,
     `const DOCK_GAP = ${n(t.dockGap)};`,
+    `const LONG_EDGE_MAX_DEG = ${n(t.longEdgeMaxDeg)};`,
+    `const LAZY_FOLLOW_EDGE = ${n(t.lazyFollowEdge)};`,
     `dockWidth: ${n(t.dockWidth)}, // in defaultLayoutTuning()`,
   ].join('\n');
 }

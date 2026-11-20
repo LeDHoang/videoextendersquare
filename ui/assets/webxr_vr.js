@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.30-20261110-vr-fixes-integration';
+  const VR_VERSION = 'v8.31-20261120-vr-screen-aspect';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
