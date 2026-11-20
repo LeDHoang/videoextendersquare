@@ -3099,6 +3099,7 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
     panelFwdOffset: -0.34,
     commentsScale: 0.432,
     guideScale: 0.314,
+    longEdgeMaxDeg: 60,
   });
   const before = api.getCommentsPanelLayout();
   const tuned = renderer.setLayoutTuning({ dockWidth: 0.7, panelSideGap: 0.5, screenScale: 20, bogus: 1 });

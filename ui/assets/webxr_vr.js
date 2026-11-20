@@ -46,6 +46,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   ];
   const ARC_ANGLE = 0.65; // ~37.24 deg
   const SPHERE_RADIUS = 1 / ARC_ANGLE; // ~1.5385m
+  // Non-square screens: the long edge stays within this angle of the eye
+  // (default size and distance) by bending the long axis less.
+  const LONG_EDGE_MAX_DEG = 60;
 
   // ─── State ──────────────────────────────────────────────────────────
   let videoElement = null;
@@ -65,6 +68,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   let previewHiFi = false;
   let sceneMode = 'reels'; // 'reels' | 'earth'
   let curvatureMode = 1; // 1: DOME, 2: SQ CURVE, 0: FLAT
+  // Applied screen shape (width/height of one eye); 1 = the square screen.
+  let screenAspect = 1;
   let isCurved = true;
   let stereoMode = false;
   let lockToViewer = false;
@@ -2428,6 +2433,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       panelFwdOffset: PANEL_FWD_OFFSET,
       commentsScale: CPANEL_SCALE_FACTOR,
       guideScale: GUIDE_SCALE_FACTOR,
+      longEdgeMaxDeg: LONG_EDGE_MAX_DEG,
     };
   }
   let layoutTuning = defaultLayoutTuning();
@@ -2903,19 +2909,66 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // ─── Path A: Screen Geometry Generation ─────────────────────────────
-  function createScreenGeometry(mode, width = 2.4, height = 2.4, segX = 48, segY = 48) {
+  // Screen shape for a width/height aspect, in short-side units: the short
+  // side stays 1 (today's square), the long side grows with the aspect up to
+  // the 16:9 span. Wider/taller ratios keep that long span and shrink the
+  // short side instead.
+  function screenSpan(aspect) {
+    const a = Number(aspect) > 0 ? Number(aspect) : 1;
+    if (a >= 1) {
+      const long = Math.min(a, 16 / 9);
+      return { w: long, h: long / a };
+    }
+    const long = Math.min(1 / a, 16 / 9);
+    return { w: long * a, h: long };
+  }
+
+  // Long-axis bend angle so the long edge stays within longEdgeMaxDeg of
+  // the eye at the default size and distance. A screen whose edge is already
+  // inside the limit keeps ARC_ANGLE (1:1 and 4:3 are untouched).
+  function longAxisArc(long) {
+    const alpha = ARC_ANGLE;
+    if (long <= 1) return alpha;
+    const maxRad = (Number(layoutTuning.longEdgeMaxDeg) || LONG_EDGE_MAX_DEG) * Math.PI / 180;
+    // Eye distance in screen-local units (local scale = screenScale / 2.4).
+    const D = -DEFAULT_POS.z / (DEFAULT_SCALE / 2.4);
+    const edgeAngle = (al) => {
+      const th = long * al;
+      return Math.atan2(Math.sin(th) / al, D - (1 - Math.cos(th)) / al);
+    };
+    if (edgeAngle(alpha) <= maxRad) return alpha;
+    let lo = 1e-4, hi = alpha;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      if (edgeAngle(mid) > maxRad) hi = mid; else lo = mid;
+    }
+    return lo;
+  }
+
+  // base is the short side of a 1:1 screen; curved modes keep today's arc
+  // per short-side unit, so a 1:1 screen is vertex-identical to the square.
+  function createScreenGeometry(mode, aspect = 1, base = 2.4, segX = 48, segY = 48) {
     ensureThree();
     if (!THREE) return null;
+    const span = screenSpan(aspect);
+    const width = base * span.w;
+    const height = base * span.h;
     if (mode === 0) {
       return new THREE.PlaneGeometry(width, height);
     }
 
     const geo = new THREE.PlaneGeometry(width, height, segX, segY);
     const pos = geo.attributes.position;
-    const halfW = width / 2;
-    const halfH = height / 2;
+    const halfW = base / 2;
+    const halfH = base / 2;
     const R = SPHERE_RADIUS;
     const alpha = ARC_ANGLE;
+    const landscape = span.w >= span.h;
+    const alphaL = longAxisArc(Math.max(span.w, span.h));
+    const alphaX = landscape ? alphaL : alpha;
+    const alphaY = landscape ? alpha : alphaL;
+    const RX = alphaX === alpha ? R : R * alpha / alphaX;
+    const RY = alphaY === alpha ? R : R * alpha / alphaY;
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -2926,19 +2979,30 @@ window.WebXRVR = window.WebXRVR || (function () {
         // DOME: Concave spherical radial cap
         const r = Math.sqrt(x * x + y * y);
         if (r > 0.0001) {
-          const phi = (r / halfW) * alpha;
-          const factor = (R * Math.sin(phi)) / r;
+          // Long-axis directions bend less (alphaL), blended by direction.
+          let a = alpha;
+          if (alphaL !== alpha) {
+            const u2 = landscape ? (x * x) / (r * r) : (y * y) / (r * r);
+            a = alpha * (1 - u2) + alphaL * u2;
+          }
+          const Re = a === alpha ? R : R * alpha / a;
+          const phi = (r / halfW) * a;
+          const factor = (Re * Math.sin(phi)) / r;
           nx = x * factor;
           ny = y * factor;
-          nz = R * (1 - Math.cos(phi));
+          nz = Re * (1 - Math.cos(phi));
         }
       } else if (mode === 2) {
         // SQ CURVE: Biaxial pillow curve
-        const thX = (x / halfW) * alpha;
-        const thY = (y / halfH) * alpha;
-        nx = R * Math.sin(thX);
-        ny = R * Math.sin(thY);
-        nz = R * (1 - Math.cos(thX) * Math.cos(thY));
+        const thX = (x / halfW) * alphaX;
+        const thY = (y / halfH) * alphaY;
+        nx = RX * Math.sin(thX);
+        ny = RY * Math.sin(thY);
+        nz = RX === RY
+          ? R * (1 - Math.cos(thX) * Math.cos(thY))
+          : (landscape
+            ? RX * (1 - Math.cos(thX)) + RY * (1 - Math.cos(thY)) * Math.cos(thX)
+            : RY * (1 - Math.cos(thY)) + RX * (1 - Math.cos(thX)) * Math.cos(thY));
       }
 
       pos.setXYZ(i, nx, ny, nz);
@@ -6909,7 +6973,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     if (!screenMesh) {
       ensureScreenQuat();
-      const screenGeo = createScreenGeometry(curvatureMode);
+      const screenGeo = createScreenGeometry(curvatureMode, screenAspect);
       const screenMat = new THREE.MeshBasicMaterial({
         map: videoTexture,
         side: THREE.DoubleSide,
@@ -6959,7 +7023,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     // ?glow=0 skips the ambient glow entirely (fill-rate bisection).
     if (!ambilightMesh && debugFlags.glow) {
-      const glowGeo = createScreenGeometry(curvatureMode, 2.4 * 1.34, 2.4 * 1.34, 24, 24) ||
+      const glowGeo = createScreenGeometry(curvatureMode, screenAspect, 2.4 * 1.34, 24, 24) ||
         new THREE.PlaneGeometry(3.2, 3.2);
       const glowMat = new THREE.MeshBasicMaterial({
         color: new THREE.Color(glowColor[0], glowColor[1], glowColor[2]),
@@ -6990,7 +7054,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       try { if (THREE.SRGBColorSpace !== undefined) overlayTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!overlayMesh && overlayTexture && debugFlags.overlay) {
-      const ovGeo = createScreenGeometry(curvatureMode);
+      const ovGeo = createScreenGeometry(curvatureMode, screenAspect);
       const ovMat = new THREE.MeshBasicMaterial({
         map: overlayTexture,
         transparent: true,
@@ -9983,7 +10047,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     next.screenScale = clampScreenScale(next.screenScale);
     next.screenDistance = clampScreenDistance(next.screenDistance);
+    const reshape = next.longEdgeMaxDeg !== layoutTuning.longEdgeMaxDeg;
     layoutTuning = next;
+    if (reshape) rebuildScreenGeometries(curvatureMode, screenAspect);
     screenScale = next.screenScale;
     screenDistance = next.screenDistance;
     screenPos = { x: DEFAULT_POS.x, y: next.screenHeight, z: -next.screenDistance };
@@ -10029,26 +10095,34 @@ window.WebXRVR = window.WebXRVR || (function () {
       // 'curved' is the legacy alias kept for older CDP probes/callers.
       mode = key === 'dome' ? 1 : (key === 'sq_curve' || key === 'curved' ? 2 : 0);
     }
-    curvatureMode = Number(mode) || 0;
+    rebuildScreenGeometries(Number(mode) || 0, screenAspect);
+    emitPreviewState();
+  }
+
+  // Rebuilds the screen, stereo eye, overlay and glow meshes for a curvature
+  // mode and screen aspect. Shared by setCurvatureMode and the per-post
+  // aspect change (applied at texture commit, never mid-post).
+  function rebuildScreenGeometries(mode, aspect) {
+    curvatureMode = mode;
     isCurved = (curvatureMode !== 0);
+    screenAspect = aspect;
     if (screenMesh) {
       if (screenMesh.geometry) screenMesh.geometry.dispose();
-      screenMesh.geometry = createScreenGeometry(curvatureMode);
+      screenMesh.geometry = createScreenGeometry(curvatureMode, screenAspect);
       // Stereo eye meshes share the screen's geometry.
       if (eyeMeshL) eyeMeshL.geometry = screenMesh.geometry;
       if (eyeMeshR) eyeMeshR.geometry = screenMesh.geometry;
     }
     if (overlayMesh) {
       if (overlayMesh.geometry) overlayMesh.geometry.dispose();
-      overlayMesh.geometry = createScreenGeometry(curvatureMode);
+      overlayMesh.geometry = createScreenGeometry(curvatureMode, screenAspect);
     }
     if (ambilightMesh) {
       if (ambilightMesh.geometry) ambilightMesh.geometry.dispose();
-      ambilightMesh.geometry = createScreenGeometry(curvatureMode, 2.4 * 1.34, 2.4 * 1.34, 24, 24) ||
+      ambilightMesh.geometry = createScreenGeometry(curvatureMode, screenAspect, 2.4 * 1.34, 24, 24) ||
         new THREE.PlaneGeometry(3.2, 3.2);
     }
     commitScreenTransform();
-    emitPreviewState();
   }
 
   function getCurvatureMode() {
@@ -12805,6 +12879,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         return low === null ? null : low * 180 / Math.PI;
       },
       postXRDiag,
+      createScreenGeometry,
       locationToUnit,
       earthZoneAngularRadius,
       earthZoneUV,
