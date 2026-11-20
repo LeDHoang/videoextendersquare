@@ -2611,12 +2611,17 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Straight up or down the yaw is noise: hold the screen's.
       const gazeYaw = flat > 1e-4 ? Math.atan2(-fx, -fz) : (followAngles ? followAngles.yaw : 0);
       const span = screenSpan(screenAspect);
+      const rising = !!(followAngles && followAngles.rising);
       followAngles = followAngles
         ? lazyFollowAngles(followAngles.yaw, followAngles.pitch, gazeYaw, gazePitch,
           edge * Math.atan2(screenScale * span.w / 2, dist), edge * Math.atan2(screenScale * span.h / 2, dist))
         : { yaw: gazeYaw, pitch: gazePitch };
-      // A screen faded by looking down rises with the gaze, so looking back up brings it back.
-      if (screenLookFade < 1 && gazePitch > followAngles.pitch) followAngles.pitch = gazePitch;
+      // A screen faded by looking down rises with the gaze, and keeps rising
+      // until the gaze turns down again, so looking back up brings it level.
+      if (screenLookFade < 1 || rising) {
+        if (gazePitch > followAngles.pitch) followAngles.pitch = gazePitch;
+        followAngles.rising = screenLookFade < 1 || gazePitch >= followAngles.pitch;
+      }
       const cp = Math.cos(followAngles.pitch);
       fx = -Math.sin(followAngles.yaw) * cp;
       fy = Math.sin(followAngles.pitch);

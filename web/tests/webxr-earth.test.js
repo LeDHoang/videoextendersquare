@@ -7640,6 +7640,57 @@ test('looking down past 30° fades the video out, and looking up brings it back'
   renderer.stopPreview();
 });
 
+test('wide and tall screens move the panels, dock, ground fade and lock distance', () => {
+  // startGround, plus a visual source that changes shape per post.
+  const gl = makeMockGl({ deleted: 0 });
+  const renderer = loadRenderer({ gl, withShell: true, search: '?vrtex=canvas' });
+  let source = stereoVideo('shape-1', 'mono', 2048, 2048);
+  renderer.init(source.element, { getVisualSource: () => source, getPlaylist: () => [KYOTO], getCurrentIndex: () => 0 });
+  renderer.startPreview(makePreviewCanvas(gl), { showControls: true });
+  const api = renderer.__test;
+  let t = 0;
+  const run = (ms) => { for (let spent = 0; spent < ms; spent += 100) { t += 100; renderer.__runScheduledFrame(t); } };
+  const shape = (aspect) => {
+    source = stereoVideo(`shape-${aspect}`, 'mono', Math.round(2048 * Math.max(1, aspect)), Math.round(2048 / Math.min(1, aspect)));
+    renderer.onVideoChange();
+    look(0);
+    assert.equal(renderer.getScreenAspect(), aspect);
+  };
+  const look = (deg) => { api.setPreviewLook(0, -deg * Math.PI / 180); run(300); };
+  const panelDist = () => {
+    const c = api.getCommentsPanelLayout().center;
+    return Math.hypot(c.x, c.y - 1.6, c.z);
+  };
+  const finite = (layout) => [layout.center.x, layout.center.y, layout.center.z, layout.w, layout.h].every(Number.isFinite);
+
+  shape(1);
+  const sqPanel = api.getCommentsPanelLayout();
+  const sqDockY = api.getSceneInfo().dock.pos[1];
+  assert.ok(panelDist() > 2.24, 'a square screen leaves its panels where they were');
+  assert.equal(api.groundGlobeState().screenFade, 1);
+
+  shape(16 / 9);
+  assert.ok(finite(api.getCommentsPanelLayout()) && finite(api.getGuidePanelLayout()));
+  assert.ok(panelDist() < 2.24, `a wide screen pulls its side panel nearer than the screen: ${panelDist()}`);
+  renderer.setLayoutTuning({ screenDistance: 1.2 });
+  assert.ok(api.lockDistance() > 1.2, 'the lock clears the deeper bulge of a wide curved screen');
+  renderer.setLayoutTuning({ screenDistance: 2.24 });
+
+  shape(9 / 16);
+  assert.ok(finite(api.getCommentsPanelLayout()));
+  assert.equal(api.getCommentsPanelLayout().w, sqPanel.w, 'panels size by the short side');
+  assert.ok(api.getSceneInfo().dock.pos[1] < sqDockY, 'the taller tag lowers the ground dock');
+  // Hard lock, a 10° nod: the tall screen's bottom edge covers the globe, the video stays.
+  renderer.setLayoutTuning({ lazyFollowEdge: 0 });
+  look(10);
+  assert.equal(api.screenFadeState().fade, 1);
+  assert.ok(api.groundGlobeState().screenFade < 1, `the globe fades under the tall screen: ${api.groundGlobeState().screenFade}`);
+  shape(1);
+  look(10);
+  assert.equal(api.groundGlobeState().screenFade, 1, 'a square screen never fades the globe');
+  renderer.stopPreview();
+});
+
 test('with lazy follow the video fades only once a look down drags the screen past 30°', () => {
   const { renderer, api, run } = startGround([KYOTO]);
   const look = (deg) => { api.setPreviewLook(0, -deg * Math.PI / 180); run(300); };
@@ -7653,5 +7704,13 @@ test('with lazy follow the video fades only once a look down drags the screen pa
   look(0);
   assert.deepEqual({ ...api.screenFadeState() }, { fade: 1, opacity: 1, transparent: false, depthWrite: true, visible: true });
   closeTo(api.getFollowAngles().pitch, 0); // the faded screen rose with the gaze
+  // A slow look back up: the screen rises with the gaze until it is fully back.
+  look(85);
+  for (let deg = 80; deg >= 0; deg -= 5) look(deg);
+  closeTo(api.getFollowAngles().pitch, 0);
+  assert.equal(api.screenFadeState().fade, 1);
+  // The first look down after that is a plain lazy glance again.
+  look(20);
+  closeTo(api.getFollowAngles().pitch, 0);
   renderer.stopPreview();
 });
