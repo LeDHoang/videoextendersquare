@@ -108,7 +108,7 @@ test('PackTile creator chip links to the curator profile', () => {
   const messages = read('web/src/components/messaging/MessagingPanel.jsx');
   assert.match(messages, /CURATED BY @/);
   const html = read('ui/assets/reels.html');
-  assert.match(html, /CURATED BY ' \+ packCreatorLabel/);
+  assert.match(html, /'Curated by', packCreatorLabel\(\)/);
 });
 
 test('Collections open straight into playback with no intro gate', () => {
@@ -163,13 +163,28 @@ test('Pack card CSS is flat enough for the SPA scoper (no comments or nested rul
 
 test('VR canvas for packs shares one obsidian frame with the collect canvas', () => {
   const html = read('ui/assets/reels.html');
+  const canvas = read('ui/assets/reels_pack_canvas.js');
+  // the pack cards draw in the shared module; the player wraps its frame for the collect card
+  assert.match(html, /<script>__REELS_PACK_CANVAS_JS__<\/script>/);
+  assert.match(html, /window\.ReelsPackCanvas\.create\(/);
   assert.match(html, /function drawPackCanvasFrame\(/);
   assert.match(html, /drawPackCanvasFrame\(ctx, 'SAVE TO COLLECTION'/);
-  assert.match(html, /drawPackCanvasFrame\(ctx, label, accent, chip\)/);
-  // hit regions the controllers rely on are unchanged
+  assert.match(canvas, /function drawPackCanvasFrame\(/);
+  assert.match(canvas, /drawPackCanvasFrame\(ctx, label, accent, chip, frameIcons\)/);
+  // hit regions the controllers rely on are unchanged, and the player still handles each
   for (const action of ['replay', 'return', 'explore', 'skip', 'save', 'share', 'close', 'publish-pack']) {
+    assert.match(canvas, new RegExp(`'${action}'`));
     assert.match(html, new RegExp(`'${action}'`));
   }
+});
+
+test('Immersive-preview workbench shows the pack VR cards from the same module', () => {
+  const bench = read('web/src/components/ui/VRPanelWorkbench.jsx');
+  assert.match(bench, /import '..\/..\/..\/..\/ui\/assets\/reels_pack_canvas\.js'/);
+  for (const key of ['PACK QUEUE', 'PACK COMPLETE', 'PACK UNAVAILABLE']) {
+    assert.match(bench, new RegExp(`'${key}'`));
+  }
+  assert.match(bench, /packCanvas\.render\(ctx, mode/);
 });
 
 test('Full-bleed fullscreen puts the action bar bottom-right and drops PREV/NEXT (swipe navigates)', () => {
@@ -232,4 +247,40 @@ test('Phone tab bar icons share one resting colour and recolour red when active'
   assert.match(css, /\.sx-bottom-nav-item \{[^}]*color: var\(--sx-ink\)/); // --sx-ink is #f2f3f5, the icons' resting stroke
   assert.match(css, /\.sx-bottom-nav-item\.sx-active \.sx-bottom-nav-svg \[stroke='#f2f3f5'\] \{\s*stroke: var\(--sx-accent/);
   assert.match(css, /\.sx-bottom-nav-item\.sx-active \.sx-bottom-nav-svg \[fill='#f2f3f5'\] \{\s*fill: var\(--sx-accent/);
+});
+
+test('VR pack queue shows a scrolling window of rows on a card over the paused frame', async () => {
+  const { default: PC } = await import('../../ui/assets/reels_pack_canvas.js');
+  const ctx = new Proxy({}, {
+    get: (target, key) => (key in target ? target[key]
+      : key === 'measureText' ? () => ({ width: 10 }) : () => ({ addColorStop() {} })),
+    set: (target, key, value) => { target[key] = value; return true; },
+  });
+  const pc = PC.create({ tok: (name, fallback) => fallback, icons: { row: {} } });
+  const items = Array.from({ length: 14 }, (_, i) => ({ title: `R${i}`, available: i !== 4 }));
+
+  assert.deepEqual(PC.queueWindow(14, 99), { first: 7, rows: PC.QUEUE_ROWS, max: 7 });
+  assert.deepEqual(PC.queueWindow(5, 3), { first: 0, rows: PC.QUEUE_ROWS, max: 0 });
+
+  const regions = pc.render(ctx, 'queue', { pack: {}, items, idx: 9, scroll: 5 });
+  assert.deepEqual(regions.filter((r) => r.action === 'select').map((r) => r.index), [5, 6, 7, 8, 9, 10, 11]);
+  assert.deepEqual(regions.filter((r) => r.action === 'scroll').map((r) => r.delta), [-1, 1]);
+  const short = pc.render(ctx, 'queue', { pack: {}, items: items.slice(0, 4), idx: 0 });
+  assert.equal(short.filter((r) => r.action === 'scroll').length, 0);
+
+  // On a 16:9 canvas the card is centred at QUEUE_CARD_SCALE of the short side.
+  const over = pc.renderQueueOver(ctx, 1820, 1024, { pack: {}, items, idx: 0 }, null);
+  const card = PC.QUEUE_CARD_SCALE * 1024;
+  for (const r of over) {
+    assert.ok(r.x >= (1820 - card) / 2 / 1820 && r.x + r.w <= (1820 + card) / 2 / 1820, r.action);
+    assert.ok(r.y >= (1024 - card) / 2 / 1024 && r.y + r.h <= (1024 + card) / 2 / 1024, r.action);
+  }
+
+  const html = read('ui/assets/reels.html');
+  assert.match(html, /onMainScreenScroll: scrollPackQueue/);
+  assert.match(html, /region\.action === 'scroll'\) scrollPackQueue\(region\.delta\)/);
+  assert.match(html, /aspect: packQueueBackdrop\.aspect/);
+  const vr = read('ui/assets/webxr_vr.js');
+  assert.match(vr, /source\.kind === 'static-card'\) return source\.aspect > 0 \? snapAspect\(source\.aspect\) : 1/);
+  assert.match(vr, /callbacks\.onMainScreenScroll\(thumbY > 0 \? 1 : -1\)/);
 });

@@ -79,6 +79,7 @@ PLAYER_SCRIPTS = {
     "__REELS_FEED_STATE_JS__": "reels_feed_state.js",
     "__REELS_REWARDS_JS__": "reels_rewards.js",
     "__REELS_PACK_STATE_JS__": "reels_pack_state.js",
+    "__REELS_PACK_CANVAS_JS__": "reels_pack_canvas.js",
     "__THREE_JS__": "three.min.js",
     "__VR_UI_CANVAS_JS__": "vr_ui_canvas.js",
     "__VR_SHELL_CANVAS_JS__": "vr_shell_canvas.js",

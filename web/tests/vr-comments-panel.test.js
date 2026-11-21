@@ -43,13 +43,36 @@ const comments = [
 test('comments panel shows the reel creator block like the 2D column', () => {
   const labels = panelText(loadCanvas(), { comments, item, itemState: {} });
   for (const text of ['echo_archive', '@echo_archive · 3D AGO', 'FOLLOW', 'NIGHT SET', 'Front row',
-    '#concert', 'Miami, USA', 'DUR', '0:15', 'LIKES', '1.8K', 'COMMENTS', 'VIEWS', '42.2K']) {
+    '#concert', 'Miami, USA', '1.8K', '2', '42.2K']) {
     assert.ok(labels.includes(text), `drew ${text}`);
   }
+  // Stats are icon + count lines like the 2D side panel: no labels, no duration chip.
+  for (const text of ['DUR', '0:15', 'LIKES', 'VIEWS']) assert.ok(!labels.includes(text), `no ${text}`);
   assert.ok(!labels.includes('ALL') && !labels.includes('SYNC'), 'no filter tabs');
   assert.ok(labels.includes('0:03') && !labels.includes('GENERAL'), 'general comments get no pill');
   assert.ok(panelText(loadCanvas(), { comments, item, itemState: { following: true } }).includes('FOLLOWING'));
   assert.ok(!panelText(loadCanvas(), { comments, item, itemState: { canFollow: false } }).includes('FOLLOW'));
+});
+
+test('a liked reel draws its like count in vermilion', () => {
+  const api = loadCanvas();
+  const countFill = (itemState) => {
+    let fill = '';
+    let seen = '';
+    const ctx = new Proxy({
+      set fillStyle(v) { fill = v; },
+      get fillStyle() { return fill; },
+      fillText(text) { if (String(text) === '1.8K') seen = fill; },
+      measureText(text) { return { width: String(text).length * 7 }; },
+    }, {
+      get(target, property) { return property in target ? Reflect.get(target, property) : (() => {}); },
+      set(target, property, value) { return Reflect.set(target, property, value); },
+    });
+    api.renderCommentsPanelCanvas(ctx, { comments, item, itemState });
+    return seen;
+  };
+  assert.equal(countFill({ liked: true }), api.TOKENS.hex.accent);
+  assert.notEqual(countFill({}), api.TOKENS.hex.accent);
 });
 
 test('one time-sync toggle flips between all comments and general only', () => {

@@ -474,6 +474,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   let prevBtnState = { rightA: false, rightB: false };
   let flickedX = false;
   let flickedY = false;
+  // Stick held on an open card list (pack queue): next repeat step time, ms.
+  let cardScrollRepeatAt = 0;
+  // Preview wheel travel not yet spent on card list steps.
+  let cardWheelCarry = 0;
   // Controls auto-hide (upstream: dock hides 5s after last interaction
   // while playing; B / tap / pause reveals it again).
   let controlsAutoHideTimer = null;
@@ -7836,7 +7840,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Static cards are square; else the host hint, else the element's own
   // eye-adjusted size, else square.
   function resolveScreenAspect(source, layout) {
-    if (!source || source.kind === 'static-card') return 1;
+    // A static card is square unless it says its shape (the pack queue
+    // takes the paused post's shape so the screen keeps its size).
+    if (!source) return 1;
+    if (source.kind === 'static-card') return source.aspect > 0 ? snapAspect(source.aspect) : 1;
     const a = sourceAspectHint || intrinsicEyeAspect(source.element, layout);
     return a > 0 ? snapAspect(a) : 1;
   }
@@ -8060,7 +8067,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         prepareProxy();
         ctx.clearRect(0, 0, texW, texH);
         try {
-          // Static cards always fill the square screen (today's stretch).
+          // Static cards fill the screen: square, or drawn at its shape.
           drawToProxy(ctx, source.element, layout, texW, texH, source.kind === 'static-card' ? 0 : aspect);
         } catch (drawErr) {
           return false;
@@ -10097,6 +10104,16 @@ window.WebXRVR = window.WebXRVR || (function () {
         vrLastUiUploadT = -1;
         return;
       }
+      // Wheel on an open card list (pack queue) steps its rows.
+      if (callbacks.onMainScreenScroll && getVisualSource().kind === 'static-card') {
+        cardWheelCarry += event.deltaY || 0;
+        const steps = Math.trunc(cardWheelCarry / 60);
+        if (callbacks.onMainScreenScroll(0)) {
+          if (steps) { cardWheelCarry -= steps * 60; callbacks.onMainScreenScroll(steps); }
+          return;
+        }
+        cardWheelCarry = 0;
+      }
       if (previewCameraMode === 'orbit') {
         previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance + (event.deltaY || 0) * 0.006));
         applyPreviewCamera();
@@ -11675,6 +11692,17 @@ window.WebXRVR = window.WebXRVR || (function () {
         if (Math.abs(thumbY) > 0.18) {
           cPanelScrollY = clampPanelScroll(cPanelScrollY + thumbY * 6);
           vrLastUiUploadT = -1;
+        }
+      } else if (cardOpen && callbacks.onMainScreenScroll && Math.abs(thumbY) > FLICK_THRESHOLD) {
+        // B1b) A card with a list (pack queue) -> stick Y steps the rows,
+        // repeating while held. Other cards return false and stay inert.
+        const now = Date.now();
+        if (!flickedY || now >= cardScrollRepeatAt) {
+          const first = !flickedY;
+          flickedY = true;
+          cardScrollRepeatAt = now + (first ? 380 : 140);
+          if (callbacks.onMainScreenScroll(thumbY > 0 ? 1 : -1)) pulseInput(eligible, 0.12, 20);
+          showControls();
         }
       } else {
         // B2) NORMAL stick Y up/down -> next / previous reel navigation.

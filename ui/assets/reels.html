@@ -1792,22 +1792,27 @@
   .reels-pack-card-inner::before { left:-1px; border-bottom-width:2px; border-left-width:2px; }
   .reels-pack-card-inner::after { right:-1px; border-bottom-width:2px; border-right-width:2px; }
   .reels-pack-card-head { display:flex; align-items:center; gap:10px; }
-  .reels-pack-card-dot { width:8px; height:8px; flex:none; background:var(--sx-accent); box-shadow:0 0 10px color-mix(in srgb, var(--sx-accent) 80%, transparent); animation:sx-pack-blink 1.6s steps(2,jump-none) infinite; }
+  .reels-pack-card-ico { display:inline-flex; flex:none; color:var(--sx-ink); }
+  .reels-pack-card-ico svg { width:20px; height:20px; display:block; }
   .reels-pack-card-label { flex:1; min-width:0; color:var(--sx-accent); font:800 12px/1.2 "JetBrains Mono",monospace; letter-spacing:.18em; text-transform:uppercase; }
-  .reels-pack-card-count { padding:4px 8px; border:1px solid var(--sx-rule-strong); background:var(--sx-surface-2); color:var(--sx-ink-2); font:800 12px/1 "JetBrains Mono",monospace; letter-spacing:.08em; }
+  .reels-pack-card-count { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid var(--sx-rule-strong); background:var(--sx-surface-2); color:var(--sx-ink-2); font:800 12px/1 "JetBrains Mono",monospace; letter-spacing:.08em; }
   .reels-pack-card h2 { margin:16px 0 10px; font:400 clamp(26px,6vmin,46px)/1.02 "Archivo Black","Archivo",sans-serif; letter-spacing:-.01em; text-transform:uppercase; overflow-wrap:anywhere; color:var(--sx-ink); }
   .reels-pack-card p { margin:0; max-width:46ch; color:var(--sx-ink-2); font:400 14px/1.55 "Archivo",sans-serif; }
   .reels-pack-card-status { margin:0 !important; padding-top:12px; border-top:1px dashed var(--sx-rule-strong); color:var(--sx-ink-3) !important; font:700 12px/1.5 "JetBrains Mono",monospace !important; letter-spacing:.1em; text-transform:uppercase; }
-  .reels-pack-card-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:20px; }
+  .reels-pack-card-count svg { width:16px; height:16px; flex:none; }
+  .reels-pack-card-actions { display:flex; gap:8px; margin-top:20px; }
   .reels-pack-btn { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-height:44px; padding:10px 16px; border:1px solid var(--sx-rule-strong); border-radius:4px; background:var(--sx-surface-2); color:var(--sx-ink); font:800 12px/1 "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; cursor:pointer; transition:background .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease; }
   .reels-pack-btn[hidden] { display:none !important; }
   .reels-pack-btn:hover { border-color:var(--sx-accent); color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 14%, transparent); }
-  .reels-pack-btn.primary { grid-column:1 / -1; min-height:48px; border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); font-size:12px; box-shadow:0 0 22px color-mix(in srgb, var(--sx-accent) 35%, transparent); }
+  .reels-pack-btn.primary { flex:1; min-height:48px; border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); font-size:12px; box-shadow:0 0 22px color-mix(in srgb, var(--sx-accent) 35%, transparent); }
   .reels-pack-btn.primary:hover { background:var(--sx-accent-hi); color:var(--sx-on-accent); }
+  .reels-pack-btn.primary svg { --sx-icon-accent:currentColor; }
+  .reels-pack-btn-icon { flex:none; width:48px; min-height:48px; padding:0; }
+  .reels-pack-btn-icon svg { width:20px; height:20px; }
   .reels-pack-btn:focus-visible, .reels-pack-pill:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
   .reels-pack-card.is-unavailable .reels-pack-card-inner { border-top-color:var(--sx-warn); box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 70px color-mix(in srgb, var(--sx-warn) 8%, transparent); }
   .reels-pack-card.is-unavailable .reels-pack-card-inner::before, .reels-pack-card.is-unavailable .reels-pack-card-inner::after { border-color:var(--sx-warn); }
-  .reels-pack-card.is-unavailable .reels-pack-card-dot { background:var(--sx-warn); box-shadow:0 0 10px color-mix(in srgb, var(--sx-warn) 80%, transparent); }
+  .reels-pack-card.is-unavailable .reels-pack-card-ico { --sx-icon-accent:var(--sx-warn); }
   .reels-pack-card.is-unavailable .reels-pack-card-label { color:var(--sx-warn); }
   .reels-pack-card.is-unavailable .reels-pack-btn.primary { border-color:var(--sx-warn); background:var(--sx-warn); box-shadow:0 0 22px color-mix(in srgb, var(--sx-warn) 30%, transparent); }
   .reels-pack-queue { position:absolute; inset:54px 76px auto 54px; z-index:18; display:flex; flex-direction:column; min-height:0; max-height:calc(100% - 88px); border:1px solid var(--sx-rule); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.98); -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px); color:var(--sx-ink); box-shadow:0 24px 90px rgba(0,0,0,.75),0 0 60px color-mix(in srgb, var(--sx-accent) 8%, transparent); animation:sx-pack-rise .24s cubic-bezier(.2,.8,.2,1) both; }
@@ -1816,18 +1821,19 @@
   .reels-pack-queue-head strong, .reels-pack-queue-head small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .reels-pack-queue-head strong { font:400 clamp(16px,3.4vmin,22px)/1.1 "Archivo Black","Archivo",sans-serif; letter-spacing:-.01em; text-transform:uppercase; }
   .reels-pack-queue-head small { margin-top:6px; color:var(--sx-ink-3); font:700 12px/1 "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; }
-  .reels-pack-queue-eyebrow { display:block; margin-bottom:6px; color:var(--sx-accent); font:800 12px/1 "JetBrains Mono",monospace; letter-spacing:.18em; font-style:normal; }
+  .reels-pack-queue-eyebrow { display:flex; align-items:center; gap:6px; margin-bottom:6px; color:var(--sx-accent); font:800 12px/1 "JetBrains Mono",monospace; letter-spacing:.18em; font-style:normal; }
   .reels-pack-queue-list { overflow:auto; flex:1; padding:8px; scrollbar-width:thin; scrollbar-color:var(--sx-rule-strong) transparent; }
   .reels-pack-queue-item { position:relative; width:100%; min-height:52px; display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:12px; padding:8px 10px; border:1px solid transparent; border-radius:4px; background:transparent; color:var(--sx-ink); font:700 13px/1.2 "Archivo",sans-serif; text-align:left; cursor:pointer; transition:background .12s ease,border-color .12s ease; }
   .reels-pack-queue-item span:first-child { display:grid; place-items:center; height:30px; border:1px solid var(--sx-rule-strong); background:var(--sx-surface-2); color:var(--sx-ink-2); font:800 12px/1 "JetBrains Mono",monospace; }
-  .reels-pack-queue-item span:last-child { padding:6px 8px; border:1px solid var(--sx-rule-strong); color:var(--sx-ink-2); font:800 12px/1 "JetBrains Mono",monospace; letter-spacing:.12em; }
+  .reels-pack-queue-eyebrow svg { width:16px; height:16px; flex:none; }
+  .reels-pack-queue-state { display:grid; place-items:center; width:32px; height:32px; border:1px solid transparent; color:var(--sx-ink-2); }
+  .reels-pack-queue-state svg { width:22px; height:22px; display:block; }
   .reels-pack-queue-item:hover, .reels-pack-queue-item:focus-visible { border-color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 8%, transparent); outline:none; }
-  .reels-pack-queue-item:hover span:last-child, .reels-pack-queue-item:focus-visible span:last-child { border-color:var(--sx-accent); color:var(--sx-accent); }
   .reels-pack-queue-item.current { border-color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 14%, transparent); box-shadow:inset 3px 0 0 var(--sx-accent); }
   .reels-pack-queue-item.current span:first-child { border-color:var(--sx-accent); color:var(--sx-accent); }
-  .reels-pack-queue-item.current span:last-child { border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); }
+  .reels-pack-queue-item.current .reels-pack-queue-state { border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); --sx-icon-accent:currentColor; }
   .reels-pack-queue-item:disabled { color:var(--sx-ink-muted); cursor:not-allowed; background:repeating-linear-gradient(135deg,color-mix(in srgb, var(--sx-warn) 6%, transparent) 0 4px,transparent 4px 8px); }
-  .reels-pack-queue-item:disabled span:last-child { border-style:dashed; border-color:color-mix(in srgb, var(--sx-warn) 50%, transparent); color:var(--sx-warn); }
+  .reels-pack-queue-item:disabled .reels-pack-queue-state { border-style:dashed; border-color:color-mix(in srgb, var(--sx-warn) 50%, transparent); color:var(--sx-warn); --sx-icon-accent:var(--sx-warn); }
   .reels-pack-queue-empty { margin:0; padding:18px 14px; color:var(--sx-ink-3); font:700 12px/1.4 "JetBrains Mono",monospace; letter-spacing:.04em; }
   .reels-collect-backdrop { position:absolute; inset:0; z-index:90; background:rgba(3,5,9,.78); backdrop-filter:blur(3px); }
   .reels-collect-dialog { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:91; width:min(560px,94%); max-height:calc(100% - 48px); display:flex; flex-direction:column; min-height:0; overflow:hidden; border:1px solid var(--sx-rule); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.98); color:var(--sx-ink); box-shadow:0 24px 90px rgba(0,0,0,.75); }
@@ -1866,11 +1872,22 @@
   .reels-pack-queue-actions button:first-child { border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); }
   .reels-pack-queue-actions button:first-child:hover { background:var(--sx-accent-hi); color:var(--sx-on-accent); }
   .reels-pack-queue-actions button:focus-visible, .reels-pack-queue-close:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
+  .reels-pack-queue-actions[hidden] { display:none !important; }
+  .reels-pack-queue-actions button svg { width:16px; height:16px; flex:none; --sx-icon-accent:currentColor; }
+  .reels-pack-queue-actions button { display:inline-flex; align-items:center; gap:8px; }
+  .reels-pack-queue-head .reels-pack-icon-btn { flex:none; display:grid; place-items:center; width:44px; min-height:44px; padding:0; }
+  .reels-pack-icon-btn svg { width:20px; height:20px; display:block; }
+  .reels-pack-icon-btn.is-saved { border-color:var(--sx-accent); color:var(--sx-accent); }
+  .reels-pack-icon-btn.is-saved svg path { fill:currentColor; }
+  .reels-pack-stats { display:flex !important; align-items:center; flex-wrap:wrap; gap:6px 16px; }
+  .reels-pack-stats > span { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+  .reels-pack-stats i { display:inline-flex; color:var(--sx-ink-2); }
+  .reels-pack-stats svg { width:16px; height:16px; flex:none; }
+  .reels-pack-stats b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--sx-ink-2); font-weight:800; }
+  .reels-pack-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
   @keyframes sx-pack-rise { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
-  @keyframes sx-pack-blink { from { opacity:1; } to { opacity:.25; } }
   @media (prefers-reduced-motion: reduce) {
     .reels-pack-card-inner, .reels-pack-queue { animation:none; }
-    .reels-pack-card-dot { animation:none; }
   }
   @media (max-width:720px) {
     .reels-pack-bar { right:68px; gap:5px; }
@@ -1883,12 +1900,15 @@
     .reels-pack-card-actions { margin-top:14px; }
     .reels-pack-btn { padding:10px 8px; font-size:12px; letter-spacing:.06em; }
     .reels-pack-btn.primary { min-height:44px; }
+    .reels-pack-btn-icon { width:44px; min-height:44px; padding:0; }
   }
   @media (max-width:480px) {
     .reels-pack-card { padding-left:54px; }
     .reels-pack-card p { font-size:12px; line-height:1.4; }
     .reels-pack-card-status { display:none !important; }
     .reels-pack-queue-item { min-height:52px; }
+    .reels-pack-queue-head { flex-wrap:wrap; row-gap:10px; }
+    .reels-pack-queue-head div { flex-basis:100%; }
   }
 
   /* Docked details column (desktop SPA embed only).
@@ -2322,7 +2342,7 @@
     <div class="reels-pack-card" id="packStageCard" hidden role="dialog" aria-modal="false" aria-labelledby="packStageTitle" aria-describedby="packStageText packStageStatus">
       <div class="reels-pack-card-inner">
         <div class="reels-pack-card-head">
-          <span class="reels-pack-card-dot" aria-hidden="true"></span>
+          <span class="reels-pack-card-ico" id="packStageIco" aria-hidden="true"></span>
           <div class="reels-pack-card-label" id="packStageLabel">REEL PACK</div>
           <span class="reels-pack-card-count" id="packStageCount" aria-hidden="true"></span>
         </div>
@@ -2330,22 +2350,22 @@
         <p id="packStageText">Loading pack…</p>
         <p class="reels-pack-card-status" id="packStageStatus"></p>
         <div class="reels-pack-card-actions">
-          <button type="button" class="reels-pack-btn primary" id="packStagePrimary"><span class="reels-pack-btn-ico" id="packStagePrimaryIco" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5"/></svg></span><span id="packStagePrimaryLabel">START PACK</span></button>
-          <button type="button" class="reels-pack-btn" id="packStageSecondary" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M20 12H5M11 5l-7 7 7 7"/></svg><span>RETURN TO PACK</span></button>
-          <button type="button" class="reels-pack-btn" id="packStageExplore" hidden><span>EXPLORE PACKS</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M4 12h15M13 5l7 7-7 7"/></svg></button>
+          <button type="button" class="reels-pack-btn primary" id="packStagePrimary"><span class="reels-pack-btn-ico" id="packStagePrimaryIco" aria-hidden="true">__ICON_MEDIA_REDO__</span><span id="packStagePrimaryLabel">START PACK</span></button>
+          <button type="button" class="reels-pack-btn reels-pack-btn-icon" id="packStageSecondary" aria-label="Return to pack" title="Return to pack" hidden>__ICON_BACK__</button>
+          <button type="button" class="reels-pack-btn reels-pack-btn-icon" id="packStageExplore" aria-label="Explore packs" title="Explore packs" hidden>__ICON_COMPASS__</button>
         </div>
       </div>
     </div>
     <section class="reels-pack-queue" id="packQueuePanel" role="dialog" aria-modal="false" aria-label="Reel Pack queue" hidden>
       <div class="reels-pack-queue-head">
-        <div><em class="reels-pack-queue-eyebrow">REEL PACK · QUEUE</em><strong id="packQueueTitle">REEL PACK</strong><small id="packQueueCreator">Loading pack…</small></div>
-        <button type="button" class="reels-pack-queue-close" id="packQueueClose" aria-label="Close pack queue">CLOSE</button>
+        <div><em class="reels-pack-queue-eyebrow">__ICON_REEL_PACK__<span>QUEUE</span></em><strong id="packQueueTitle">REEL PACK</strong><small class="reels-pack-stats" id="packQueueCreator">Loading pack…</small></div>
+        <button type="button" class="reels-pack-queue-close reels-pack-icon-btn" id="packQueueSave" aria-pressed="false" aria-label="Save pack" title="Save pack">__ICON_SAVE__</button>
+        <button type="button" class="reels-pack-queue-close reels-pack-icon-btn" id="packQueueShare" aria-label="Share pack" title="Share pack">__ICON_SHARE__</button>
+        <button type="button" class="reels-pack-queue-close reels-pack-icon-btn" id="packQueueClose" aria-label="Close pack queue" title="Close">__ICON_MEDIA_CLOSE__</button>
       </div>
       <div class="reels-pack-queue-list" id="packQueueList"></div>
-      <div class="reels-pack-queue-actions">
-        <button type="button" id="packQueueSave">SAVE PACK</button>
-        <button type="button" id="packQueueShare">SHARE PACK</button>
-        <button type="button" id="packQueuePublish" hidden>PUBLISH COLLECTION</button>
+      <div class="reels-pack-queue-actions" id="packQueueActions" hidden>
+        <button type="button" id="packQueuePublish" hidden>__ICON_UPLOAD__PUBLISH COLLECTION</button>
       </div>
     </section>
     <div class="center-flash" id="centerFlash">▶</div>
@@ -2653,6 +2673,7 @@
 <script>__REELS_FEED_STATE_JS__</script>
 <script>__REELS_REWARDS_JS__</script>
 <script>__REELS_PACK_STATE_JS__</script>
+<script>__REELS_PACK_CANVAS_JS__</script>
 <script>__THREE_JS__</script>
 <script>__VR_UI_CANVAS_JS__</script>
 <script>__VR_SHELL_CANVAS_JS__</script>
@@ -2675,6 +2696,11 @@
     let packVisualVersion = 0;
     let packVisualMode = '';
     let packVisualRegions = [];
+    // The VR queue is a card over the paused frame (packQueueCanvas), in the
+    // post's shape so the screen keeps its size; packQueueScroll is its first row.
+    let packQueueCanvas = null;
+    let packQueueBackdrop = { frame: null, aspect: 1 };
+    let packQueueScroll = 0;
     let packResumeAfterOverlay = false;
     let packUnavailableTimer = null;
     let collectOpen = false;
@@ -2738,6 +2764,8 @@
     const packQueueSave = document.getElementById('packQueueSave');
     const packQueueShare = document.getElementById('packQueueShare');
     const packQueuePublish = document.getElementById('packQueuePublish');
+    const packQueueActions = document.getElementById('packQueueActions');
+    const packStageIco = document.getElementById('packStageIco');
     const collectMenuPanel = document.getElementById('collectMenuPanel');
     const collectMenuBackdrop = document.getElementById('collectMenuBackdrop');
     const collectMenuList = document.getElementById('collectMenuList');
@@ -3551,6 +3579,19 @@
           version: packVisualVersion,
         };
       }
+      if (isPackMode && packQueueOpen && packQueueCanvas) {
+        return {
+          kind: 'static-card',
+          element: packQueueCanvas,
+          ready: true,
+          aspect: packQueueBackdrop.aspect,
+          paused: true,
+          muted: true,
+          currentTime: 0,
+          duration: 0,
+          version: packVisualVersion,
+        };
+      }
       if (isPackMode && (packQueueOpen || packState.phase !== 'playing' || !item || item.available === false)) {
         return {
           kind: 'static-card',
@@ -3719,19 +3760,24 @@
       if (typeof WebXRVR !== 'undefined' && WebXRVR.onVideoChange) WebXRVR.onVideoChange();
     }
 
-    function wrapPackCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
-      const words = String(text || '').split(/\s+/).filter(Boolean);
-      let line = '';
-      let lineNo = 0;
-      for (let i = 0; i < words.length && lineNo < maxLines; i += 1) {
-        const trial = line ? line + ' ' + words[i] : words[i];
-        if (ctx.measureText(trial).width > maxWidth && line) {
-          ctx.fillText(line, x, y + lineNo * lineHeight);
-          line = words[i];
-          lineNo += 1;
-        } else line = trial;
+    // Pack queue / complete / unavailable cards draw in ui/assets/reels_pack_canvas.js, shared
+    // with the immersive-preview workbench. Created on first use: the PACK_ICON_* consts sit below.
+    let packCanvas = null;
+    function getPackCanvas() {
+      if (!packCanvas) {
+        packCanvas = window.ReelsPackCanvas.create({
+          tok: sxTok,
+          icons: {
+            replay: PACK_ICON_REPLAY, reels: PACK_ICON_REELS, creator: PACK_ICON_CREATOR,
+            complete: PACK_ICON_COMPLETE, alert: PACK_ICON_ALERT, skip: PACK_ICON_SKIP,
+            save: '__ICON_SAVE__', share: '__ICON_SHARE__', close: '__ICON_MEDIA_CLOSE__',
+            back: '__ICON_BACK__', compass: '__ICON_COMPASS__', upload: '__ICON_UPLOAD__',
+            row: PACK_ICON_ROW,
+          },
+          onIconReady: () => { if (packVisualMode) renderPackVisual(packVisualMode); },
+        });
       }
-      if (lineNo < maxLines && line) ctx.fillText(line, x, y + lineNo * lineHeight);
+      return packCanvas;
     }
 
     function addPackVisualRegion(action, x, y, w, h, extra) {
@@ -3740,221 +3786,81 @@
 
     let packFontKicked = false;
 
-    function setPackCanvasSpacing(ctx, px) {
-      if ('letterSpacing' in ctx) ctx.letterSpacing = px + 'px';
-    }
-
-    // Shared obsidian frame for the pack / collect canvases: grid, vermilion glow, corner brackets, status label.
     function drawPackCanvasFrame(ctx, label, accent, chip) {
-      ctx.clearRect(0, 0, 1024, 1024);
-      ctx.fillStyle = sxTok('bg', '#0d0e10');
-      ctx.fillRect(0, 0, 1024, 1024);
-      const glow = ctx.createRadialGradient(100, 1000, 0, 100, 1000, 760);
-      glow.addColorStop(0, accent === '#ffb224' ? 'rgba(255,178,36,.20)' : 'rgba(255,59,31,.24)');
-      glow.addColorStop(1, 'rgba(255,59,31,0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, 1024, 1024);
-      ctx.strokeStyle = 'rgba(255,255,255,.035)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let g = 32; g < 1024; g += 32) {
-        ctx.moveTo(g + 0.5, 0); ctx.lineTo(g + 0.5, 1024);
-        ctx.moveTo(0, g + 0.5); ctx.lineTo(1024, g + 0.5);
-      }
-      ctx.stroke();
-      ctx.strokeStyle = sxTok('rule', '#24282e');
-      ctx.lineWidth = 2;
-      ctx.strokeRect(34, 34, 956, 956);
-      ctx.fillStyle = accent;
-      ctx.fillRect(34, 34, 956, 6);
-      ctx.strokeStyle = accent;
-      ctx.lineWidth = 5;
-      const arm = 40;
-      [[34, 990, 1, -1], [990, 990, -1, -1]].forEach(([cx, cy, dx, dy]) => {
-        ctx.beginPath();
-        ctx.moveTo(cx, cy + dy * arm); ctx.lineTo(cx, cy); ctx.lineTo(cx + dx * arm, cy);
-        ctx.stroke();
-      });
-      ctx.fillStyle = accent;
-      ctx.fillRect(92, 91, 14, 14);
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.font = '800 22px "JetBrains Mono", monospace';
-      setPackCanvasSpacing(ctx, 4);
-      ctx.fillText(label, 124, 99);
-      if (chip) {
-        ctx.textAlign = 'right';
-        ctx.font = '800 22px "JetBrains Mono", monospace';
-        setPackCanvasSpacing(ctx, 1);
-        const chipW = ctx.measureText(chip).width + 32;
-        ctx.fillStyle = sxTok('surface-2', '#16191c');
-        ctx.fillRect(932 - chipW, 78, chipW, 42);
-        ctx.strokeStyle = '#2f353c';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(932 - chipW, 78, chipW, 42);
-        ctx.fillStyle = sxTok('ink-2', '#a4abb3');
-        ctx.fillText(chip, 916, 99);
-      }
-      setPackCanvasSpacing(ctx, 0);
-      ctx.textBaseline = 'alphabetic';
+      getPackCanvas().drawFrame(ctx, label, accent, chip);
     }
 
-    function drawPackCanvasButton(ctx, label, x, y, w, h, primary, action, extra) {
-      ctx.fillStyle = primary ? sxTok('accent', '#ff3b1f') : sxTok('surface-2', '#16191c');
-      ctx.strokeStyle = primary ? sxTok('accent', '#ff3b1f') : '#2f353c';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, 4);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = primary ? sxTok('on-accent', '#0a0a0a') : sxTok('ink', '#f2f3f5');
-      ctx.font = '800 23px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      setPackCanvasSpacing(ctx, 2);
-      ctx.fillText(label, x + w / 2, y + h / 2);
-      setPackCanvasSpacing(ctx, 0);
-      addPackVisualRegion(action, x, y, w, h, extra);
+    function drawPackCanvasButton(ctx, label, x, y, w, h, primary, action, extra, icon) {
+      getPackCanvas().drawButton(ctx, packVisualRegions, label, x, y, w, h, primary, action, extra, icon);
     }
 
     function renderPackVisual(mode) {
       if (!isPackMode || !packVisualCanvas) return;
       if (mode === 'collect') { renderCollectVisual(); return; }
       packVisualMode = mode;
-      packVisualRegions = [];
-      const ctx = packVisualCanvas.getContext('2d');
-      const pack = packState.pack || {};
-      const pad = (n) => String(n).padStart(2, '0');
       // Canvas text never triggers a webfont load by itself — fetch the title face once, then redraw.
       if (!packFontKicked && document.fonts && document.fonts.load) {
         packFontKicked = true;
         document.fonts.load('400 40px "Archivo Black"').then(() => { if (packVisualMode === mode) renderPackVisual(mode); }).catch(() => {});
       }
-      const unavailable = mode === 'unavailable';
-      const accent = unavailable ? '#ffb224' : '#ff3b1f';
-      const label = mode === 'queue' ? 'REEL PACK · QUEUE' : mode === 'complete' ? 'REEL PACK COMPLETE' : unavailable ? 'PACK ITEM ' + (idx + 1) + ' OF ' + videoData.length : 'REEL PACK';
-      const chip = mode === 'complete' ? pad(videoData.length) + ' / ' + pad(videoData.length) : unavailable ? pad(idx + 1) + ' / ' + pad(videoData.length) : '';
-      drawPackCanvasFrame(ctx, label, accent, chip);
-      ctx.fillStyle = accent;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'alphabetic';
-
+      const state = { pack: packState.pack || {}, items: videoData, idx, creatorLabel: packCreatorLabel() };
       if (mode === 'queue') {
-        ctx.fillStyle = sxTok('ink', '#f2f3f5');
-        ctx.font = '400 44px "Archivo Black", "Archivo", sans-serif';
-        ctx.fillText(String(pack.title || 'Untitled Pack').toUpperCase().slice(0, 30), 92, 164);
-        ctx.fillStyle = sxTok('ink-3', '#8a919a');
-        ctx.font = '700 20px "JetBrains Mono", monospace';
-        ctx.fillText('CURATED BY ' + packCreatorLabel() + ' · ' + videoData.length + ' REELS', 92, 198);
-        const rowX = 92, rowW = 840, rowH = 48, rowGap = 5, rowStart = 220;
-        // Draft owners get a publish row above the action bar; trim the
-        // visible queue rows so the two never overlap.
-        const canPublishQueue = !!(pack.viewer_state && pack.viewer_state.can_edit) && pack.status === 'draft';
-        const maxRows = canPublishQueue ? 10 : 12;
-        videoData.slice(0, maxRows).forEach((item, index) => {
-          const y = rowStart + index * (rowH + rowGap);
-          const current = index === idx;
-          const available = item && item.available !== false;
-          ctx.fillStyle = current ? 'rgba(255,59,31,.16)' : '#12151a';
-          ctx.strokeStyle = current ? sxTok('accent', '#ff3b1f') : sxTok('rule', '#24282e');
-          ctx.lineWidth = current ? 3 : 1;
-          ctx.fillRect(rowX, y, rowW, rowH);
-          ctx.strokeRect(rowX, y, rowW, rowH);
-          if (current) { ctx.fillStyle = sxTok('accent', '#ff3b1f'); ctx.fillRect(rowX, y, 7, rowH); }
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = sxTok('surface-2', '#16191c');
-          ctx.fillRect(rowX + 20, y + 9, 40, 30);
-          ctx.strokeStyle = current ? sxTok('accent', '#ff3b1f') : '#2f353c';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(rowX + 20, y + 9, 40, 30);
-          ctx.fillStyle = current ? sxTok('accent', '#ff3b1f') : sxTok('ink-2', '#a4abb3');
-          ctx.font = '800 17px "JetBrains Mono", monospace';
-          ctx.fillText(pad(index + 1), rowX + 40, y + rowH / 2 + 1);
-          ctx.textAlign = 'left';
-          ctx.fillStyle = available ? sxTok('ink', '#f2f3f5') : sxTok('ink-muted', '#6b727a');
-          ctx.font = '700 21px "Archivo", sans-serif';
-          const name = available ? (item.title || item.filename || 'Untitled reel') : 'Reel unavailable';
-          ctx.fillText(String(name).slice(0, 46), rowX + 80, y + rowH / 2);
-          ctx.textAlign = 'right';
-          ctx.font = '800 15px "JetBrains Mono", monospace';
-          ctx.fillStyle = !available ? sxTok('warn', '#ffb224') : (current ? sxTok('accent', '#ff3b1f') : sxTok('ink-2', '#a4abb3'));
-          ctx.fillText(available ? (current ? 'NOW PLAYING' : 'PLAY') : 'SKIPPED', rowX + rowW - 18, y + rowH / 2);
-          if (available) addPackVisualRegion('select', rowX, y, rowW, rowH, { index });
-        });
-        if (videoData.length > maxRows) {
-          ctx.fillStyle = sxTok('ink-3', '#8a919a');
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'alphabetic';
-          ctx.font = '700 18px "JetBrains Mono", monospace';
-          ctx.fillText('+' + (videoData.length - maxRows) + ' MORE · FULL LIST IN THE PACK DETAILS', 512, 868);
-        }
-        if (canPublishQueue) {
-          const queuePlayable = videoData.filter((row) => row && row.available !== false && row.media_type !== 'static').length;
-          if (queuePlayable >= 3) {
-            drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 796, 350, 64, false, 'publish-pack');
-          } else {
-            ctx.fillStyle = sxTok('ink-muted', '#6b727a');
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = '800 19px "JetBrains Mono", monospace';
-            ctx.fillText('PUBLISH AT 3+ AVAILABLE (' + queuePlayable + '/3)', 512, 828);
-          }
-        }
-        drawPackCanvasButton(ctx, pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK', 92, 884, 250, 72, true, 'save');
-        drawPackCanvasButton(ctx, 'SHARE PACK', 387, 884, 250, 72, false, 'share');
-        drawPackCanvasButton(ctx, 'CLOSE', 682, 884, 250, 72, false, 'close');
+        state.scroll = packQueueScroll;
+        packVisualRegions = renderPackQueueVisual(state);
       } else {
-        ctx.fillStyle = sxTok('ink', '#f2f3f5');
-        ctx.font = '400 64px "Archivo Black", "Archivo", sans-serif';
-        const title = unavailable ? 'REEL UNAVAILABLE' : String(pack.title || 'Untitled Pack').toUpperCase();
-        wrapPackCanvasText(ctx, title, 92, 250, 840, 72, 2);
-        ctx.fillStyle = sxTok('ink-2', '#a4abb3');
-        ctx.font = '400 26px "Archivo", sans-serif';
-        const description = mode === 'complete'
-          ? 'You reached the end of this authored collection.'
-          : unavailable
-            ? 'This item was removed or is inaccessible. It will be skipped.'
-            : (pack.description || ('An ordered collection by ' + packCreatorLabel() + '.'));
-        wrapPackCanvasText(ctx, description, 92, 420, 840, 38, 3);
-        if (mode === 'complete') {
-          ctx.strokeStyle = '#2f353c';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([8, 6]);
-          ctx.beginPath(); ctx.moveTo(92, 590); ctx.lineTo(932, 590); ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = sxTok('ink-3', '#8a919a');
-          ctx.textAlign = 'left';
-          ctx.font = '700 18px "JetBrains Mono", monospace';
-          setPackCanvasSpacing(ctx, 1.5);
-          ctx.fillText(videoData.length + ' ORDERED REELS · NO AUTOMATIC FEED CONTINUATION', 92, 636);
-          setPackCanvasSpacing(ctx, 0);
-          drawPackCanvasButton(ctx, 'REPLAY PACK', 92, 720, 250, 76, true, 'replay');
-          drawPackCanvasButton(ctx, 'RETURN TO PACK', 387, 720, 250, 76, false, 'return');
-          drawPackCanvasButton(ctx, 'EXPLORE PACKS', 682, 720, 250, 76, false, 'explore');
-        } else if (unavailable) {
-          ctx.fillStyle = sxTok('ink-3', '#8a919a');
-          ctx.textAlign = 'left';
-          ctx.font = '700 18px "JetBrains Mono", monospace';
-          ctx.fillText('SKIPPING WITHOUT EXPOSING PROTECTED MEDIA.', 92, 636);
-          drawPackCanvasButton(ctx, 'SKIP ITEM', 337, 720, 350, 76, true, 'skip');
-        }
-        const canPublishHere = !!(pack.viewer_state && pack.viewer_state.can_edit) && pack.status === 'draft' && mode === 'complete';
-        if (canPublishHere) {
-          const playable = videoData.filter((row) => row && row.available !== false && row.media_type !== 'static').length;
-          if (playable >= 3) {
-            drawPackCanvasButton(ctx, 'PUBLISH COLLECTION', 337, 822, 350, 64, false, 'publish-pack');
-          } else {
-            ctx.fillStyle = sxTok('ink-muted', '#6b727a');
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = '800 19px "JetBrains Mono", monospace';
-            ctx.fillText('PUBLISH AT 3+ AVAILABLE (' + playable + '/3)', 512, 854);
-          }
-        }
+        packVisualRegions = getPackCanvas().render(packVisualCanvas.getContext('2d'), mode, state);
       }
       packVisualVersion += 1;
       notifyVisualSourceChange();
+    }
+
+    // Grabs the paused frame (one eye of a 3D post) once as the queue's backdrop.
+    // No playing frame (intro, complete, unavailable) gives a square plain card.
+    function snapshotPackQueueBackdrop() {
+      const item = videoData[idx];
+      packQueueBackdrop = { frame: null, aspect: 1 };
+      if (packState.phase !== 'playing' || !item || item.available === false) return;
+      const source = isImageItem(item) ? vrImageSource(reelsImage) : { element: video, ready: !!(video && video.readyState >= 2) };
+      const el = source.element;
+      const w = el ? el.videoWidth || el.naturalWidth || el.width : 0;
+      const h = el ? el.videoHeight || el.naturalHeight || el.height : 0;
+      packQueueBackdrop.aspect = aspectOf(item) || 1;
+      if (!source.ready || !w || !h) return;
+      const eyeW = activeVisualLayout === 'sbs' ? w / 2 : w;
+      const eyeH = activeVisualLayout === 'tb' ? h / 2 : h;
+      if (!aspectOf(item)) packQueueBackdrop.aspect = eyeW / eyeH;
+      try {
+        const scale = Math.min(1, 1024 / Math.min(eyeW, eyeH));
+        const frameCanvas = document.createElement('canvas');
+        frameCanvas.width = Math.round(eyeW * scale);
+        frameCanvas.height = Math.round(eyeH * scale);
+        frameCanvas.getContext('2d').drawImage(el, 0, 0, eyeW, eyeH, 0, 0, frameCanvas.width, frameCanvas.height);
+        packQueueBackdrop.frame = frameCanvas;
+      } catch (e) {}
+    }
+
+    function renderPackQueueVisual(state) {
+      const aspect = Math.max(0.25, Math.min(4, packQueueBackdrop.aspect || 1));
+      const width = aspect >= 1 ? Math.round(1024 * aspect) : 1024;
+      const height = aspect >= 1 ? 1024 : Math.round(1024 / aspect);
+      if (!packQueueCanvas) packQueueCanvas = document.createElement('canvas');
+      if (packQueueCanvas.width !== width) packQueueCanvas.width = width;
+      if (packQueueCanvas.height !== height) packQueueCanvas.height = height;
+      const frame = packQueueBackdrop.frame;
+      return getPackCanvas().renderQueueOver(packQueueCanvas.getContext('2d'), width, height, state,
+        frame ? (ctx, w, h) => ctx.drawImage(frame, 0, 0, w, h) : null);
+    }
+
+    // Steps the VR queue list; false when no queue is showing (the caller
+    // then uses the input for its own job).
+    function scrollPackQueue(delta) {
+      if (!isPackMode || !packQueueOpen || collectOpen) return false;
+      const next = window.ReelsPackCanvas.queueWindow(videoData.length, packQueueScroll + delta).first;
+      if (next !== packQueueScroll) {
+        packQueueScroll = next;
+        renderPackVisual('queue');
+      }
+      return true;
     }
 
     function handlePackVisualSelect(point) {
@@ -3969,6 +3875,7 @@
       else if (region.action === 'save') togglePackSave();
       else if (region.action === 'share') shareCurrentPack();
       else if (region.action === 'close') setPackQueue(false);
+      else if (region.action === 'scroll') scrollPackQueue(region.delta);
       else if (region.action === 'skip') nextVideo('unavailable');
       else if (region.action === 'return') returnToPack();
       else if (region.action === 'explore') dispatchNavigation('/explore?type=packs');
@@ -4010,7 +3917,36 @@
       else if (video) video.play().catch(() => {});
     }
 
-    const PACK_ICON_REPLAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5"/></svg>';
+    const PACK_ICON_REPLAY = '__ICON_MEDIA_REDO__';
+    const PACK_ICON_REELS = '__ICON_REEL_PACK__';
+    const PACK_ICON_CREATOR = '__ICON_PROFILE__';
+    const PACK_ICON_COMPLETE = '__ICON_MEDIA_CHECK__';
+    const PACK_ICON_ALERT = '__ICON_MEDIA_ALERT__';
+    const PACK_ICON_ROW = { play: '__ICON_PLAY__', now: '__ICON_MEDIA_ACTIVITY__', skipped: '__ICON_MEDIA_ALERT__' };
+
+    function packIconStat(icon, label, value) {
+      const stat = document.createElement('span');
+      stat.title = label;
+      const ico = document.createElement('i');
+      ico.setAttribute('aria-hidden', 'true');
+      ico.innerHTML = icon;
+      const sr = document.createElement('span');
+      sr.className = 'reels-pack-sr';
+      sr.textContent = label + ' ';
+      const text = document.createElement('b');
+      text.textContent = value;
+      stat.append(ico, sr, text);
+      return stat;
+    }
+
+    // Curator and reel count as an icon + value line (same idea as the pack details bar).
+    function fillPackStats(el) {
+      if (!el) return;
+      el.replaceChildren(
+        packIconStat(PACK_ICON_CREATOR, 'Curated by', packCreatorLabel()),
+        packIconStat(PACK_ICON_REELS, 'Reels', String(videoData.length)),
+      );
+    }
     const PACK_ICON_SKIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M5 5l9 7-9 7zM19 5v14"/></svg>';
 
     function renderPackQueueDom() {
@@ -4020,7 +3956,7 @@
       const title = document.getElementById('packQueueTitle');
       const creator = document.getElementById('packQueueCreator');
       if (title) title.textContent = pack.title || 'Untitled Pack';
-      if (creator) creator.textContent = 'CURATED BY ' + packCreatorLabel() + ' · ' + videoData.length + ' REELS';
+      fillPackStats(creator);
       videoData.forEach((item, index) => {
         const row = document.createElement('button');
         row.type = 'button';
@@ -4031,8 +3967,15 @@
         number.textContent = String(index + 1).padStart(2, '0');
         const name = document.createElement('strong');
         name.textContent = row.disabled ? 'Reel unavailable' : (item.title || item.filename || 'Untitled reel');
+        const state = row.disabled ? 'skipped' : (index === idx ? 'now' : 'play');
         const status = document.createElement('span');
-        status.textContent = row.disabled ? 'SKIPPED' : (index === idx ? 'NOW' : 'PLAY');
+        status.className = 'reels-pack-queue-state';
+        status.title = state === 'skipped' ? 'Skipped' : state === 'now' ? 'Now playing' : 'Play';
+        status.innerHTML = PACK_ICON_ROW[state];
+        const statusText = document.createElement('span');
+        statusText.className = 'reels-pack-sr';
+        statusText.textContent = status.title;
+        status.appendChild(statusText);
         row.append(number, name, status);
         row.addEventListener('click', () => selectPackItem(index));
         packQueueList.appendChild(row);
@@ -4054,10 +3997,16 @@
         packSaveBtn.classList.toggle('is-saved', !!pack.saved_by_me);
         packSaveBtn.setAttribute('aria-pressed', pack.saved_by_me ? 'true' : 'false');
       }
-      if (packQueueSave) packQueueSave.textContent = saveLabel;
+      if (packQueueSave) {
+        packQueueSave.title = pack.saved_by_me ? 'Saved pack' : 'Save pack';
+        packQueueSave.setAttribute('aria-label', packQueueSave.title);
+        packQueueSave.classList.toggle('is-saved', !!pack.saved_by_me);
+        packQueueSave.setAttribute('aria-pressed', pack.saved_by_me ? 'true' : 'false');
+      }
       if (packQueuePublish) {
         const canPublish = !!(pack.viewer_state && pack.viewer_state.can_edit) && pack.status === 'draft';
         packQueuePublish.hidden = !canPublish;
+        if (packQueueActions) packQueueActions.hidden = !canPublish;
       }
       if (modeBtn) modeBtn.hidden = true;
       if (notInterestedBtn) notInterestedBtn.hidden = true;
@@ -4083,19 +4032,23 @@
       packStageCard.classList.toggle('is-unavailable', mode !== 'complete');
       const pad = (n) => String(n).padStart(2, '0');
       if (mode === 'complete') {
-        if (packStageCount) packStageCount.textContent = pad(videoData.length) + ' / ' + pad(videoData.length);
-        packStageLabel.textContent = 'REEL PACK COMPLETE';
+        if (packStageCount) packStageCount.innerHTML = PACK_ICON_REELS + videoData.length + '/' + videoData.length;
+        if (packStageIco) packStageIco.innerHTML = PACK_ICON_COMPLETE;
+        packStageLabel.textContent = 'PACK COMPLETE';
         packStageTitle.textContent = pack.title || 'Pack complete';
-        packStageText.textContent = 'You reached the end of this authored collection.';
-        packStageStatus.textContent = videoData.length + ' ordered reels · no automatic feed continuation';
+        packStageText.textContent = 'You reached the end of this reel pack.';
+        packStageStatus.classList.add('reels-pack-stats');
+        fillPackStats(packStageStatus);
         packStagePrimaryLabel.textContent = 'REPLAY PACK';
         if (packStagePrimaryIco) packStagePrimaryIco.innerHTML = PACK_ICON_REPLAY;
         packStagePrimary.dataset.action = 'replay';
       } else {
-        if (packStageCount) packStageCount.textContent = pad(idx + 1) + ' / ' + pad(videoData.length);
+        if (packStageCount) packStageCount.innerHTML = PACK_ICON_REELS + (idx + 1) + '/' + videoData.length;
+        if (packStageIco) packStageIco.innerHTML = PACK_ICON_ALERT;
         packStageLabel.textContent = 'PACK ITEM ' + (idx + 1) + ' OF ' + videoData.length;
         packStageTitle.textContent = 'Reel unavailable';
         packStageText.textContent = 'This reel was removed or is no longer accessible. Its place in the authored order is preserved.';
+        packStageStatus.classList.remove('reels-pack-stats');
         packStageStatus.textContent = 'Skipping without exposing protected media.';
         packStagePrimaryLabel.textContent = 'SKIP ITEM';
         if (packStagePrimaryIco) packStagePrimaryIco.innerHTML = PACK_ICON_SKIP;
@@ -4164,6 +4117,8 @@
         setPackStageFrame(false);
         if (packQueuePanel) packQueuePanel.hidden = false;
         renderPackQueueDom();
+        snapshotPackQueueBackdrop();
+        packQueueScroll = window.ReelsPackCanvas.queueWindow(videoData.length, idx - Math.floor(window.ReelsPackCanvas.QUEUE_ROWS / 2)).first;
         renderPackVisual('queue');
         try { packQueueClose.focus({ preventScroll: true }); } catch (e) {
           try { packQueueClose.focus(); } catch (ignored) {}
@@ -7808,6 +7763,7 @@
         },
         onTogglePackQueue: function() { return setPackQueue(); },
         onMainScreenSelect: handleScreenSelect,
+        onMainScreenScroll: scrollPackQueue,
         onSavePack: togglePackSave,
         onSharePack: shareCurrentPack,
         onCollectReel: function() { return openCollectOverlay(); },

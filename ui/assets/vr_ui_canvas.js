@@ -222,6 +222,21 @@
       ['M21 15L19 17H7L3 21V5L5 3H19L21 5V15Z', 's', 'i', 1.5],
       [ring(17, 7, 2), 'f', 'a'],
     ],
+    // Liked heart for the reel details stats: edge filled vermilion, like the 2D side panel.
+    liked: [
+      ['M12 8.5L9.2 5.8H5.8L4.2 7.8L5.5 11.5L12 18.5L18.5 11.5L19.8 7.8L18.2 5.8H14.8L12 8.5Z', 'f', 'a'],
+      ['M12 8.5L9.2 5.8H5.8L4.2 7.8L5.5 11.5L12 18.5L18.5 11.5L19.8 7.8L18.2 5.8H14.8L12 8.5Z', 's', 'a', 1.6],
+      ['M5.5 11.5H18.5M12 8.5V18.5', 's', 'i', 1.2, 0.25],
+      ['M12 9.8L15.2 13L12 16.2L8.8 13Z', 'f', 'a'],
+      [ring(12, 13, 0.9), 'f', 'i'],
+    ],
+    // web/src/components/icons/svg/view.svg: the static eye from the Echo Glass logo.
+    view: [
+      ['M1.5 12L6.75 6.3H17.25L22.5 12L17.25 17.7H6.75Z', 'f', 'i'],
+      ['M12 6.3L17.7 12L12 17.7L6.3 12Z', 'f', 'a'],
+      ['M12 9.4L14.6 12L12 14.6L9.4 12Z', 'f', 'k'],
+      ['M13.2 8.85H14.6V10.25H13.2Z', 'f', 'i'],
+    ],
     share: [
       [ring(6, 12, 2.5), 'f', 'k'],
       [ring(6, 12, 2.5), 's', 'i', 1.5],
@@ -1203,7 +1218,7 @@
       });
     }
 
-    // Chips: #tags, place, then specs (3D layout, duration). One row; extras drop.
+    // Chips: #tags, place, then the 3D layout spec. One row; extras drop.
     const chips = [];
     if (!unavailable) {
       (item.tags || []).forEach((tag) => {
@@ -1217,8 +1232,6 @@
       if (Number(item.width) > 0 && Number(item.height) > 0 && (stereo === 'sbs' || stereo === 'tb')) {
         chips.push({ kind: 'spec', key: '3D', text: stereo === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM' });
       }
-      const durationMs = Number(item.duration_ms);
-      if (durationMs > 0 && item.media_type !== 'image') chips.push({ kind: 'spec', key: 'DUR', text: formatTime(durationMs / 1000) });
     }
     if (chips.length) {
       const chipY = y + 8;
@@ -1247,31 +1260,24 @@
       }
     }
 
-    // Stats row
+    // Stats: icon + mono count, like the 2D side panel (.side-stats). A liked
+    // reel shows the red-filled heart and a vermilion count.
+    const liked = !unavailable && !!itemState.liked;
     const stats = [
-      ['LIKES', unavailable ? '0' : fmtCount(item.likes)],
-      ['COMMENTS', unavailable ? '0' : fmtCount(comments.length)],
-      ['VIEWS', unavailable ? '0' : fmtCount(item.views)],
+      [liked ? 'liked' : 'like', unavailable ? '0' : fmtCount(item.likes), liked],
+      ['comment', unavailable ? '0' : fmtCount(comments.length), false],
+      ['view', unavailable ? '0' : fmtCount(item.views), false],
     ];
-    const statsW = CPANEL_W - 40;
-    const cellW = statsW / stats.length;
-    ctx.fillStyle = TOKENS.hex.surface2;
-    roundRectPath(ctx, 20, CP_STATS_Y, statsW, 46, TOKENS.radiusPx);
-    ctx.fill();
-    ctx.strokeStyle = TOKENS.hex.rule;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = TOKENS.hex.rule;
-    for (let i = 1; i < stats.length; i++) ctx.fillRect(20 + cellW * i, CP_STATS_Y, 1, 46);
-    ctx.textAlign = 'center';
-    stats.forEach(([label, value], i) => {
-      const cx = 20 + cellW * i + cellW / 2;
-      ctx.fillStyle = TOKENS.hex.ink3;
-      ctx.font = `600 9px ${TOKENS.font.mono}`;
-      ctx.fillText(label, cx, CP_STATS_Y + 15);
-      ctx.fillStyle = TOKENS.hex.ink;
-      ctx.font = `700 15px ${TOKENS.font.sans}`;
-      ctx.fillText(value, cx, CP_STATS_Y + 32);
+    const statsCy = CP_STATS_Y + 23;
+    let statX = 20;
+    ctx.font = `600 15px ${TOKENS.font.mono}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    stats.forEach(([icon, value, lit]) => {
+      drawIcon(ctx, icon, statX + 10, statsCy, 20, TOKENS.hex.ink, accent, TOKENS.hex.surface);
+      ctx.fillStyle = lit ? accent : TOKENS.hex.ink2;
+      ctx.fillText(value, statX + 28, statsCy + 1);
+      statX += 28 + ctx.measureText(value).width + 20;
     });
 
     ctx.fillStyle = TOKENS.hex.rule;

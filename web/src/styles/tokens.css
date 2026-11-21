@@ -163,6 +163,8 @@
 :root:not([data-theme='dark']) #sxReelsRoot .center-flash,
 :root:not([data-theme='dark']) #sxReelsRoot .twitch-comment-pill,
 :root:not([data-theme='dark']) #sxReelsRoot .reels-dot-tooltip,
+:root:not([data-theme='dark']) #sxReelsRoot .reels-pack-card,
+:root:not([data-theme='dark']) #sxReelsRoot .reels-pack-queue,
 :root:root {
   color-scheme: light;
 
