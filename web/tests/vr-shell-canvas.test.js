@@ -72,23 +72,103 @@ test('hoverKey matches the renderers hover argument', () => {
 test('grid: search bar, scroll buttons and tiles resolve with the scroll offset', () => {
   const sc = loadCanvas();
   const items = Array.from({ length: 10 }, (_, i) => ({ title: 't' + i }));
-  const route = { section: 'explore', items, scroll: 1, status: 'ready' };
+  const route = { section: 'explore', items, scroll: 0, status: 'ready' };
   const L = sc.gridLayout(route);
   assert.equal(L.cols, sc.GRID_COLS);
   assert.equal(sc.resolveMainHit({ route }, 200, 200).action, 'search-focus');
-  const c = sc.tileRect(L, 0);
-  assert.ok(c.w > 400 && c.h > 400, `tiles are big (${c.w}x${c.h})`);
-  assert.deepEqual({ ...sc.resolveMainHit({ route }, c.x + 10, c.y + 10) }, { action: 'play', arg: 4 });
-  const last = sc.tileRect(L, 6);
-  assert.equal(sc.resolveMainHit({ route }, last.x + 10, last.y + 10), null, 'past the end');
-  assert.deepEqual({ ...sc.resolveMainHit({ route }, sc.MAIN_W - 96, 900) }, { action: 'scroll', arg: 1 });
-  const right = sc.tileRect(L, L.cols - 1);
+  const c = sc.gridTiles(route)[0].r;
+  assert.ok(c.w > 300 && c.h === Math.round(c.w), `square tiles default (${c.w}x${c.h})`);
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, c.x + 10, c.y + 10) }, { action: 'play', arg: 0 });
+  const s1 = sc.gridTiles({ ...route, scroll: 1 }).find((t) => t.i === 0);
+  assert.equal(s1.r.y, c.y - sc.SCROLL_STEP, 'one scroll step moves the grid one drag step');
+  // At the end the content foot meets the grid foot; the short last column leaves a gap.
+  const end = { ...route, scroll: sc.gridMaxScroll(route) };
+  const tiles = sc.gridTiles(end);
+  assert.equal(Math.max(...tiles.map((t) => t.r.y + t.r.h)), L.y + L.h);
+  const lastCol = tiles.filter((t) => t.r.x === Math.max(...tiles.map((u) => u.r.x)));
+  const gapY = Math.max(...lastCol.map((t) => t.r.y + t.r.h)) + 20;
+  assert.equal(sc.resolveMainHit({ route: end }, lastCol[0].r.x + 10, gapY), null, 'past the end');
+  const down = sc.resolveMainHit({ route }, sc.MAIN_W - 96, 900);
+  assert.ok(down.action === 'scroll' && down.arg > 0);
+  const right = sc.gridTiles(route).find((t) => t.i === L.cols - 1).r;
   assert.ok(right.x + right.w < sc.MAIN_W - 144, 'tiles clear the scroll column');
-  const bottom = sc.tileRect(L, L.cols * L.rows - 1);
-  assert.ok(bottom.y + bottom.h <= sc.MAIN_H - 40, 'tiles stay on the panel');
+  assert.ok(L.y + L.h <= sc.MAIN_H - 40, 'tiles stay on the panel');
   const tag = { section: 'tag', items: [], related: [{ label: '#a', path: '/explore/tag/a' }] };
-  assert.deepEqual({ ...sc.resolveMainHit({ route: tag }, 100, 200) }, { action: 'chip', arg: '/explore/tag/a' });
+  assert.deepEqual({ ...sc.resolveMainHit({ route: tag }, 100, 200) }, { action: 'search-focus' }, 'tag pages lead with the field');
   assert.equal(sc.resolveMainHit({ route: { section: 'wallet' } }, c.x + 10, c.y + 10), null);
+});
+
+test('search: place chips sit right of a narrower field and open the place feed', () => {
+  const sc = loadCanvas();
+  const related = [{ label: 'São Paulo, Brazil', path: '/explore/location/s%C3%A3o-paulo--brazil' }];
+  const route = { section: 'search', arg: 'sao paulo', items: [], related, status: 'ready' };
+  const y = 200;
+  assert.equal(sc.resolveMainHit({ route }, 200, y).action, 'search-focus');
+  // The far right of the tool row is the chip, not the field.
+  const chipX = sc.MAIN_W - 216 + 48 - 100;
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, chipX, y) }, { action: 'chip', arg: related[0].path });
+  assert.equal(sc.resolveMainHit({ route: { ...route, related: [] } }, chipX, y).action, 'search-focus', 'no places: field spans the row');
+  const rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route }, '');
+  assert.ok(rec.texts.includes('São Paulo, Brazil'));
+});
+
+test('tag page: the field holds the tag, related tags sit beside it', () => {
+  const sc = loadCanvas();
+  const related = [{ label: '#tokyo', path: '/explore/tag/tokyo' }, { label: '#night', path: '/explore/tag/night' },
+    { label: '#city', path: '/explore/tag/city' }, { label: '#fog', path: '/explore/tag/fog' }];
+  const route = { section: 'tag', arg: 'rain', label: '#rain', items: [], related, status: 'ready' };
+  const y = 200;
+  assert.equal(sc.resolveMainHit({ route }, 200, y).action, 'search-focus');
+  const chipX = sc.MAIN_W - 216 + 48 - 100;
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, chipX, y) }, { action: 'chip', arg: related[2].path }, 'the far right is the third chip');
+  const rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route }, '');
+  assert.ok(rec.texts.includes('#tokyo'));
+  assert.ok(rec.texts.includes('#city') && !rec.texts.includes('#fog'), 'three related tags at most');
+  assert.ok(rec.texts.includes('RELATED TAGS'), 'the chips carry a caption');
+  assert.equal(rec.texts.filter((t) => t === '#rain').length, 2, 'header and field both show the tag');
+  assert.equal(sc.resolveMainHit({ route }, chipX, 160), null, 'the caption above the shorter chip is not a hit');
+});
+
+test('search dropdown: grouped rows over the grid open their pages or play the post', () => {
+  const sc = loadCanvas();
+  const items = Array.from({ length: 8 }, (_, i) => ({ title: 't' + i }));
+  const route = { section: 'explore', items, scroll: 0, status: 'ready' };
+  const suggest = {
+    users: ['amy', 'bo', 'cy'].map((u) => ({ username: u, display_name: u === 'amy' ? 'Amy' : u, follower_count: 1500 })),
+    locations: [{ slug: 'paris--france', name: 'Paris, France', reel_count: 3, views: 20 }],
+    tags: [{ slug: 'night', name: '#night', reel_count: 4, views: 9, reason: 'TRENDING' }],
+    posts: [{ path: 'a/sunrise.mp4', creator: { username: 'nam' }, views: 5100 }, { title: 'Bay', path: 'b.mp4', views: 1 }],
+  };
+  const field = { id: 'search', focused: true, text: 'a', suggest };
+  const rows = [];
+  for (let y = 270; y < sc.MAIN_H; y += 8) {
+    const hit = sc.resolveMainHit({ route, field }, 400, y);
+    const key = hit && (hit.action === 'chip' ? hit.arg : hit.action === 'play-suggested' ? 'post:' + hit.arg : null);
+    if (key && rows[rows.length - 1] !== key) rows.push(key);
+  }
+  // Four groups share the room: two rows each, so the posts still fit.
+  assert.deepEqual(rows, ['/profile/amy', '/profile/bo', '/explore/location/paris--france', '/explore/tag/night', 'post:0', 'post:1']);
+  const hit = sc.resolveMainHit({ route, field }, 400, 340);
+  assert.equal(sc.hoverKey(hit), 'suggest:0');
+  assert.equal(sc.resolveMainHit({ route, field }, 400, 274), null, 'a group label inside the dropdown does nothing');
+  assert.equal(sc.resolveMainHit({ route, field: { ...field, focused: false } }, 400, 300).action, 'play', 'closed: the grid takes the hit');
+  let rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route, field }, 'suggest:1');
+  for (const text of ['PEOPLE', 'PLACES', 'TAGS', 'POSTS', '@amy', 'Paris, France', '#night', 'Amy · 1.5K FOLLOWERS', '4 POSTS · 9 VIEWS · TRENDING',
+    'sunrise.mp4', '@nam · 5.1K VIEWS', 'Bay']) {
+    assert.ok(rec.texts.includes(text), text);
+  }
+  // Typed text with no match says so; an empty field with no match shows nothing.
+  const none = { users: [], locations: [], tags: [], posts: [] };
+  rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route, field: { ...field, suggest: none } }, '');
+  assert.ok(rec.texts.includes('NO PEOPLE, PLACES, TAGS, OR POSTS FOUND'));
+  assert.equal(sc.resolveMainHit({ route, field: { ...field, suggest: none } }, 400, 300), null, 'the empty line covers the grid');
+  rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route, field: { ...field, text: '', suggest: none } }, '');
+  assert.ok(!rec.texts.includes('NO PEOPLE, PLACES, TAGS, OR POSTS FOUND'));
 });
 
 test('grid renders titles, statuses and uses the image getter', () => {
@@ -114,7 +194,7 @@ test('tiles: creator and place pills open their pages, the rest plays', () => {
   const item = { title: 'Night walk', creator: { username: 'amy' }, location: { city: 'Paris', country: 'France' },
     likes: 1500, views: 20, comments_count: 2, liked_by_me: true, media_type: 'image', images: [{}, {}, {}], stereo_layout: 'sbs' };
   const route = { section: 'explore', status: 'ready', items: [item] };
-  const r = sc.tileRect(sc.gridLayout(route), 0);
+  const r = sc.gridTiles(route)[0].r;
   const creator = sc.resolveMainHit({ route }, r.x + 20, r.y + 20);
   assert.deepEqual({ ...creator }, { action: 'chip', arg: '/profile/amy', hover: 'creator:0' });
   assert.equal(sc.hoverKey(creator), 'creator:0');
@@ -123,9 +203,12 @@ test('tiles: creator and place pills open their pages, the rest plays', () => {
   assert.deepEqual({ ...sc.resolveMainHit({ route }, r.x + r.w / 2, r.y + r.h / 2) }, { action: 'play', arg: 0 });
   const rec = recordingCtx();
   sc.renderMainPanel(rec.ctx, { route }, 'creator:0');
-  for (const text of ['@amy', 'Paris, France', 'IMAGES · 3 · 3D', 'Night walk', '1.5K', '20', '2']) {
+  for (const text of ['@amy', 'Paris, France', '3', ' · ', '3D', 'Night walk', '1.5K', '20', '2']) {
     assert.ok(rec.texts.includes(text), text);
   }
+  const priv = recordingCtx();
+  sc.renderMainPanel(priv.ctx, { route: { ...route, items: [{ ...item, visibility: 'private', images: [] }] } }, '');
+  assert.ok(priv.texts.includes('PRIVATE') && !priv.texts.includes('3'), 'private badge, a single image shows no count');
 });
 
 test('keyboard keys tile the canvas and resolve to their id', () => {
@@ -205,7 +288,7 @@ test('profile: hero column with bio, tags and counts beside highlights over a na
   const withHl = { ...profile, highlights: [{ id: 'p 1', title: 'Tokyo', reel_count: 4 }] };
   const L = sc.gridLayout(withHl);
   assert.ok(L.y > plain.y, 'highlights push the grid down');
-  const t = sc.tileRect(L, 0);
+  const t = sc.gridTiles(withHl)[0].r;
   assert.deepEqual({ ...sc.resolveMainHit({ route: withHl }, t.x + t.w / 2, t.y + t.h / 2) }, { action: 'play', arg: 0 });
   assert.deepEqual({ ...sc.resolveMainHit({ route: withHl }, plain.x + 20, 260) }, { action: 'chip', arg: '/packs/p%201' });
   const [follow] = sc.detailButtons(withHl);

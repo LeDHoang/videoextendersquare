@@ -23,6 +23,8 @@ import { useMessaging } from '../hooks/MessagingContext.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
 import { FORMAT_FILTER_LABELS } from '../utils/mediaFormat.js';
+import useMasonry from '../hooks/useMasonry.js';
+import { tileAspect } from '../utils/aspect.js';
 
 const CODEC_DEFAULT = 'HEVC 2K (Raw Master)';
 const CODEC_OPTS = [
@@ -314,6 +316,7 @@ export default function ExplorePage() {
     tiles.push(...(packsVisible ? packs : order));
   }
   const reelCount = data ? data.count ?? order.length : null;
+  const masonryRef = useMasonry(tiles.map((tile) => (tile.path ? { key: tile.path, aspect: tileAspect(tile) } : { key: 'pack:' + tile.id, aspect: 1 })), density);
 
   return (
     <div className="sx-wide-page">
@@ -427,7 +430,7 @@ export default function ExplorePage() {
       ) : (
         <>
           {packsVisible || reelsVisible ? (
-            <div className={gridClassName(density)} aria-label="Explore results">
+            <div ref={masonryRef} className={gridClassName(density)} aria-label="Explore results">
               {tiles.map((tile) => (tile.path ? (
                 <ExploreTile key={tile.path} video={tile} onOpen={openReel} onShare={(item) => messaging.openShare({ ...item, kind: 'reel' })} />
               ) : (

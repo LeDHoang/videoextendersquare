@@ -168,6 +168,41 @@ async def _alert_loop():
             logger.exception("Alert check failed")
 
 
+def _fal_price_sync_s() -> int:
+    """Seconds between fal price syncs (server/fal_prices.py); 0 turns the sync off."""
+    return env_int("SX_FAL_PRICE_SYNC_S", 3600, minimum=0)
+
+
+def _sync_fal_prices() -> None:
+    from server import fal_prices
+    from server.social.database import SessionLocal
+
+    with SessionLocal() as db:
+        fal_prices.sync(db)
+
+
+def _sync_fal_schemas() -> None:
+    from server import fal_schemas
+    from server.social.database import SessionLocal
+
+    with SessionLocal() as db:
+        fal_schemas.sync(db)
+
+
+async def _fal_price_loop():
+    """Keep credit prices and options on fal's live ones; the first sync runs at startup."""
+    while True:
+        try:
+            await asyncio.to_thread(_sync_fal_prices)
+        except Exception:
+            logger.exception("fal price sync failed")
+        try:
+            await asyncio.to_thread(_sync_fal_schemas)
+        except Exception:
+            logger.exception("fal schema sync failed")
+        await asyncio.sleep(_fal_price_sync_s())
+
+
 def _backfill_media_info() -> None:
     """Fill reel duration/size for posts that predate the probe (see services.backfill_media_info)."""
     if os.environ.get("SX_MEDIA_BACKFILL", "1").strip().lower() in {"0", "false", "no", "off"}:
@@ -288,8 +323,16 @@ async def lifespan(app: FastAPI):
     job_manager.start()
     start_derived_pool()
 
+    # The last synced fal prices and options, before the first request is priced.
+    from server import fal_prices, fal_schemas
+    from server.social.database import SessionLocal
+    with SessionLocal() as db:
+        fal_prices.load(db)
+        fal_schemas.load(db)
+
     cleanup_task = asyncio.create_task(_cleanup_loop())
     alert_task = asyncio.create_task(_alert_loop())
+    price_task = asyncio.create_task(_fal_price_loop()) if _fal_price_sync_s() else None
     # Off the startup path: probing a large library can take a while.
     backfill_task = asyncio.create_task(asyncio.to_thread(_backfill_media_info))
     # Also off the startup path (and readyz): only file checks, the encodes
@@ -302,6 +345,8 @@ async def lifespan(app: FastAPI):
         gc.unfreeze()
         cleanup_task.cancel()
         alert_task.cancel()
+        if price_task is not None:
+            price_task.cancel()
         backfill_task.cancel()
         requeue_task.cancel()
         await _drain_workers()

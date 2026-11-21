@@ -13,10 +13,13 @@ import { profilePostUrl } from '../utils/profileLinks.js';
 import { EmptyState, Mono } from '../components/ui/primitives.jsx';
 import { ExploreGridSkeleton } from '../components/ui/Skeleton.jsx';
 import { useToast } from '../components/ui/Toast.jsx';
+import { EditIcon, IndustrialCreditsIcon, ShareIcon } from '../components/icons/index.jsx';
 import useExplorePreviews from '../hooks/useExplorePreviews.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useMessaging } from '../hooks/MessagingContext.jsx';
 import { useConfigContext } from '../hooks/ConfigContext.jsx';
+import useMasonry from '../hooks/useMasonry.js';
+import { tileAspect } from '../utils/aspect.js';
 
 const TABS = [
   ['all', 'ALL POSTS'],
@@ -153,6 +156,7 @@ export default function ProfilePage() {
   // Same gallery pipeline as the Explore page: tiles paint instantly from
   // posters while missing previews/posters are generated in the background.
   const { items: galleryItems, previewMessage } = useExplorePreviews(packGrid ? NO_POSTS : items);
+  const masonryRef = useMasonry(packGrid ? [] : galleryItems.map((post) => ({ key: post.id, aspect: tileAspect(post) })), density);
 
   const loadProfile = useCallback(async () => {
     setError('');
@@ -407,10 +411,16 @@ export default function ProfilePage() {
             <div className="sx-pf-actions">
               {profile.is_me ? (
                 <>
-                  <button type="button" className="sx-xh-btn sx-xh-btn--primary" onClick={() => navigate('/settings/profile')}>EDIT PROFILE</button>
+                  <button type="button" className="sx-xh-btn sx-xh-btn--primary sx-pf-icon-btn" onClick={() => navigate('/settings/profile')} aria-label="Edit profile" title="Edit profile">
+                    <EditIcon className="sx-pf-icon" />
+                  </button>
                   {/* Credits are private to the account owner: this button only renders on your own profile. */}
-                  <button type="button" className="sx-xh-btn" onClick={() => navigate('/wallet')}>CREDITS</button>
-                  <button type="button" className="sx-xh-btn" onClick={shareProfile}>SHARE</button>
+                  <button type="button" className="sx-xh-btn sx-pf-icon-btn" onClick={() => navigate('/wallet')} aria-label="Credits" title="Credits">
+                    <IndustrialCreditsIcon className="sx-pf-icon" />
+                  </button>
+                  <button type="button" className="sx-xh-btn sx-pf-icon-btn" onClick={shareProfile} aria-label="Share profile" title="Share profile">
+                    <ShareIcon className="sx-pf-icon" />
+                  </button>
                 </>
               ) : (
                 <>
@@ -424,7 +434,9 @@ export default function ProfilePage() {
                     {followBusy ? '…' : profile.is_following ? 'FOLLOWING' : 'FOLLOW +'}
                   </button>
                   <button type="button" className="sx-xh-btn" onClick={() => navigate('/messages?user=' + encodeURIComponent(profile.username))}>MESSAGE</button>
-                  <button type="button" className="sx-xh-btn" onClick={shareProfile}>SHARE</button>
+                  <button type="button" className="sx-xh-btn sx-pf-icon-btn" onClick={shareProfile} aria-label="Share profile" title="Share profile">
+                    <ShareIcon className="sx-pf-icon" />
+                  </button>
                   <button type="button" className="sx-xh-btn sx-pf-quiet" onClick={reportProfile}>REPORT</button>
                   <button type="button" className="sx-xh-btn sx-pf-quiet" onClick={blockProfile}>BLOCK</button>
                 </>
@@ -530,7 +542,7 @@ export default function ProfilePage() {
             <ExploreGridSkeleton label={packGrid ? 'Loading Reel Packs' : 'Loading profile posts'} />
           ) : items.length ? (
             <>
-              <div className={packGrid ? 'sx-pack-grid' : gridClassName(density) + ' sx-profile-grid'}>
+              <div ref={masonryRef} className={packGrid ? 'sx-pack-grid' : gridClassName(density) + ' sx-profile-grid'}>
                 {(packGrid ? items : galleryItems).map((item) => (
                   packGrid ? (
                     <PackTile

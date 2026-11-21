@@ -4,22 +4,31 @@ import IconButton from '../ui/IconButton.jsx';
 import Progress from '../ui/Progress.jsx';
 import { CancelJobButton } from '../ui/JobRunner.jsx';
 import { Button, ToggleRow } from '../ui/controls.jsx';
-import { STEREO_LABELS, stereoEyeSize } from '../../utils/mediaFormat.js';
-import { CheckIcon, CloseIcon, CubeIcon, DownloadIcon, RedoIcon, SendIcon, SquareIcon, StackIcon } from '../icons/index.jsx';
+import { STEREO_LABELS, stereoEyeSize, stereoFrame } from '../../utils/mediaFormat.js';
+import { masterSize } from '../../utils/aspect.js';
+import { matchesTarget } from '../../utils/cloudBilling.js';
+import { CloseIcon, CubeIcon, DownloadIcon, IndustrialReelsIcon, RedoIcon, SendIcon, SquareIcon } from '../icons/index.jsx';
 import StudioStage from './StudioStage.jsx';
+import { ModeChoice, QualityChoice, Step } from './OptionsPanel.jsx';
+import { MODES } from './useExtendConfig.js';
 import PostForm from './PostForm.jsx';
-import { isSquareMeta, metaStereoCandidate, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
-import { MASTER_SIDE } from './stageGeometry.js';
+import { metaStereoCandidate, postSource, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
 import { onRovingKeyDown } from '../ui/roving.js';
 
 // A result made elsewhere has no upload here; its stage is the square master.
+const [MASTER_SIDE] = masterSize(1, 1, '1:1');
 const MASTER_META = { width: MASTER_SIDE, height: MASTER_SIDE, orientation: 'SQUARE' };
+const even = (n) => n + (n % 2);
 
-// Detection result + 3D switch for an exact 2:1 / 1:2 upload.
-function StereoChoice({ item, onToggle }) {
-  const candidate = metaStereoCandidate(item.meta);
+// Detection result + 3D switch for an upload in a stereo frame shape. A 9:8 /
+// 8:9 frame is never detected: the person turns 3D on and picks SBS or TB.
+function StereoChoice({ item, onChange }) {
+  const frame = stereoFrame(item.meta?.width, item.meta?.height);
+  const manual = !metaStereoCandidate(item.meta) && !!frame?.manual;
+  const candidate = item.stereoPick || metaStereoCandidate(item.meta) || frame?.layout;
   const label = STEREO_LABELS[candidate];
   const on = !!stereoOf(item);
+  const onToggle = (next) => onChange({ stereoOn: next, ...(next && manual && !item.stereoPick ? { stereoPick: candidate } : {}) });
   const eye = stereoEyeSize(candidate, item.meta?.width, item.meta?.height);
   const method = item.meta?.stereo?.method;
   const how = method === 'metadata'
@@ -33,18 +42,37 @@ function StereoChoice({ item, onToggle }) {
     <div className="sx-studio-stereo">
       <div className={`sx-accent-block ${on ? '' : 'sx-muted'}`} role="note">
         <div className="sx-accent-block-title">
-          {item.meta?.stereo?.detected ? `3D ${label} DETECTED` : `${candidate === 'sbs' ? '2:1' : '1:2'} FRAME — IS THIS 3D ${label}?`}
+          {item.meta?.stereo?.detected ? `3D ${label} DETECTED` : `${frame?.shape || (candidate === 'sbs' ? '2:1' : '1:2')} FRAME — IS THIS 3D ${manual ? '' : `${label}?`}`.trim()}
         </div>
         <div className="sx-accent-block-body">
           <p>
             {on
-              ? `Posted as it is, in 3D: each eye gets one ${eye.width}×${eye.height} square in VR, and 2D views show the left eye.`
-              : `Turn on if this file holds a left/right eye pair ${candidate === 'sbs' ? 'side by side' : 'stacked top over bottom'}. Off makes it a flat square instead.`}
+              ? `Posted as it is, in 3D: each eye gets one ${eye.width}×${eye.height} picture in VR, and 2D views show the left eye.`
+              : manual
+                ? 'Turn on if this file holds a left/right eye pair, then say how the eyes sit. Off posts it as one flat picture.'
+                : `Turn on if this file holds a left/right eye pair ${candidate === 'sbs' ? 'side by side' : 'stacked top over bottom'}. Off posts it as one flat picture.`}
           </p>
           {how ? <p className="sx-monospace-sm">{how}</p> : null}
         </div>
       </div>
-      <ToggleRow label={`STEREOSCOPIC 3D · ${label}`} checked={on} onChange={onToggle} help="One square per eye; it is not made square" />
+      <ToggleRow label={manual ? 'STEREOSCOPIC 3D' : `STEREOSCOPIC 3D · ${label}`} checked={on} onChange={onToggle} help="One picture per eye; nothing is filled" />
+      {manual && on ? (
+        <div className="sx-seg" role="radiogroup" aria-label="Eye layout" onKeyDown={onRovingKeyDown}>
+          {['sbs', 'tb'].map((layout) => (
+            <button
+              type="button"
+              key={layout}
+              role="radio"
+              aria-checked={candidate === layout}
+              tabIndex={candidate === layout ? 0 : -1}
+              className={candidate === layout ? 'sx-selected' : ''}
+              onClick={() => onChange({ stereoPick: layout })}
+            >
+              {STEREO_LABELS[layout]}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -58,8 +86,8 @@ function ErrorBox({ title, children }) {
   );
 }
 
-// One file (or the images of one post) opened from a tile: the square stage on
-// the left; on the right, what the file needs next: make it square, wait, or post.
+// One file (or the images of one post) opened from a tile: the stage on the
+// left; on the right, what the file needs next: make it, wait, or post.
 export default function MediaDialog({
   items,           // the open items, in post order
   view,            // key of the slide on the stage (several images)
@@ -68,7 +96,7 @@ export default function MediaDialog({
   onRemove,
   onClose,
   onStep,          // (-1 | 1) to the neighbouring file, or undefined
-  makeMode,        // the options are showing (the file needs square, or is being redone)
+  makeMode,        // the options are showing (the file needs making, or is being redone)
   options,         // the options panel and its Make button
   progress,        // { [jobId]: job state }
   cfg,
@@ -76,6 +104,7 @@ export default function MediaDialog({
   onDraft,
   onStereo,
   onRedo,          // open the options for a file that is already postable, or undefined
+  onPick,          // (mode, engine): Original / Extend or the quality was picked
   onRedoBack,
   canConvert,
   convertBusy,
@@ -93,7 +122,8 @@ export default function MediaDialog({
   const navigate = useNavigate();
   const cover = items[0];
   const group = items.length > 1;
-  const shelf = shelfOf(cover);
+  const meta = cover.meta || MASTER_META;
+  const shelf = shelfOf(cover, cfg.asIsShapeFor(meta));
   const stereo = stereoOf(cover);
   const working = !group && shelf === 'working';
   const render = cover.render;
@@ -112,17 +142,30 @@ export default function MediaDialog({
     };
   };
   const posted = cover.posted;
-  const stereoChoice = !group && !posted && cover.live && !render && metaStereoCandidate(cover.meta);
+  const stereoChoice = !group && !posted && cover.live && !render
+    && (metaStereoCandidate(cover.meta) || stereoFrame(cover.meta?.width, cover.meta?.height)?.manual);
   const title = group ? `${items.length} images, one post` : cover.name;
-  // A square upload can be posted as it is or upscaled first.
-  const squareChoice = !group && !posted && !render && !stereo && isSquareMeta(cover.meta) && (onRedo || onRedoBack);
+  // An upload that already has its shape can be posted as it is, or extended / upscaled first.
+  const asIsChoice = !group && !posted && !render && !stereo && !!cover.meta && !!postSource(cover, cfg.asIsShapeFor(meta)) && (onRedo || onRedoBack);
+  // Original / Extend shows over the options, and over the post form of such an upload.
+  // Posting as it is is Original with no upscale, whatever the options hold.
+  const modeChoice = asIsChoice || (makeMode && !group);
+  const shownMode = makeMode ? cfg.mode : MODES[1];
+  // Original on such an upload goes back to posting it as it is; Extend keeps the quality the options hold.
+  const pickMode = (mode) => onPick(mode, asIsChoice && mode === MODES[1] ? '' : cfg.engine);
+  // The shape the stage shows: the one being made, else the file's own.
+  const making = makeMode || working || !!render;
+  const target = making ? cfg.shapeFor(meta) : null;
+  // A long clip on a cloud job is cut: the part to make is picked on the stage timeline.
+  const trimmed = makeMode && !group && cover.kind === 'video' && cover.meta ? cfg.trimFor(cover.meta) : null;
+  const trim = trimmed ? { ...trimmed, onChange: (start, dur) => cfg.setTrim(cover.meta.stage_id, { start, dur }) } : null;
   // The size the file will come out at with the current options.
-  const nativeSide = cover.meta ? Math.max(cover.meta.width, cover.meta.height) + (Math.max(cover.meta.width, cover.meta.height) % 2) : null;
+  const [masterWidth, masterHeight] = masterSize(meta.width, meta.height, target);
   const targetLabel = !(makeMode || working)
     ? null
     : !cfg.noUpscale
-      ? `${MASTER_SIDE}×${MASTER_SIDE}`
-      : nativeSide && (cfg.upscaleOnly || isSquareMeta(cover.meta)) ? `${nativeSide}×${nativeSide}` : null;
+      ? `${masterWidth}×${masterHeight}`
+      : cover.meta && matchesTarget(cover.meta, target) ? `${even(cover.meta.width)}×${even(cover.meta.height)}` : null;
 
   return (
     <Dialog className="sx-modal-backdrop" aria-label={title} onClose={onClose} busy={publishing}>
@@ -149,35 +192,20 @@ export default function MediaDialog({
             stereo={stereo}
             upscaleOnly={cfg.upscaleOnly}
             targetLabel={targetLabel}
+            target={target}
             outpaintActive={!cfg.upscaleOnly}
-            trim={cover.kind === 'video' ? { enabled: cfg.trimEnabled, start: cfg.trimStart, dur: cfg.trimDur } : null}
+            trim={trim}
             onMoveGalleryItem={onMove}
             onRemoveGalleryItem={onRemove}
             locked
           />
           <div className="sx-media-side">
-            {stereoChoice ? <StereoChoice item={cover} onToggle={onStereo} /> : null}
-            {squareChoice ? (
-              <div className="sx-media-choices" role="radiogroup" aria-label="Square file" onKeyDown={onRovingKeyDown}>
-                {[
-                  ['Keep as is', 'Post the file at its own resolution', CheckIcon, !makeMode, onRedoBack],
-                  ['Upscale', 'Upscale it to 2K before posting', StackIcon, makeMode, onRedo],
-                ].map(([name, hint, Icon, picked, pick]) => (
-                  <button
-                    type="button"
-                    key={name}
-                    role="radio"
-                    aria-checked={picked}
-                    tabIndex={picked ? 0 : -1}
-                    className={`sx-media-choice ${picked ? 'sx-selected' : ''}`}
-                    title={hint}
-                    onClick={picked ? undefined : pick}
-                  >
-                    <Icon />
-                    <span className="sx-media-choice-name">{name}</span>
-                  </button>
-                ))}
-              </div>
+            {stereoChoice ? <StereoChoice item={cover} onChange={onStereo} /> : null}
+            {modeChoice ? <ModeChoice value={shownMode} onChange={pickMode} isVideo={cover.kind === 'video'} /> : null}
+            {asIsChoice && !makeMode ? (
+              <Step title="Quality">
+                <QualityChoice engines={cfg.engines} value="" onChange={(engine) => onPick(shownMode, engine)} />
+              </Step>
             ) : null}
 
             {posted ? (
@@ -200,7 +228,7 @@ export default function MediaDialog({
               </>
             ) : makeMode ? (
               <>
-                {onRedoBack && !squareChoice ? <Button onClick={onRedoBack}>‹ BACK TO POST</Button> : null}
+                {onRedoBack && !asIsChoice ? <Button onClick={onRedoBack}>‹ BACK TO POST</Button> : null}
                 {options}
               </>
             ) : working ? (
@@ -213,18 +241,18 @@ export default function MediaDialog({
                 {!group ? (
                   <div className="sx-media-actions" role="group" aria-label="File actions">
                     {result ? (
-                      <IconButton as="a" href={result.download_url} download label={convert?.status === 'ready' ? 'Download the 3D file' : 'Download the 2K square'}>
+                      <IconButton as="a" href={result.download_url} download label={convert?.status === 'ready' ? 'Download the 3D file' : 'Download the 2K file'}>
                         <DownloadIcon />
                       </IconButton>
                     ) : null}
-                    {onRedo && !squareChoice ? <IconButton label="Make square again" onClick={onRedo}><RedoIcon /></IconButton> : null}
+                    {onRedo && !asIsChoice ? <IconButton label="Make again" onClick={onRedo}><RedoIcon /></IconButton> : null}
                     {canConvert && !convert ? (
                       <IconButton label="Make 3D" title="Make 3D: a side-by-side pair for VR. No credits. Videos up to 60 s." onClick={onConvert} disabled={convertBusy}>
                         <CubeIcon />
                       </IconButton>
                     ) : null}
                     {convert?.status === 'ready' ? (
-                      <IconButton label="Remove 3D" title="Remove 3D and post the flat square" onClick={onDropConvert}><SquareIcon /></IconButton>
+                      <IconButton label="Remove 3D" title="Remove 3D and post the flat file" onClick={onDropConvert}><SquareIcon /></IconButton>
                     ) : null}
                   </div>
                 ) : null}
@@ -234,11 +262,19 @@ export default function MediaDialog({
                   </div>
                 ) : null}
                 {convertError ? <ErrorBox title="MAKE 3D FAILED">{convertError}</ErrorBox> : null}
-                {convert?.status === 'failed' ? <ErrorBox title="MAKE 3D FAILED">The 3D version could not be made. The flat square is posted.</ErrorBox> : null}
+                {convert?.status === 'failed' ? <ErrorBox title="MAKE 3D FAILED">The 3D version could not be made. The flat version is posted.</ErrorBox> : null}
 
                 {spatial?.shown ? (
                   <div className="sx-media-spatial">
-                    <ToggleRow label="Add depth for VR" checked={spatial.on} onChange={spatial.onToggle} help="A depth version for VR headsets, posted beside the 2D file. No credits. Videos up to 60 s." />
+                    {!spatial.on ? (
+                      <>
+                        <Button onClick={spatial.onAdd}><IndustrialReelsIcon className="sx-btn-icon" aria-hidden="true" /> ADD DEPTH FOR VR</Button>
+                        <p className="sx-studio-note">A depth version for VR headsets, posted beside the 2D file. No credits. Videos up to 60 s.</p>
+                      </>
+                    ) : (
+                      <Button onClick={spatial.onRemove}><SquareIcon /> REMOVE DEPTH</Button>
+                    )}
+                    {spatial.ready ? <p role="status" className="sx-studio-note">The depth version is ready. It posts beside the 2D file.</p> : null}
                     {spatial.on ? items.map((item) => {
                       const job = spatialOf(item);
                       const state = job?.jobId ? progress[job.jobId] : null;
@@ -248,6 +284,9 @@ export default function MediaDialog({
                         </p>
                       ) : null;
                     }) : null}
+                    {spatial.skipped && !spatial.failed ? (
+                      <p role="status" className="sx-studio-note">Depth versions take 1:1, 16:9 or 9:16 files only, so this post is 2D only.</p>
+                    ) : null}
                     {spatial.failed ? (
                       <ErrorBox title="DEPTH VERSION FAILED — THE POST IS 2D ONLY">
                         {spatial.errors.map((error) => <div key={error}>{error}</div>)}

@@ -10,13 +10,15 @@ from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
 from pipeline.utils import (
+    TARGET_ASPECTS,
     calculate_square_padding,
     get_video_dimensions_and_duration,
     log_pipeline_execution,
+    needs_extend,
 )
 from core import models as _models
 from core.pricing import PricingError, validate_outpaint_source
-from server.billing.parameters import video_parameters
+from server.billing.parameters import LTX_NEGATIVE_PROMPT, model_defaults, video_parameters
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
 from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
 from pipeline.video_worker import process_video
@@ -46,8 +48,9 @@ STAGE_TTL_S = 6 * 3600
 _UPSCALE_ENGINES = {"fast", "fal", "studio", "none"}
 _LTX_RESOLUTIONS = {"480p", "720p", "1080p"}
 _LTX_TRANSFORMERS = {"high", "low", "both"}
-_SEEDVR_TARGETS = {"720p", "1080p", "2160p"}
-_BYTEDANCE_RES = {"1080p", "2k", "4k"}
+_LTX25_ANCHORS = {"center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"}
+_SEEDVR_TARGETS = {"720p", "1080p", "1440p", "2160p"}
+_BYTEDANCE_RES = {"1080p", "2k", "4k", "6k", "8k"}
 _BYTEDANCE_FPS = {"30fps", "60fps"}
 _BYTEDANCE_TIERS = {"fast", "standard", "pro"}
 
@@ -163,10 +166,11 @@ def upload_video(
 
     STAGED_UPLOADS[stage_id] = (dest_path, time.time(), stage_owner_identity(request, response, context), file.filename)
 
-    w, h, dur = get_video_dimensions_and_duration(dest_path)
-    # Stereo layout follows the frame as shown (rotation applied): ffmpeg
-    # decodes rotated, so the left-eye crop sees display orientation too.
-    shown_w, shown_h, _ = get_video_dimensions_and_duration(dest_path, display=True)
+    # Dims, padding and the stereo layout follow the frame as shown (rotation
+    # applied): ffmpeg decodes rotated, so the left-eye crop sees display
+    # orientation too, and the quote prices that shape.
+    w, h, dur = get_video_dimensions_and_duration(dest_path, display=True)
+    shown_w, shown_h = w, h
     top, bottom, left, right = calculate_square_padding(w, h)
     orientation = "LANDSCAPE" if w > h else ("PORTRAIT" if h > w else "SQUARE")
     upload_log.record(
@@ -197,18 +201,24 @@ def start_video_process(
     stage_id: str = Form(...),
     prompt: str = Form(""),
     upscale_only: bool = Form(False),
+    # None: a legacy caller that names no shape keeps today's square behaviour.
+    target_aspect: str | None = Form(None),
     upscale_engine: str = Form("fast"),
     sharpening: float = Form(0.0),
-    outpaint_model: str = Form("fal-ai/ltx-2.3-quality/outpaint"),
-    upscale_model: str = Form("fal-ai/seedvr/upscale/video"),
+    # Empty: the same default the quote used (billing/parameters.py model_defaults).
+    outpaint_model: str = Form(""),
+    upscale_model: str = Form(""),
     ltx_resolution: str = Form("720p"),
     ltx_audio: bool = Form(True),
     ltx_guidance: float = Form(1.0),
     ltx_prompt_expansion: bool = Form(False),
-    ltx_negative_prompt: str = Form("yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"),
+    ltx_negative_prompt: str = Form(LTX_NEGATIVE_PROMPT),
     ltx_loras: str = Form(""),
-    wan_resolution: str = Form("720p"),
     luma_resolution: str = Form("1080p"),
+    minimax_resolution: str = Form("768p"),
+    minimax_seed: str = Form(""),
+    ltx25_resolution: str = Form("1080p"),
+    ltx25_anchor: str = Form("center"),
     seedvr_factor: float = Form(2.0),
     seedvr_target: str = Form("1080p"),
     bytedance_target_res: str = Form("2k"),
@@ -237,10 +247,18 @@ def start_video_process(
         bytedance_target_res, bytedance_target_fps, bytedance_tier,
         trim_start, trim_duration, ltx_guidance,
     )
-    if wan_resolution not in {"480p", "580p", "720p"}:
-        raise HTTPException(status_code=400, detail="Invalid wan_resolution")
+    if target_aspect is not None and target_aspect not in TARGET_ASPECTS:
+        raise HTTPException(status_code=400, detail="Invalid target_aspect")
     if luma_resolution not in {"540p", "720p", "1080p"}:
         raise HTTPException(status_code=400, detail="Invalid luma_resolution")
+    if minimax_resolution not in {"480p", "768p", "1080p"}:
+        raise HTTPException(status_code=400, detail="Invalid minimax_resolution")
+    if minimax_seed and not (minimax_seed.isascii() and minimax_seed.isdigit() and int(minimax_seed) <= 4294967295):
+        raise HTTPException(status_code=400, detail="Invalid minimax_seed")
+    if ltx25_resolution not in {"720p", "1080p"}:
+        raise HTTPException(status_code=400, detail="Invalid ltx25_resolution")
+    if ltx25_anchor not in _LTX25_ANCHORS:
+        raise HTTPException(status_code=400, detail="Invalid ltx25_anchor")
     parsed_loras = _parse_ltx_loras(ltx_loras)
     try:
         custom_outpaint = _models.parse_custom_args(custom_outpaint_args)
@@ -258,13 +276,15 @@ def start_video_process(
     # A foreign stage gets the same error as a missing one (no oracle).
     if not stage_owner_matches(staged[2] if len(staged) > 2 else None, request, context):
         raise HTTPException(status_code=400, detail="Invalid or expired stage_id")
-    width, height, _duration = get_video_dimensions_and_duration(src_path)
+    width, height, _duration = get_video_dimensions_and_duration(src_path, display=True)
     submit_fingerprint = stage_fingerprint(src_path, width=width, height=height, duration=_duration)
-    cloud_required = ((not upscale_only) and width != height) or upscale_engine.casefold() == "fal"
+    extend = (not upscale_only) and needs_extend(width, height, target_aspect or "1:1")
+    cloud_required = extend or upscale_engine.casefold() == "fal"
     kill_switch.require_open(db, paid=cloud_required)
     params = video_parameters({
         "prompt": prompt,
         "upscale_only": upscale_only,
+        "target_aspect": target_aspect,
         "upscale_engine": upscale_engine,
         "sharpening": sharpening,
         "outpaint_model": outpaint_model,
@@ -275,8 +295,11 @@ def start_video_process(
         "ltx_prompt_expansion": ltx_prompt_expansion,
         "ltx_negative_prompt": ltx_negative_prompt,
         "ltx_loras": parsed_loras,
-        "wan_resolution": wan_resolution,
         "luma_resolution": luma_resolution,
+        "minimax_resolution": minimax_resolution,
+        "minimax_seed": minimax_seed,
+        "ltx25_resolution": ltx25_resolution,
+        "ltx25_anchor": ltx25_anchor,
         "seedvr_factor": seedvr_factor,
         "seedvr_target": seedvr_target,
         "bytedance_target_res": bytedance_target_res,
@@ -289,9 +312,9 @@ def start_video_process(
         "trim_duration": trim_duration,
         "custom_outpaint_args": custom_outpaint,
         "custom_upscale_args": custom_upscale,
-    })
+    }, model_defaults(db))
 
-    if cloud_required and not params["upscale_only"] and width != height:
+    if cloud_required and extend:
         # Ray 3.2 reframe rejects sources over 10 s; refuse before the
         # reservation or any fal call (BYOK jobs never pass a quote).
         try:
@@ -319,7 +342,7 @@ def start_video_process(
                 require_billing_secrets()
                 fal_key = resolve_fal_key(db, user_id=owner_id, payment_source=payment_source)
                 stage_specs = []
-                if not upscale_only and width != height:
+                if extend:
                     stage_specs.append(("outpaint", params["outpaint_model"]))
                 if params["upscale_engine"] == "fal":
                     stage_specs.append(("upscale", params["upscale_model"]))
@@ -360,6 +383,7 @@ def start_video_process(
         "outpaint_model": params["outpaint_model"],
         "upscale_model": params["upscale_model"],
         "upscale_only": params["upscale_only"],
+        "target_aspect": params["target_aspect"],
         "sharpening": params["sharpening"],
         "upscale_engine": params["upscale_engine"],
         "ltx_resolution": params["ltx_resolution"],
@@ -368,8 +392,11 @@ def start_video_process(
         "ltx_prompt_expansion": params["ltx_prompt_expansion"],
         "ltx_negative_prompt": params["ltx_negative_prompt"],
         "ltx_loras": params["ltx_loras"],
-        "wan_resolution": params["wan_resolution"],
         "luma_resolution": params["luma_resolution"],
+        "minimax_resolution": params["minimax_resolution"],
+        "minimax_seed": params["minimax_seed"],
+        "ltx25_resolution": params["ltx25_resolution"],
+        "ltx25_anchor": params["ltx25_anchor"],
         "seedvr_factor": params["seedvr_factor"],
         "seedvr_target": params["seedvr_target"],
         "bytedance_target_res": params["bytedance_target_res"],

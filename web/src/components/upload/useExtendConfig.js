@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { imageBillingParameters, videoBillingParameters } from '../../utils/cloudBilling.js';
+import { imageBillingParameters, matchesTarget, stagedItemNeedsCloud, videoBillingParameters } from '../../utils/cloudBilling.js';
+import { nearestAspect } from '../../utils/aspect.js';
+import { H3_REFRAME, LTX25_REFRAME, offeredValue, rateTiers, topTier, videoOptions } from '../../utils/modelOptions.js';
 
 // Extender settings for the Upload Studio, one hook per media kind. Each kind
 // keeps its own settings for the whole visit (like the standalone /image and
@@ -7,7 +9,9 @@ import { imageBillingParameters, videoBillingParameters } from '../../utils/clou
 // The derivations below mirror ImagePage.jsx / VideoPage.jsx one-for-one so
 // both pages and the studio send identical /process payloads.
 
-export const MODES = ['OUTPAINT + UPSCALE', 'UPSCALE ONLY'];
+// Fill with AI paints the file out to a picked shape; Keep shape leaves its
+// shape alone (sent as upscale_only).
+export const MODES = ['FILL WITH AI', 'KEEP SHAPE'];
 export const IMG_ENGINES = ['FAST', 'FAL AI'];
 export const VID_ENGINES = ['FAST', 'STUDIO', 'FAL AI'];
 
@@ -28,15 +32,34 @@ const CREDIT_VIDEO_OUTPAINT_MODELS = new Set([
   'fal-ai/ltx-2.3-quality/outpaint',
   'fal-ai/ltx-2.3-quality/outpaint/lora',
   'luma/agent/ray/v3.2/reframe',
-  'fal-ai/wan-vace-14b/outpainting',
+  H3_REFRAME,
+  LTX25_REFRAME,
 ]);
 const CREDIT_VIDEO_UPSCALE_MODELS = new Set([
   'fal-ai/bytedance-upscaler/upscale/video',
   'fal-ai/seedvr/upscale/video',
 ]);
 const VALID_ARGS = { args: {}, ok: true, error: '' };
+// The longest part of a clip a cloud job takes (the server's trim_duration cap).
+export const TRIM_MAX_SECONDS = 15;
 
-const isNonSquare = (item) => Number(item?.width) !== Number(item?.height);
+const nearestOf = (meta) => (Number(meta?.width) > 0 && Number(meta?.height) > 0 ? nearestAspect(Number(meta.width), Number(meta.height)) : '1:1');
+
+// The Fill with AI shape. A pick holds for the whole visit; until then each
+// file is made in the shape of the three nearest its own. Under Keep shape a
+// file keeps its shape (null).
+function useTargetShape(upscaleOnly, noUpscale) {
+  const [shape, setShape] = useState(null);
+  const shapeFor = (meta) => (upscaleOnly ? null : shape || nearestOf(meta));
+  return {
+    shape,
+    setShape,
+    shapeFor,
+    // The shape a file must already have to post as it is (null: any). With an
+    // upscale picked no file posts as it is (false): each one is made.
+    asIsShapeFor: (meta) => (!noUpscale ? false : upscaleOnly ? null : shapeFor(meta)),
+  };
+}
 
 export function useImageExtendConfig(models) {
   const outpaintCatalog = models.image_outpaint_catalog || [];
@@ -45,16 +68,18 @@ export function useImageExtendConfig(models) {
 
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState(IMG_PROMPT_DEFAULT);
-  const [engine, setEngine] = useState('FAST');
+  const [engine, setEngine] = useState('');
   const [falModel, setFalModel] = useState('Clarity Upscaler');
   const [sharpening, setSharpening] = useState(0.5);
   const [outArgs, setOutArgs] = useState(VALID_ARGS);
   const [upArgs, setUpArgs] = useState(VALID_ARGS);
 
-  const upscaleOnly = mode === 'UPSCALE ONLY';
+  const upscaleOnly = mode === 'KEEP SHAPE';
   const falPicked = engine === 'FAL AI';
-  // No Quality card picked: made square at its own resolution, not upscaled to 2K.
+  // No Quality card picked: the file keeps its own resolution, not upscaled to 2K.
   const noUpscale = engine === '';
+  const target = useTargetShape(upscaleOnly, noUpscale);
+  const targetAspect = upscaleOnly ? null : target.shape;
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falModel) || null;
   const upscaleModel = upscaleEntry?.model || FALLBACK_FAL_MODEL_IDS[falModel] || models.upscale_img;
   const outpaintModel = models.outpaint_img || STOCK_OUTPAINT_IMG;
@@ -74,6 +99,7 @@ export function useImageExtendConfig(models) {
   const parameters = useMemo(() => imageBillingParameters({
     prompt,
     upscaleOnly,
+    targetAspect,
     sharpening,
     falPicked,
     noUpscale,
@@ -81,7 +107,7 @@ export function useImageExtendConfig(models) {
     outpaintModel,
     customOutpaintArgs: outpaintCustom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, sharpening, falPicked, noUpscale, upscaleModel, outpaintModel, outpaintCustom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, targetAspect, sharpening, falPicked, noUpscale, upscaleModel, outpaintModel, outpaintCustom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
 
   const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? !outpaintCustom;
   const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? upscaleModel === 'fal-ai/clarity-upscaler';
@@ -90,6 +116,7 @@ export function useImageExtendConfig(models) {
     kind: 'image',
     engines: IMG_ENGINES,
     mode, setMode,
+    ...target,
     prompt, setPrompt,
     engine, setEngine,
     falModel, setFalModel,
@@ -110,8 +137,12 @@ export function useImageExtendConfig(models) {
     outpaintLabel: outpaintCustom ? `CUSTOM (${outpaintShort})` : (outpaintEntry?.label || 'Image Apps Outpaint'),
     upscaleLabel: falModel,
     parameters,
+    // One file's /process parameters: an unpicked shape is that file's own nearest.
+    // Keep shape sends the file's nearest too: upscale_only with a named shape is
+    // the server's native-shape upscale (without one it squares, the legacy API).
+    parametersFor: (meta) => ({ ...parameters, target_aspect: upscaleOnly ? nearestOf(meta) : target.shapeFor(meta) }),
     byokOnlyFor(items) {
-      const needsOutpaintCloud = items.some((item) => !upscaleOnly && isNonSquare(item));
+      const needsOutpaintCloud = items.some((item) => !matchesTarget(item, target.shapeFor(item)));
       return (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);
     },
     validate() {
@@ -130,36 +161,52 @@ export function useVideoExtendConfig(models) {
 
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState(VID_PROMPT_DEFAULT);
-  const [engine, setEngine] = useState('FAST');
+  const [engine, setEngine] = useState('');
   const [outpaintOpt, setOutpaintOpt] = useState(outpaintOptions[0] || 'LTX 2.3 Quality');
   const [falUpscale, setFalUpscale] = useState(upscaleOptions[0] || 'Bytedance Upscaler');
   const [sharpening, setSharpening] = useState(0.5);
-  const [ltxRes, setLtxRes] = useState('720p');
+  const [ltxResPicked, setLtxRes] = useState('720p');
   const [ltxAudio, setLtxAudio] = useState(true);
   const [ltxGuidance, setLtxGuidance] = useState(1.0);
   const [ltxPromptExpansion, setLtxPromptExpansion] = useState(false);
   const [ltxNegativePrompt, setLtxNegativePrompt] = useState(VID_NEG_DEFAULT);
   const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
+  const [minimaxResPicked, setMinimaxRes] = useState('768p');
+  const [minimaxSeed, setMinimaxSeed] = useState('');
+  const [ltx25ResPicked, setLtx25Res] = useState('1080p');
+  const [ltx25Anchor, setLtx25Anchor] = useState('center');
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
-  const [seedvrTarget, setSeedvrTarget] = useState('1080p');
-  const [btdRes, setBtdRes] = useState('2k');
-  const [btdFps, setBtdFps] = useState('30fps');
-  const [btdTier, setBtdTier] = useState('fast');
+  const [seedvrTargetPicked, setSeedvrTarget] = useState('1080p');
+  const [btdResPicked, setBtdRes] = useState('2k');
+  const [btdFpsPicked, setBtdFps] = useState('30fps');
+  const [btdTierPicked, setBtdTier] = useState('fast');
   const [btdPreset, setBtdPreset] = useState('general');
   const [btdFidelity, setBtdFidelity] = useState('medium');
-  const [trimEnabled, setTrimEnabled] = useState(false);
-  const [trimStart, setTrimStart] = useState(0);
-  const [trimDur, setTrimDur] = useState(15);
+  // The part of each clip a cloud job takes, by stage_id: { start, dur }.
+  const [trims, setTrims] = useState({});
   const [outArgs, setOutArgs] = useState(VALID_ARGS);
   const [upArgs, setUpArgs] = useState(VALID_ARGS);
 
-  const upscaleOnly = mode === 'UPSCALE ONLY';
+  const upscaleOnly = mode === 'KEEP SHAPE';
   const falPicked = engine === 'FAL AI';
-  // No Quality card picked: made square at its own resolution, not upscaled to 2K.
+  // No Quality card picked: the file keeps its own resolution, not upscaled to 2K.
   const noUpscale = engine === '';
+  const target = useTargetShape(upscaleOnly, noUpscale);
+  const targetAspect = upscaleOnly ? null : target.shape;
   const studioPicked = engine === 'STUDIO';
   const outpaintEntry = outpaintCatalog.find((e) => e.label === outpaintOpt) || outpaintCatalog[0];
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
+  // Options fal still accepts; the server withdraws the others (server/fal_schemas.py).
+  const offered = videoOptions(outpaintEntry, upscaleEntry);
+  const ltxRes = offeredValue(ltxResPicked, offered.ltxRes);
+  const seedvrTarget = offeredValue(seedvrTargetPicked, offered.seedvrTarget);
+  const btdRes = offeredValue(btdResPicked, offered.btdRes);
+  const btdFps = offeredValue(btdFpsPicked, offered.btdFps);
+  const btdTier = offeredValue(btdTierPicked, offered.btdTier);
+  const minimaxResOptions = rateTiers(outpaintCatalog, H3_REFRAME, ['480p', '768p', '1080p']);
+  const minimaxRes = offeredValue(minimaxResPicked, minimaxResOptions);
+  const ltx25ResOptions = rateTiers(outpaintCatalog, LTX25_REFRAME, ['720p', '1080p']);
+  const ltx25Res = offeredValue(ltx25ResPicked, ltx25ResOptions);
   const outpaintModel = outpaintEntry?.model || models.outpaint_vid;
   const upscaleModel = upscaleEntry?.model || models.upscale_vid;
 
@@ -176,7 +223,10 @@ export function useVideoExtendConfig(models) {
     if (uc?.is_custom) setFalUpscale(uc.label);
   }, [outpaintCatalog, upscaleCatalog, models]);
 
-  const ltxPicked = !upscaleOnly && outpaintOpt.includes('LTX');
+  const minimaxPicked = !upscaleOnly && outpaintModel === H3_REFRAME;
+  const ltx25Picked = !upscaleOnly && outpaintModel === LTX25_REFRAME;
+  // LTX 2.3 settings only: LTX 2.5 Reframe has its own.
+  const ltxPicked = !upscaleOnly && outpaintOpt.includes('LTX') && !ltx25Picked;
   const loraPicked = !upscaleOnly && (outpaintOpt.includes('LoRA') || (outpaintModel || '').includes('/lora'));
   const loraList = useMemo(
     () => loraPicked ? ltxLoras.map((lora) => ({ ...lora, path: (lora.path || '').trim() })).filter((lora) => lora.path) : [],
@@ -185,6 +235,7 @@ export function useVideoExtendConfig(models) {
   const parameters = useMemo(() => videoBillingParameters({
     prompt,
     upscaleOnly,
+    targetAspect,
     falPicked,
     studioPicked,
     noUpscale,
@@ -197,11 +248,12 @@ export function useVideoExtendConfig(models) {
     ltxPromptExpansion,
     ltxNegativePrompt,
     ltxLoras: loraList,
-    // No WAN resolution selector in the UI yet: pin the top tier so quotes
-    // never understate the charge (same as VideoPage).
-    wanResolution: '720p',
     // No Ray 3.2 resolution selector either: default to 1080p ($0.36/s).
-    lumaResolution: '1080p',
+    lumaResolution: topTier(outpaintCatalog, 'luma/agent/ray/v3.2/reframe', '1080p'),
+    minimaxResolution: minimaxRes,
+    minimaxSeed,
+    ltx25Resolution: ltx25Res,
+    ltx25Anchor,
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,
@@ -209,15 +261,35 @@ export function useVideoExtendConfig(models) {
     bytedanceTier: btdTier,
     bytedancePreset: btdPreset,
     bytedanceFidelity: btdFidelity,
-    trimEnabled,
-    trimStart,
-    trimDuration: trimDur,
     customOutpaintArgs: outpaintEntry?.is_custom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, targetAspect, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, minimaxRes, minimaxSeed, ltx25Res, ltx25Anchor, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
 
   const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? CREDIT_VIDEO_OUTPAINT_MODELS.has(outpaintModel);
   const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? CREDIT_VIDEO_UPSCALE_MODELS.has(upscaleModel);
+
+  const shapeParametersFor = (meta) => ({ ...parameters, target_aspect: upscaleOnly ? nearestOf(meta) : target.shapeFor(meta) });
+  // The longest part of a clip a job may take, or null when it takes all of it.
+  // Cloud jobs bill per second, so a long clip is cut to the outpaint model's
+  // limit (Ray 3.2: 10 s, MiniMax credits: 10 s), else to 15 s.
+  const trimMaxFor = (meta) => {
+    const base = shapeParametersFor(meta);
+    if (!stagedItemNeedsCloud(meta, base)) return null;
+    const outpaints = !base.upscale_only && !matchesTarget(meta, base.target_aspect);
+    const limits = outpaints ? [outpaintEntry?.max_source_seconds, outpaintEntry?.credit_max_seconds] : [];
+    return Math.min(TRIM_MAX_SECONDS, ...limits.map(Number).filter((limit) => limit > 0));
+  };
+  // The part of a clip that will be made, { start, dur, max, duration }, or null when the
+  // whole clip is made. It defaults to the first `max` seconds.
+  const trimFor = (meta) => {
+    const max = meta ? trimMaxFor(meta) : null;
+    const duration = Number(meta?.duration) || 0;
+    if (!max || duration <= max) return null;
+    const picked = trims[meta.stage_id] || {};
+    const dur = Math.min(max, duration, Math.max(1, Number(picked.dur) || max));
+    const start = Math.min(Math.max(0, Number(picked.start) || 0), duration - dur);
+    return { start, dur, max, duration };
+  };
 
   const updateLora = (index, patch) => {
     setLtxLoras((current) => current.map((lora, position) => (position === index ? { ...lora, ...patch } : lora)));
@@ -227,12 +299,14 @@ export function useVideoExtendConfig(models) {
     kind: 'video',
     engines: VID_ENGINES,
     mode, setMode,
+    ...target,
     prompt, setPrompt,
     engine, setEngine,
     outpaintOpt, setOutpaintOpt,
     falUpscale, setFalUpscale,
     sharpening, setSharpening,
     ltxRes, setLtxRes,
+    videoOptions: offered,
     ltxAudio, setLtxAudio,
     ltxGuidance, setLtxGuidance,
     ltxPromptExpansion, setLtxPromptExpansion,
@@ -241,6 +315,10 @@ export function useVideoExtendConfig(models) {
     updateLora,
     addLora: () => setLtxLoras((current) => (current.length < MAX_LORAS ? [...current, { path: '', scale: 1, transformer: 'both' }] : current)),
     removeLora: (index) => setLtxLoras((current) => current.filter((_, position) => position !== index)),
+    minimaxRes, setMinimaxRes, minimaxResOptions,
+    minimaxSeed, setMinimaxSeed,
+    ltx25Res, setLtx25Res, ltx25ResOptions,
+    ltx25Anchor, setLtx25Anchor,
     seedvrFactor, setSeedvrFactor,
     seedvrTarget, setSeedvrTarget,
     btdRes, setBtdRes,
@@ -248,15 +326,16 @@ export function useVideoExtendConfig(models) {
     btdTier, setBtdTier,
     btdPreset, setBtdPreset,
     btdFidelity, setBtdFidelity,
-    trimEnabled, setTrimEnabled,
-    trimStart, setTrimStart,
-    trimDur, setTrimDur,
+    trimFor,
+    setTrim: (stageId, trim) => setTrims((current) => ({ ...current, [stageId]: trim })),
     setOutArgs, setUpArgs,
     upscaleOnly,
     falPicked,
     noUpscale,
     studioPicked,
     ltxPicked,
+    minimaxPicked,
+    ltx25Picked,
     loraPicked,
     outpaintCatalog,
     outpaintOptions,
@@ -269,8 +348,16 @@ export function useVideoExtendConfig(models) {
     outpaintLabel: outpaintOpt,
     upscaleLabel: falUpscale,
     parameters,
+    // One file's /process parameters: an unpicked shape is that file's own nearest.
+    // Keep shape sends the file's nearest too: upscale_only with a named shape is
+    // the server's native-shape upscale (without one it squares, the legacy API).
+    // A long clip on a cloud job sends the part picked on the stage timeline.
+    parametersFor: (meta) => {
+      const trim = trimFor(meta);
+      return { ...shapeParametersFor(meta), trim_enabled: !!trim, trim_start: trim?.start ?? 0, trim_duration: trim?.dur ?? TRIM_MAX_SECONDS };
+    },
     byokOnlyFor(items) {
-      const needsOutpaintCloud = items.some((item) => !upscaleOnly && isNonSquare(item));
+      const needsOutpaintCloud = items.some((item) => !matchesTarget(item, target.shapeFor(item)));
       return (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);
     },
     validate() {

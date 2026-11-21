@@ -993,22 +993,22 @@ button:hover .sx-sidebar-hero-logo,
   margin-top: 8px;
 }
 
-/* 2x2 Navigation Cards */
+/* Navigation: one column of rows, icon then label */
 .sx-sidebar-nav-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .sx-sidebar-nav-card {
-  background: var(--sx-surface-2);
-  border: 1px solid var(--sx-rule-strong);
-  padding: 12px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 10px 12px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 14px;
   text-decoration: none;
   border-radius: 0;
   transition: all 180ms ease;
@@ -1017,14 +1017,18 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-nav-card:hover {
   background: var(--sx-surface-hover);
-  border-color: var(--sx-ink-3);
-  transform: translateY(-1px);
 }
 
 .sx-sidebar-nav-card.sx-active {
   background: var(--sx-surface-3);
-  border-color: var(--sx-accent);
-  box-shadow: inset 0 -2px 0 var(--sx-accent);
+  border-color: var(--sx-rule-strong);
+  box-shadow: inset 2px 0 0 var(--sx-accent);
+}
+
+.sx-sidebar-nav-card .sx-sidebar-icon-svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
 }
 
 .sx-sidebar-nav-icon,
@@ -1049,7 +1053,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-nav-label {
   font-family: var(--sx-font-display);
-  font-size: var(--sx-t-eyebrow);
+  font-size: var(--sx-t-body);
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1092,133 +1096,64 @@ button:hover .sx-sidebar-hero-logo,
   color: var(--sx-ink);
 }
 
+/* Colour theme: a nav-style row, a sun or moon, the label, and a switch on the right. */
 .sx-sidebar-theme {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sx-3);
   flex-shrink: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--sx-rule);
 }
 
-/* Horizon theme switch: a sun over a paper-white sky by day, a moon and stars by night. */
-.sx-horizon {
-  position: relative;
-  flex-shrink: 0;
-  width: 132px;
-  height: 44px;
-  padding: 0;
-  overflow: hidden;
-  border: 1.5px solid var(--sx-ink);
-  border-radius: var(--sx-radius);
-  background: var(--sx-surface);
-  cursor: pointer;
-  transition: background-color 500ms var(--sx-ease-in-out);
+.sx-theme-row {
+  width: 100%;
+  font: inherit;
+  text-align: left;
 }
 
-.sx-horizon:focus-visible {
+.sx-theme-row:focus-visible {
   outline: var(--sx-focus-ring);
   outline-offset: var(--sx-focus-offset);
 }
 
-/* The ground: covers whatever has set below the horizon line. */
-.sx-horizon::after {
+.sx-theme-switch {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 34px;
+  height: 18px;
+  border: 1.5px solid var(--sx-ink-2);
+  border-radius: var(--sx-radius);
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+/* The knob: a square that slides right and turns accent when dark is on. */
+.sx-theme-switch::after {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 2px;
+  left: 2px;
+  width: 11px;
   height: 11px;
-  border-top: 1.5px solid var(--sx-ink);
-  background: inherit;
-  z-index: 2;
+  border-radius: 2px;
+  background: var(--sx-ink-2);
+  transition: transform 180ms var(--sx-ease-in-out), background-color 180ms ease;
 }
 
-.sx-horizon-sun,
-.sx-horizon-moon {
-  position: absolute;
-  top: 5px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  z-index: 1;
-  transition: transform 500ms var(--sx-ease-in-out), opacity 500ms var(--sx-ease-in-out);
+.sx-theme-row:hover .sx-theme-switch {
+  border-color: var(--sx-ink);
 }
 
-.sx-horizon-sun {
-  left: 14px;
+.sx-theme-row[aria-checked='true'] .sx-theme-switch {
+  border-color: var(--sx-accent);
+}
+
+.sx-theme-row[aria-checked='true'] .sx-theme-switch::after {
+  transform: translateX(16px);
   background: var(--sx-accent);
 }
 
-.sx-horizon[aria-checked='true'] .sx-horizon-sun {
-  transform: translateY(30px);
-  opacity: 0;
-}
-
-/* An upright crescent: the inset shadow is the lit part. */
-.sx-horizon-moon {
-  right: 14px;
-  box-shadow: inset -6px 0 0 0 var(--sx-ink);
-  transform: translateY(30px);
-  opacity: 0;
-}
-
-.sx-horizon[aria-checked='true'] .sx-horizon-moon {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-.sx-horizon-stars {
-  position: absolute;
-  top: 8px;
-  left: 64px;
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: var(--sx-ink);
-  box-shadow: 10px 10px 0 0 var(--sx-ink), 20px -1px 0 0 var(--sx-ink);
-  opacity: 0;
-  transition: opacity 400ms var(--sx-ease-in-out);
-}
-
-.sx-horizon[aria-checked='true'] .sx-horizon-stars {
-  opacity: 1;
-  transition-delay: 200ms;
-}
-
-.sx-horizon-label {
-  position: absolute;
-  top: 0;
-  height: 30px;
-  line-height: 30px;
-  font-family: var(--sx-font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.15em;
-  color: var(--sx-ink);
-  transition: opacity 300ms var(--sx-ease-in-out);
-}
-
-.sx-horizon-day {
-  right: 14px;
-}
-
-.sx-horizon-night {
-  left: 12px;
-  opacity: 0;
-}
-
-.sx-horizon[aria-checked='true'] .sx-horizon-day {
-  opacity: 0;
-}
-
-.sx-horizon[aria-checked='true'] .sx-horizon-night {
-  opacity: 1;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .sx-horizon,
-  .sx-horizon *,
-  .sx-horizon::after {
+  .sx-theme-switch,
+  .sx-theme-switch::after {
     transition: none;
   }
 }
@@ -3538,7 +3473,8 @@ code {
 
 /* Reels fullscreen host: the browser forces the :fullscreen element's
    own box, so the player fullscreens this wrapper (plain black stage)
-   and the 1:1 frame centers inside it via normal flex layout. */
+   and the frame centers inside it via normal flex layout. The media
+   contain-fits the frame over its blurred backdrop (ui/assets/reels.html). */
 #sxReelsHost:fullscreen,
 #sxReelsHost:-webkit-full-screen,
 #sxReelsHost.sx-pseudo-fullscreen {
@@ -3594,17 +3530,14 @@ code {
 #sxReelsHost:-webkit-full-screen #reelsImage,
 #sxReelsHost.sx-pseudo-fullscreen #reelsVideo,
 #sxReelsHost.sx-pseudo-fullscreen #reelsImage {
+  width: 100% !important;
   height: 100% !important;
-  width: auto !important;
-  aspect-ratio: 1 / 1 !important;
   flex: 0 0 auto !important;
   min-width: 0 !important;
-  min-height: 100% !important;
+  min-height: 0 !important;
   max-width: none !important;
   max-height: none !important;
-  object-fit: cover !important;
-  will-change: transform;
-  cursor: grab;
+  object-fit: contain !important;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -4870,7 +4803,28 @@ body.sx-vr-active .sx-reels-mount,
   font-weight: 700;
   color: var(--sx-accent);
   margin-top: 4px;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  text-decoration: none;
+}
+
+.sx-account-popover-credits:hover {
+  color: var(--sx-accent-hi);
+  text-decoration: underline;
+}
+
+/* Account menu row icons; the credits line in the menu head uses a smaller one. */
+.sx-account-menu-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.sx-account-popover-credits .sx-account-menu-icon {
+  width: 14px;
+  height: 14px;
 }
 
 /* Enter VR: purple, icon and label; the label drops below 1024px so the bar keeps its room. */
@@ -5156,10 +5110,9 @@ body.sx-vr-active .sx-reels-mount,
 /* Reels player skeleton — same square sizing as the live mount. */
 .sx-skel-player {
   position: relative;
-  width: min(92vw, 84vh, 860px);
-  width: min(92vw, 84dvh, 860px);
-  height: min(92vw, 84vh, 860px);
-  height: min(92vw, 84dvh, 860px);
+  width: min(calc(100vh - 160px), 900px, 100%);
+  width: min(calc(100dvh - 160px), 900px, 100%);
+  aspect-ratio: 1 / 1;
   margin: 0 auto;
 }
 
@@ -5188,6 +5141,7 @@ body.sx-vr-active .sx-reels-mount,
     justify-content: center;
     width: 100%;
     height: auto;
+    aspect-ratio: auto;
   }
 
   .sx-skel-player-stage {
@@ -5247,9 +5201,17 @@ body.sx-vr-active .sx-reels-mount,
   }
 }
 
+/* A reel tile takes its post's shape (--tile-aspect, set by ExploreTile from
+   tileAspect); pack tiles and skeletons fall back to a square. useMasonry
+   places tiles in columns. The tile is a size container for the short-tile
+   query below. Chips scale with the window, not the tile, so every tile on
+   screen has the same chip size: 24px on a phone, 30px at 1000px, 34px wide. */
 .sx-explore-tile {
+  --sx-chip: clamp(24px, 20.4px + 0.96vw, 34px);
+  --sx-chip-font: clamp(11px, calc(var(--sx-chip) * 0.4), 14px);
   position: relative;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: var(--tile-aspect, 1);
+  container: sx-tile / size;
   overflow: hidden;
   background: var(--sx-surface-2);
   border: none;
@@ -5340,7 +5302,8 @@ body.sx-vr-active .sx-reels-mount,
   gap: 10px;
   background: var(--sx-media-scrim);
   color: var(--sx-on-media);
-  font-size: 0.85rem;
+  font-size: calc(var(--sx-chip-font) * 1.0625);
+  height: var(--sx-chip);
   padding: 3px 9px;
   pointer-events: none;
   white-space: nowrap;
@@ -5351,18 +5314,7 @@ body.sx-vr-active .sx-reels-mount,
 
 @media (max-width: 480px) {
   .sx-explore-stats {
-    font-size: var(--sx-t-eyebrow);
     gap: 7px;
-  }
-  .sx-explore-loc {
-    font-size: var(--sx-t-eyebrow);
-  }
-  .sx-explore-title {
-    font-size: var(--sx-t-eyebrow);
-    bottom: 38px;
-  }
-  .sx-explore-kind {
-    font-size: var(--sx-t-eyebrow);
   }
 }
 
@@ -5383,8 +5335,8 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 .sx-explore-stat-icon {
-  width: 16px;
-  height: 16px;
+  width: calc(var(--sx-chip, 30px) * 8 / 15);
+  height: calc(var(--sx-chip, 30px) * 8 / 15);
   display: block;
   flex-shrink: 0;
 }
@@ -5406,7 +5358,8 @@ body.sx-vr-active .sx-reels-mount,
   gap: 4px;
   background: var(--sx-media-scrim);
   color: var(--sx-on-media);
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
+  font: 800 var(--sx-chip-font)/1 var(--sx-font-mono);
+  height: var(--sx-chip);
   padding: 3px 9px 3px 7px;
   pointer-events: none;
   white-space: nowrap;
@@ -5415,7 +5368,7 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 .sx-explore-tile:has(.sx-explore-creator) .sx-explore-loc {
-  top: 40px;
+  top: calc(var(--sx-chip) + 12px);
 }
 
 button.sx-explore-loc-link {
@@ -5443,18 +5396,19 @@ button.sx-explore-loc-link:hover {
   transform: scale(1.04);
 }
 
-/* Cover-title badge, bottom-left above the stats row. */
+/* Cover-title badge, bottom-left above the stats row. One line is the same
+   height as the other chips; a second line grows it upward. */
 .sx-explore-title {
   position: absolute;
   left: 8px;
-  bottom: 40px;
+  bottom: calc(var(--sx-chip) + 12px);
   max-width: calc(100% - 16px);
   background: var(--sx-media-scrim);
   color: var(--sx-on-media);
-  font-size: var(--sx-t-eyebrow);
+  font-size: var(--sx-chip-font);
   font-weight: 700;
-  line-height: 1.25;
-  padding: 3px 9px;
+  line-height: calc(var(--sx-chip-font) * 4 / 3);
+  padding: calc((var(--sx-chip) - var(--sx-chip-font) * 4 / 3) / 2) 9px;
   pointer-events: none;
   overflow: hidden;
   display: -webkit-box;
@@ -5462,21 +5416,13 @@ button.sx-explore-loc-link:hover {
   -webkit-box-orient: vertical;
 }
 
-/* Pack order + runtime (counts down while the preview plays), top-right. */
-.sx-explore-order {
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  z-index: 4;
-  padding: 5px 8px;
-  background: var(--sx-spot);
-  border: 1px solid var(--sx-ink);
-  color: var(--sx-on-spot);
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
-  letter-spacing: 0.08em;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  white-space: nowrap;
+/* A short (wide) tile has no room for the title and place badges: keep the
+   creator, kind and stats only. */
+@container sx-tile (max-height: 200px) {
+  .sx-explore-title,
+  .sx-explore-loc {
+    display: none;
+  }
 }
 
 /* Legacy 3D posts without a 2D rendition serve the raw stereo file: crop
@@ -5496,9 +5442,11 @@ button.sx-explore-loc-link:hover {
   top: 8px;
   background: color-mix(in srgb, var(--sx-accent) 90%, transparent);
   color: var(--sx-on-accent);
-  font-size: var(--sx-t-eyebrow);
+  font-size: var(--sx-chip-font);
   font-weight: 800;
   letter-spacing: 0.08em;
+  height: var(--sx-chip);
+  line-height: calc(var(--sx-chip) - 6px);
   padding: 3px 8px;
   pointer-events: none;
 }
@@ -5933,9 +5881,10 @@ button.sx-explore-loc-link:hover {
   font-size: var(--sx-t-eyebrow);
 }
 
-.sx-account-popover :is(a, button) {
+.sx-account-popover > :is(a, button) {
   display: flex;
   align-items: center;
+  gap: 10px;
   box-sizing: border-box;
   text-decoration: none;
   width: 100%;
@@ -5957,7 +5906,7 @@ button.sx-explore-loc-link:hover {
   color: var(--sx-accent-hi);
 }
 
-.sx-account-popover :is(a, button):hover {
+.sx-account-popover > :is(a, button):hover {
   background: var(--sx-surface-hover);
   color: var(--sx-ink);
 }
@@ -6121,7 +6070,7 @@ button.sx-explore-loc-link:hover {
   background: var(--sx-media-scrim);
   color: var(--sx-on-media);
   cursor: pointer;
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
+  font: 800 var(--sx-chip-font)/1 var(--sx-font-mono);
 }
 
 .sx-explore-creator:hover {
@@ -6131,14 +6080,14 @@ button.sx-explore-loc-link:hover {
 
 .sx-explore-creator img,
 .sx-explore-creator > span {
-  width: 22px;
-  height: 22px;
+  width: calc(var(--sx-chip) - 8px);
+  height: calc(var(--sx-chip) - 8px);
   display: grid;
   place-items: center;
   object-fit: cover;
   border-radius: 50%;
   color: var(--sx-bg);
-  font-size: var(--sx-t-eyebrow);
+  font-size: var(--sx-chip-font);
 }
 
 .sx-explore-creator strong {
@@ -6163,13 +6112,21 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-explore-owner-actions button {
-  min-height: 30px;
-  padding: 0 9px;
+  width: var(--sx-chip);
+  height: var(--sx-chip);
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
   border: none;
   background: color-mix(in srgb, var(--sx-bg) 86%, transparent);
   color: var(--sx-ink);
   cursor: pointer;
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
+}
+
+.sx-explore-action-icon {
+  width: calc(var(--sx-chip) * 0.6);
+  height: calc(var(--sx-chip) * 0.6);
+  display: block;
 }
 
 .sx-explore-owner-actions button:last-child {
@@ -6181,16 +6138,42 @@ button.sx-explore-loc-link:hover {
   right: 8px;
   bottom: 8px;
   z-index: 5;
+  display: flex;
 }
 
 .sx-explore-share button {
-  min-height: 30px;
-  padding: 0 9px;
+  width: var(--sx-chip);
+  height: var(--sx-chip);
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
   border: none;
-  background: color-mix(in srgb, var(--sx-bg) 86%, transparent);
+  background: var(--sx-media-scrim);
   color: var(--sx-accent-hi);
   cursor: pointer;
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
+}
+
+.sx-explore-share-icon {
+  width: calc(var(--sx-chip) * 0.6);
+  height: calc(var(--sx-chip) * 0.6);
+  display: block;
+}
+
+/* Image glyph in the kind/order chips. The chip is accent-filled, so the
+   glyph's accent stroke takes the chip's text colour. */
+.sx-explore-kind-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.sx-explore-kind-icon {
+  --sx-accent: currentColor;
+  width: 1.4em;
+  height: 1.4em;
+  display: block;
+  flex-shrink: 0;
 }
 
 .sx-post-editor-fields {
@@ -6673,10 +6656,6 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
   }
 
 
-
-  .sx-explore-creator {
-    font-size: var(--sx-t-eyebrow);
-  }
 }
 /* ─── Direct messaging (page + compact dock) ─────────────────────────
    "Tactical console" look shared by /messages and the collapsible dock:
@@ -8593,6 +8572,38 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
   padding: 10px 16px;
 }
 
+.sx-pf-actions .sx-pf-icon-btn {
+  width: 44px;
+  padding: 0;
+  justify-content: center;
+}
+
+.sx-pf-icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+/* The share glyph is drawn in fixed white; on header buttons it follows the text colour so it
+   reads on paper and on the inverted hover. */
+.sx-pf-icon [stroke='#f2f3f5'] {
+  stroke: currentColor;
+}
+
+.sx-pf-icon [fill='#f2f3f5'] {
+  fill: currentColor;
+}
+
+.sx-pf-icon [fill='#121315'] {
+  fill: none;
+}
+
+/* On the accent button the accent strokes take the text colour so they stay visible. */
+.sx-xh-btn--primary .sx-pf-icon {
+  --sx-icon-accent: currentColor;
+  --sx-accent: currentColor;
+}
+
 .sx-pf-quiet {
   color: var(--sx-ink-3);
 }
@@ -10063,44 +10074,53 @@ a.sx-ps-btn { text-decoration: none; }
   color: var(--sx-accent-hi);
 }
 
-/* Telemetry grid */
+/* Stats and actions share one bar: same height, type and icon size on both sides. */
+.sx-pk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sx-2) var(--sx-3);
+  padding-top: var(--sx-3);
+  border-top: 1px solid var(--sx-rule);
+}
+
 .sx-pk-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: 45px;
   margin: 0;
-  padding: 1px;
-  border-top: 2px solid var(--sx-accent);
-  background: var(--sx-rule);
 }
 
 .sx-pk-stats > div {
-  display: flex;
-  flex-direction: column-reverse;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 12px 6px;
-  background: var(--pk-panel);
+  gap: 8px;
+}
+
+.sx-pk-stats dt {
+  display: inline-flex;
 }
 
 .sx-pk-stats dd {
   margin: 0;
-  color: var(--sx-ink);
-  font: 700 1.125rem/1 var(--sx-font-mono);
+  color: var(--sx-ink-2);
+  font: 700 1rem/1 var(--sx-font-mono);
 }
 
-.sx-pk-stats dt {
-  color: var(--sx-ink-3);
-  font: 600 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
-  letter-spacing: 0.1em;
+.sx-pk-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
 }
 
-/* Action rail */
+/* One segmented control: shared outline, hairline dividers */
 .sx-pk-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sx-2);
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--sx-rule);
+  background: var(--pk-panel-2);
 }
 
 .sx-pk-act {
@@ -10108,31 +10128,29 @@ a.sx-ps-btn { text-decoration: none; }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 12px 10px;
-  border: 1px solid var(--sx-rule);
-  background: var(--pk-panel-2);
+  min-width: 50px;
+  height: 43px;
+  padding: 0 15px;
+  border: 0;
+  background: transparent;
   color: var(--sx-ink);
-  font: 700 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font: 700 1rem/1 var(--sx-font-mono);
   cursor: pointer;
-  transition: background var(--sx-duration-fast) var(--sx-ease-out), border-color var(--sx-duration-fast) var(--sx-ease-out), color var(--sx-duration-fast) var(--sx-ease-out);
+  transition: background var(--sx-duration-fast) var(--sx-ease-out), color var(--sx-duration-fast) var(--sx-ease-out);
 }
 
-.sx-pk-act svg {
-  width: 14px;
-  height: 14px;
+.sx-pk-act + .sx-pk-act {
+  border-left: 1px solid var(--sx-rule);
 }
 
 .sx-pk-act:hover:not(:disabled) {
-  background: var(--pk-panel-2);
-  border-color: var(--sx-accent);
-  color: var(--sx-ink);
+  background: var(--pk-panel);
+  color: var(--sx-accent-hi);
 }
 
 .sx-pk-act:focus-visible {
   outline: 2px solid var(--sx-accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .sx-pk-act:disabled {
@@ -10140,12 +10158,7 @@ a.sx-ps-btn { text-decoration: none; }
   cursor: progress;
 }
 
-.sx-pk-act--on {
-  border-color: var(--sx-accent);
-  background: var(--sx-accent-dim);
-  color: var(--sx-accent-hi);
-}
-
+.sx-pk-act--on,
 .sx-pk-act--on:hover:not(:disabled) {
   background: var(--sx-accent-dim);
   color: var(--sx-accent-hi);
@@ -10153,11 +10166,6 @@ a.sx-ps-btn { text-decoration: none; }
 
 .sx-pk-act--quiet {
   color: var(--sx-ink-3);
-}
-
-.sx-pk-act--quiet:hover:not(:disabled) {
-  color: var(--sx-accent-hi);
-  border-color: var(--sx-accent);
 }
 
 /* Owner controls */
@@ -10622,10 +10630,6 @@ a.sx-ps-btn { text-decoration: none; }
 }
 
 @media (max-width: 640px) {
-  .sx-pk-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .sx-pk-list-head {
     align-items: flex-start;
   }
@@ -11701,15 +11705,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   pointer-events: none;
 }
 
-.sx-studio-track-trim {
-  position: absolute;
-  top: -4px;
-  bottom: -4px;
-  border: 1px solid var(--sx-warn);
-  background: var(--sx-warn-dim);
-  pointer-events: none;
-}
-
 .sx-studio-track-input {
   position: absolute;
   inset: -6px 0;
@@ -11721,6 +11716,72 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 }
 
 .sx-studio-track:focus-within {
+  outline: 2px solid var(--sx-accent);
+  outline-offset: 2px;
+}
+
+/* The part of a long clip a cloud job makes, over the seek track: drag the
+   window, or its edges. Clicks outside it reach the seek input below. */
+.sx-studio-track.sx-trimmed {
+  height: 20px;
+  isolation: isolate;
+}
+
+/* Over a range the fill keeps the track's full height, with no glow
+   spilling past it; the range tint above it fades the fill it covers. */
+.sx-studio-track.sx-trimmed .sx-studio-track-fill {
+  box-shadow: none;
+}
+
+.sx-studio-trim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.sx-studio-trim-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 16px;
+  background: color-mix(in srgb, var(--sx-warn) 30%, transparent);
+  backdrop-filter: saturate(0.4);
+  cursor: grab;
+  pointer-events: auto;
+}
+
+/* On paper the warn colour is a dark ochre that browns the fill, so the range
+   uses the proof-yellow highlighter and fades the fill toward the paper. */
+:root:not([data-theme='dark']) .sx-studio-trim-window {
+  background: color-mix(in srgb, var(--sx-spot) 35%, transparent);
+  backdrop-filter: saturate(0.6) brightness(1.35);
+}
+
+.sx-studio-trim-window:active {
+  cursor: grabbing;
+}
+
+.sx-studio-trim-edge {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: var(--sx-warn);
+  cursor: ew-resize;
+}
+
+.sx-studio-trim-edge.sx-start {
+  left: -4px;
+}
+
+.sx-studio-trim-edge.sx-end {
+  right: -4px;
+}
+
+.sx-studio-trim-window:focus-visible,
+.sx-studio-trim-edge:focus-visible {
   outline: 2px solid var(--sx-accent);
   outline-offset: 2px;
 }
@@ -12318,6 +12379,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   .sx-explore-share button::before {
     content: '';
     position: absolute;
-    inset: -7px -3px;
+    inset: calc((var(--sx-chip) - 44px) / 2) -3px;
   }
 }

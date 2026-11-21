@@ -155,19 +155,68 @@
     return { x: 48, y: GRID_TOP, w: right - 48, h: bottom - GRID_TOP, cols: GRID_COLS, rows: GRID_ROWS };
   }
 
-  function tileRect(L, slot) {
-    const w = (L.w - TILE_GAP * (L.cols - 1)) / L.cols;
-    const h = (L.h - TILE_GAP * (L.rows - 1)) / L.rows;
-    return { x: L.x + (slot % L.cols) * (w + TILE_GAP), y: L.y + Math.floor(slot / L.cols) * (h + TILE_GAP), w, h };
-  }
+  // Grid sections scroll in SCROLL_STEP canvas px (the drag step, so a drag
+  // moves the tiles with the ray); an arrow moves about a tile row.
+  const SCROLL_STEP = 140;
+  const ARROW_STEP = 3;
 
   // Scroll column beside a grid: the up and down halves of its height.
   function gridScrollBtns(L) {
     const h = (L.h - GRID_GAP) / 2;
     return [
-      { arg: -1, label: '▲', x: MAIN_W - 144, y: L.y, w: 96, h },
-      { arg: 1, label: '▼', x: MAIN_W - 144, y: L.y + h + GRID_GAP, w: 96, h },
+      { arg: -ARROW_STEP, label: '▲', x: MAIN_W - 144, y: L.y, w: 96, h },
+      { arg: ARROW_STEP, label: '▼', x: MAIN_W - 144, y: L.y + h + GRID_GAP, w: 96, h },
     ];
+  }
+
+  // Tile shape as the 2D grid sizes it (utils/aspect.js tileAspect): the
+  // reel's aspect clamped to 9:16..16:9, square without one.
+  function tileAspect(item) {
+    const a = Number(item && item.aspect);
+    return Math.min(16 / 9, Math.max(9 / 16, Number.isFinite(a) && a > 0 ? a : 1));
+  }
+
+  // True-shape masonry, as 2D useMasonry places it: greedy shortest column,
+  // ties left, so appending a page keeps every earlier tile where it was.
+  // Rects are in content space (y from the grid top). Cached per items array.
+  const masonryCache = new WeakMap();
+  function masonry(route) {
+    const L = gridLayout(route);
+    const items = route.items || [];
+    const key = L.x + ':' + L.w + ':' + L.cols + ':' + items.length;
+    const hit = masonryCache.get(items);
+    if (hit && hit.key === key) return hit;
+    const colW = (L.w - TILE_GAP * (L.cols - 1)) / L.cols;
+    const heights = new Array(L.cols).fill(0);
+    const rects = items.map((item) => {
+      const col = heights.indexOf(Math.min(...heights));
+      const r = { x: L.x + col * (colW + TILE_GAP), y: heights[col], w: colW, h: Math.round(colW / tileAspect(item)) };
+      heights[col] += r.h + TILE_GAP;
+      return r;
+    });
+    const out = { key, rects, height: Math.max(0, Math.max(...heights) - TILE_GAP) };
+    masonryCache.set(items, out);
+    return out;
+  }
+
+  // Scroll steps until the tallest column's foot is on screen.
+  function gridMaxScroll(route) {
+    return Math.max(0, Math.ceil((masonry(route).height - gridLayout(route).h) / SCROLL_STEP));
+  }
+
+  // Tiles overlapping the grid area at the route's scroll: [{ r, i }] in panel
+  // px. Edge tiles overhang the area; renderGrid clips them. The last step
+  // stops at the content's foot rather than past it.
+  function gridTiles(route) {
+    const L = gridLayout(route);
+    const m = masonry(route);
+    const top = L.y - Math.min((route.scroll || 0) * SCROLL_STEP, Math.max(0, m.height - L.h));
+    const out = [];
+    m.rects.forEach((c, i) => {
+      const r = { x: c.x, y: top + c.y, w: c.w, h: c.h };
+      if (r.y < L.y + L.h && r.y + r.h > L.y) out.push({ r, i });
+    });
+    return out;
   }
 
   // Hero column, bottom up: follow button, 2×2 counts, top tags; the bio gets the rest.
@@ -223,32 +272,42 @@
 
   // URL key of a reel's place, as the 2D explore tile builds it.
   function locationKey(loc) {
-    const slug = (v) => String(v || '').toLowerCase().replace(/[^\w]+|_+/g, '-').replace(/^-+|-+$/g, '');
+    const slug = (v) => String(v || '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
     const city = slug(loc && loc.city);
     if (!city) return '';
     const country = slug(loc.country);
     return city + (country ? '--' + country : '');
   }
 
-  // IMAGE / IMAGES · n for image reels, 3D for stereo ones; videos get no badge.
-  function kindLabel(item) {
+  // Kind badge parts, as the 2D tile joins them with " · ": PRIVATE, the image
+  // mark (with its count for a slideshow), 3D. A plain public video gets none.
+  // Text parts are strings; the image mark is { image: n }.
+  function kindParts(item) {
     const parts = [];
-    if (item.media_type === 'image') {
-      const n = (item.images || []).length || 1;
-      parts.push(n > 1 ? 'IMAGES · ' + n : 'IMAGE');
-    }
+    if (item.visibility === 'private') parts.push('PRIVATE');
+    if (item.media_type === 'image') parts.push({ image: (item.images || []).length || 1 });
     if (item.stereo_layout === 'sbs' || item.stereo_layout === 'tb') parts.push('3D');
-    return parts.join(' · ');
+    return parts;
   }
+  const KIND_FONT = 22;
+  const KIND_ICON = 28;
+  const KIND_SEP = ' · ';
+  function kindPartW(p) {
+    if (typeof p === 'string') return monoW(p, KIND_FONT);
+    return KIND_ICON + (p.image > 1 ? 4 + monoW(String(p.image), KIND_FONT) : 0);
+  }
+
+  // Short tiles drop the title and place, like the 2D tile's 200px container query.
+  const COMPACT_TILE_H = 320;
 
   // Overlay pills of a tile (2D ExploreTile): creator, then place, top-left; kind badge top-right.
   function tilePills(r, item) {
     const out = {};
-    const kind = kindLabel(item);
+    const kind = kindParts(item);
     let right = r.x + r.w - 12;
-    if (kind) {
-      const w = monoW(kind, 22) + 28;
-      out.kind = { x: right - w, y: r.y + 12, w, h: 40, text: kind };
+    if (kind.length) {
+      const w = kind.reduce((s, p, k) => s + kindPartW(p) + (k ? monoW(KIND_SEP, KIND_FONT) : 0), 0) + 28;
+      out.kind = { x: right - w, y: r.y + 12, w, h: 40, parts: kind };
       right = out.kind.x - 8;
     }
     let y = r.y + 12;
@@ -260,7 +319,7 @@
       right = r.x + r.w - 12;
     }
     const loc = item.location || {};
-    const key = locationKey(loc);
+    const key = r.h < COMPACT_TILE_H ? '' : locationKey(loc);
     if (key) {
       const text = clipChars([loc.city, loc.country].filter(Boolean).join(', '), right - r.x - 12 - 64, PILL_FONT);
       out.loc = { x: r.x + 12, y, w: 64 + monoW(text, PILL_FONT), h: PILL_H, text, key };
@@ -276,6 +335,38 @@
     }
     if (p.loc && inRect(p.loc, x, y)) return { action: 'chip', arg: '/explore/location/' + p.loc.key, hover: 'loc:' + i };
     return { action: 'play', arg: i };
+  }
+
+  // Search tool row: place chips (route.related) take the right end; the field gets the rest.
+  // Wider than tag chips so "São Paulo, Brazil" fits beside the pin. Tag and place pages
+  // keep the field too, holding their tag or place, with their related chips beside it.
+  const PLACE_W = 460;
+  // Tag and place pages: smaller, quieter related chips under a caption, so they read as
+  // extras beside the field rather than as part of it.
+  const RELATED_W = 300;
+  const RELATED_H = 64;
+  const RELATED_CAPTIONS = { tag: 'RELATED TAGS', location: 'RELATED PLACES' };
+  const BAR_SECTIONS = { explore: true, search: true, tag: true, location: true };
+  function placeChips(route) {
+    if (!route || !BAR_SECTIONS[route.section]) return [];
+    return (route.related || []).slice(0, RELATED_CAPTIONS[route.section] ? 3 : 2);
+  }
+  // What the idle field shows: the search text, or the open tag or place.
+  function barText(route) {
+    if (route.section === 'search') return route.arg;
+    return route.section === 'tag' || route.section === 'location' ? route.label || '' : '';
+  }
+  function searchBarRect(route) {
+    const n = placeChips(route).length;
+    const w = RELATED_CAPTIONS[route.section] ? RELATED_W : PLACE_W;
+    return n ? Object.assign({}, SEARCH_BAR, { w: SEARCH_BAR.w - n * (w + 16) }) : SEARCH_BAR;
+  }
+  function placeChipRect(route, i) {
+    const bar = searchBarRect(route);
+    if (RELATED_CAPTIONS[route.section]) {
+      return { x: bar.x + bar.w + 16 + i * (RELATED_W + 16), y: SEARCH_BAR.y + SEARCH_BAR.h - RELATED_H, w: RELATED_W, h: RELATED_H };
+    }
+    return { x: bar.x + bar.w + 16 + i * (PLACE_W + 16), y: SEARCH_BAR.y, w: PLACE_W, h: SEARCH_BAR.h };
   }
 
   function chipRect(i) {
@@ -748,8 +839,8 @@
   function renderSearchBar(ctx, route, field, hover) {
     const T = tokens().hex;
     const f = field || {};
-    const r = SEARCH_BAR;
-    const text = f.focused ? f.text : (route.section === 'search' ? route.arg : '');
+    const r = searchBarRect(route);
+    const text = f.focused ? f.text : barText(route);
     drawField(ctx, r, text, 'Search reels, tags, places', !!f.focused, hover === 'search-focus', 100);
     const cx = r.x + 50;
     const cy = r.y + r.h / 2;
@@ -762,6 +853,134 @@
     ctx.moveTo(cx + 7, cy + 7);
     ctx.lineTo(cx + 19, cy + 19);
     ctx.stroke();
+    const caption = RELATED_CAPTIONS[route.section];
+    if (caption && placeChips(route).length) {
+      const first = placeChipRect(route, 0);
+      ctx.font = '600 22px ' + tokens().font.mono;
+      ctx.fillStyle = T.ink3;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(caption, first.x + 4, SEARCH_BAR.y + 4);
+    }
+    placeChips(route).forEach((c, i) => {
+      const cr = placeChipRect(route, i);
+      if (caption) {
+        const pin = c.path.indexOf('/explore/location/') === 0;
+        ctx.font = '600 24px ' + tokens().font.mono;
+        drawButton(ctx, cr, truncate(ctx, c.label, RELATED_W - (pin ? 90 : 40)), { hover: hover === 'chip:' + c.path, size: 24, weight: 600, quiet: true });
+        if (pin) icon(ctx, 'location', cr.x + 28, cr.y + cr.h / 2, 24, T.ink3);
+        return;
+      }
+      ctx.font = '600 30px ' + tokens().font.mono;
+      drawButton(ctx, cr, truncate(ctx, c.label, PLACE_W - 120), { hover: hover === 'chip:' + c.path, size: 30, weight: 600 });
+      if (c.path.indexOf('/explore/location/') === 0) icon(ctx, 'location', cr.x + 36, cr.y + cr.h / 2, 32, T.ink2);
+    });
+  }
+
+  // Search dropdown under the field: people, places, tags and posts, grouped as the 2D
+  // header lists them. Each group gets an even share of the rows that fit (one to three).
+  // Typed text with no match shows the 2D empty line instead.
+  const SUGGEST_ROW = 80;
+  const SUGGEST_LABEL = 44;
+  const SUGGEST_MAX = 3;
+  const SUGGEST_EMPTY = 'NO PEOPLE, PLACES, TAGS, OR POSTS FOUND';
+  function suggestLayout(route, field) {
+    const s = field && field.focused && field.suggest;
+    if (!s) return null;
+    const bar = searchBarRect(route);
+    const groups = [
+      ['PEOPLE', 'user', s.users, (u) => '/profile/' + encodeURIComponent(u.username)],
+      ['PLACES', 'place', s.locations, (p) => '/explore/location/' + encodeURIComponent(p.slug)],
+      ['TAGS', 'tag', s.tags, tagPath],
+      ['POSTS', 'post', s.posts, () => null],
+    ].filter((g) => g[2] && g[2].length);
+    const top = bar.y + bar.h + 8;
+    if (!groups.length) {
+      return String(field.text || '').trim() ? { box: { x: bar.x, y: top, w: bar.w, h: SUGGEST_ROW + 16 }, labels: [], rows: [], empty: true } : null;
+    }
+    const fit = Math.floor((MAIN_H - 40 - top - 16 - groups.length * SUGGEST_LABEL) / SUGGEST_ROW);
+    const cap = Math.max(1, Math.min(SUGGEST_MAX, Math.floor(fit / groups.length)));
+    const labels = [];
+    const rows = [];
+    let y = top + 12;
+    groups.forEach(([label, kind, list, path]) => {
+      if (y + SUGGEST_LABEL + SUGGEST_ROW > MAIN_H - 40) return;
+      labels.push({ label, y });
+      y += SUGGEST_LABEL;
+      list.slice(0, cap).forEach((item, index) => {
+        if (y + SUGGEST_ROW > MAIN_H - 40) return;
+        rows.push({ x: bar.x + 12, y, w: bar.w - 24, h: SUGGEST_ROW - 8, kind, item, index, path: path(item) });
+        y += SUGGEST_ROW;
+      });
+    });
+    return { box: { x: bar.x, y: top, w: bar.w, h: y - top + 4 }, labels, rows };
+  }
+
+  function renderSuggestions(ctx, route, field, hover) {
+    const S = suggestLayout(route, field);
+    if (!S) return;
+    const t = tokens();
+    const T = t.hex;
+    tile(ctx, S.box, 12, T.surface2, T.accent, 3);
+    ctx.textBaseline = 'middle';
+    if (S.empty) {
+      ctx.textAlign = 'left';
+      ctx.font = '600 26px ' + t.font.mono;
+      ctx.fillStyle = T.inkMuted;
+      ctx.fillText(SUGGEST_EMPTY, S.box.x + 32, S.box.y + S.box.h / 2);
+      return;
+    }
+    S.labels.forEach((l) => {
+      ctx.textAlign = 'left';
+      ctx.font = '600 26px ' + t.font.mono;
+      ctx.fillStyle = T.inkMuted;
+      ctx.fillText(l.label, S.box.x + 32, l.y + SUGGEST_LABEL / 2);
+    });
+    S.rows.forEach((r, k) => {
+      const lit = hover === 'suggest:' + k;
+      const it = r.item;
+      const cy = r.y + r.h / 2;
+      if (lit) tile(ctx, r, 10, T.surfaceHover, T.accent, 2);
+      if (r.kind === 'user') drawAvatar(ctx, r.x + 48, cy, 26, it);
+      else if (r.kind === 'place') icon(ctx, 'location', r.x + 48, cy, 36, T.ink2);
+      else if (r.kind === 'post') {
+        ctx.fillStyle = T.accent;
+        ctx.beginPath();
+        ctx.moveTo(r.x + 38, cy - 14);
+        ctx.lineTo(r.x + 62, cy);
+        ctx.lineTo(r.x + 38, cy + 14);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.textAlign = 'center';
+        ctx.font = '700 36px ' + t.font.mono;
+        ctx.fillStyle = T.accent;
+        ctx.fillText('#', r.x + 48, cy + 2);
+      }
+      const title = r.kind === 'user' ? '@' + it.username
+        : r.kind === 'post' ? String(it.title || String(it.path || '').split('/').pop())
+          : String(it.name || '');
+      const sub = r.kind === 'user'
+        ? [it.display_name, fmtCount(it.follower_count) + ' FOLLOWERS'].filter(Boolean).join(' · ')
+        : r.kind === 'post'
+          ? [it.creator && it.creator.username ? '@' + it.creator.username : '', fmtCount(it.views) + ' VIEWS'].filter(Boolean).join(' · ')
+          : [(it.reel_count || 0) + ' POSTS', fmtCount(it.views) + ' VIEWS', it.reason].filter(Boolean).join(' · ');
+      const x = r.x + 100;
+      const end = r.x + r.w - 72;
+      ctx.textAlign = 'left';
+      ctx.font = '600 34px ' + t.font.sans;
+      ctx.fillStyle = T.ink;
+      const shown = truncate(ctx, title, (end - x) * 0.5);
+      ctx.fillText(shown, x, cy + 2);
+      const subX = x + ctx.measureText(shown).width + 24;
+      ctx.font = '600 24px ' + t.font.mono;
+      ctx.fillStyle = T.ink2;
+      ctx.fillText(truncate(ctx, sub, end - subX), subX, cy + 2);
+      ctx.textAlign = 'right';
+      ctx.font = '600 32px ' + t.font.mono;
+      ctx.fillStyle = lit ? T.accent : T.inkMuted;
+      ctx.fillText('↗', r.x + r.w - 24, cy + 2);
+    });
   }
 
   function renderChips(ctx, related, hover) {
@@ -996,27 +1215,9 @@
     });
   }
 
-  // Open eye: the views glyph (no dock icon for it).
-  function drawEye(ctx, cx, cy, size, ink) {
-    const hw = size / 2;
-    ctx.save();
-    ctx.strokeStyle = ink;
-    ctx.fillStyle = ink;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(cx - hw, cy);
-    ctx.quadraticCurveTo(cx, cy - size * 0.62, cx + hw, cy);
-    ctx.quadraticCurveTo(cx, cy + size * 0.62, cx - hw, cy);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, size * 0.16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-
   // 2D ExploreTile in the panel: full-bleed thumb, creator and place pills
   // top-left, kind badge top-right, title and like/view/comment counts at the foot.
-  function renderTile(ctx, r, item, i, hover, getImage) {
+  function renderTile(ctx, r, item, i, hover, getImage, video) {
     const t = tokens();
     const T = t.hex;
     const lit = hover === 'play:' + i;
@@ -1025,7 +1226,7 @@
     shape(ctx, r);
     ctx.clip();
     // A video reel plays its muted preview loop once the host has a frame, like the 2D tile.
-    const vid = item.media_type !== 'image' && item.preview_url && getImage ? getImage(item.preview_url, 'video') : null;
+    const vid = video && item.media_type !== 'image' && item.preview_url && getImage ? getImage(item.preview_url, 'video') : null;
     drawThumb(ctx, r, vid || (url && getImage ? getImage(url) : null), item);
     ctx.restore();
     const pill = (q, on) => tile(ctx, q, 8, t.rgba.mediaScrim, on ? T.accent : T.ruleStrong, 2);
@@ -1033,10 +1234,25 @@
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     if (p.kind) {
-      pill(p.kind, false);
-      ctx.fillStyle = T.onMedia;
-      ctx.font = '600 22px ' + t.font.mono;
-      ctx.fillText(p.kind.text, p.kind.x + 14, p.kind.y + p.kind.h / 2 + 1);
+      // Accent badge with on-accent parts; the image mark is one-colour there, as in 2D.
+      const k = p.kind;
+      const cy = k.y + k.h / 2;
+      ctx.globalAlpha = 0.9;
+      tile(ctx, k, 8, T.accent);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = T.onAccent;
+      ctx.font = '800 ' + KIND_FONT + 'px ' + t.font.mono;
+      const ui = uiKit();
+      let x = k.x + 14;
+      k.parts.forEach((part, n) => {
+        if (n) { ctx.fillText(KIND_SEP, x, cy + 1); x += monoW(KIND_SEP, KIND_FONT); }
+        if (typeof part === 'string') ctx.fillText(part, x, cy + 1);
+        else {
+          if (ui && ui.drawIcon) ui.drawIcon(ctx, 'image', x + KIND_ICON / 2, cy, KIND_ICON, T.onAccent, T.onAccent);
+          if (part.image > 1) ctx.fillText(String(part.image), x + KIND_ICON + 4, cy + 1);
+        }
+        x += kindPartW(part);
+      });
     }
     if (p.creator) {
       const c = p.creator;
@@ -1078,22 +1294,20 @@
     }
     // Foot: counts pill, the title box above it.
     const comments = item.comments_count != null ? item.comments_count : (item.comments || []).length;
-    const stats = [['like', fmtCount(item.likes), item.liked_by_me], ['eye', fmtCount(item.views)]];
+    const stats = [[item.liked_by_me ? 'liked' : 'like', fmtCount(item.likes)], ['view', fmtCount(item.views)]];
     if (comments > 0) stats.push(['comment', fmtCount(comments)]);
     const sw = stats.reduce((w, s) => w + 36 + monoW(s[1], 22) + 16, 12);
     const sr = { x: r.x + 12, y: r.y + r.h - 56, w: sw, h: 44 };
     pill(sr, false);
     ctx.font = '600 22px ' + t.font.mono;
     let x = sr.x + 12;
-    stats.forEach(([name, n, on]) => {
-      const ink = T.onMedia;
-      if (name === 'eye') drawEye(ctx, x + 14, sr.y + 22, 26, ink);
-      else icon(ctx, name, x + 14, sr.y + 22, 28, ink);
+    stats.forEach(([name, n]) => {
+      icon(ctx, name, x + 14, sr.y + 22, 28, T.onMedia);
       ctx.fillStyle = T.onMedia;
       ctx.fillText(n, x + 36, sr.y + 23);
       x += 36 + monoW(n, 22) + 16;
     });
-    if (item.title) {
+    if (item.title && r.h >= COMPACT_TILE_H) {
       ctx.font = '700 26px ' + t.font.sans;
       const lines = wrapLines(ctx, item.title, r.w - 48, 2);
       const tw = lines.reduce((w, l) => Math.max(w, ctx.measureText(l).width), 0);
@@ -1113,13 +1327,21 @@
     if (route.status === 'loading') { drawStatus(ctx, 'Loading…', statusY); return; }
     if (route.status === 'error') { drawStatus(ctx, "Couldn't load this page", statusY); return; }
     if (!items.length) { drawStatus(ctx, 'Nothing here yet', statusY); return; }
-    const first = (route.scroll || 0) * L.cols;
-    for (let slot = 0; slot < L.cols * L.rows; slot++) {
-      const item = items[first + slot];
-      if (!item) break;
-      renderTile(ctx, tileRect(L, slot), item, first + slot, hover, getImage);
-    }
-    renderScrollRail(ctx, route, gridScrollBtns(L), Math.max(0, Math.ceil(items.length / L.cols) - L.rows), hover);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(L.x - 4, L.y - 2, L.w + 8, L.h + 4);
+    ctx.clip();
+    // Masonry shows more tiles than the old 4×2 page: previews play on at most that many,
+    // and only on tiles at least half in view.
+    let videos = 0;
+    gridTiles(route).forEach(({ r, i }) => {
+      const shown = Math.min(r.y + r.h, L.y + L.h) - Math.max(r.y, L.y) >= r.h / 2;
+      const video = shown && videos < GRID_COLS * GRID_ROWS;
+      if (video) videos += 1;
+      renderTile(ctx, r, items[i], i, hover, getImage, video);
+    });
+    ctx.restore();
+    renderScrollRail(ctx, route, gridScrollBtns(L), gridMaxScroll(route), hover);
   }
 
   // Square avatar tile: up to two initials in the user's colour.
@@ -1465,11 +1687,12 @@
     if (section === 'newchat') { renderPeopleList(ctx, s, hover); return; }
     if (section === 'wallet') { renderWallet(ctx, s, hover); return; }
     if (!GRID_SECTIONS[section]) { renderSectionBody(ctx, s); return; }
-    if (section === 'explore' || section === 'search') renderSearchBar(ctx, route, s.field, hover);
+    if (BAR_SECTIONS[section]) renderSearchBar(ctx, route, s.field, hover);
     else if (section === 'profile') renderProfile(ctx, route, hover, getImage);
     else if (section === 'pack') renderDetailRow(ctx, route, hover);
     else renderChips(ctx, route.related, hover);
     renderGrid(ctx, route, hover, getImage);
+    if (BAR_SECTIONS[section]) renderSuggestions(ctx, route, s.field, hover);
   }
 
   function resolveMainHit(state, x, y) {
@@ -1487,8 +1710,21 @@
       return sb ? { action: 'scroll', arg: sb.arg } : null;
     }
     if (!route || !GRID_SECTIONS[route.section]) return null;
-    if (route.section === 'explore' || route.section === 'search') {
-      if (inRect(SEARCH_BAR, x, y)) return { action: 'search-focus' };
+    if (BAR_SECTIONS[route.section]) {
+      const places = placeChips(route);
+      const p = places.findIndex((c, k) => inRect(placeChipRect(route, k), x, y));
+      if (p >= 0) return { action: 'chip', arg: places[p].path };
+      if (inRect(searchBarRect(route), x, y)) return { action: 'search-focus' };
+      // The open dropdown covers the grid: a miss inside it does nothing.
+      const S = suggestLayout(route, state.field);
+      if (S && inRect(S.box, x, y)) {
+        const k = S.rows.findIndex((r) => inRect(r, x, y));
+        if (k < 0) return null;
+        const row = S.rows[k];
+        return row.kind === 'post'
+          ? { action: 'play-suggested', arg: row.index, hover: 'suggest:' + k }
+          : { action: 'chip', arg: row.path, hover: 'suggest:' + k };
+      }
     } else if (route.section === 'profile' || route.section === 'pack') {
       const b = detailButtons(route).find((r) => inRect(r, x, y));
       if (b) return b.disabled ? null : (b.arg === undefined ? { action: b.action } : { action: b.action, arg: b.arg });
@@ -1508,14 +1744,9 @@
     const L = gridLayout(route);
     const sb = gridScrollBtns(L).find((r) => inRect(r, x, y));
     if (sb) return { action: 'scroll', arg: sb.arg };
-    const items = route.items || [];
-    for (let slot = 0; slot < L.cols * L.rows; slot++) {
-      const r = tileRect(L, slot);
-      if (!inRect(r, x, y)) continue;
-      const i = (route.scroll || 0) * L.cols + slot;
-      return i < items.length ? tileHit(r, items[i], i, x, y) : null;
-    }
-    return null;
+    if (!inRect(L, x, y)) return null;
+    const t = gridTiles(route).find(({ r }) => inRect(r, x, y));
+    return t ? tileHit(t.r, route.items[t.i], t.i, x, y) : null;
   }
 
   function resolveListHit(route, x, y) {
@@ -1666,7 +1897,9 @@
     renderMainPanel,
     resolveMainHit,
     gridLayout,
-    tileRect,
+    gridTiles,
+    gridMaxScroll,
+    SCROLL_STEP,
     detailButtons,
     thumbUrl,
     keyboardRects,

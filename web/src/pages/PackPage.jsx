@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client.js';
 import ExploreTile, { formatCompactCount } from '../components/explore/ExploreTile.jsx';
 import { DensityToggle, Segmented, gridClassName, useGridDensity } from '../components/explore/ExploreChrome.jsx';
-import { CommentIcon, LikeIcon, ViewIcon } from '../components/icons/index.jsx';
+import { CommentIcon, LikeIcon, RedoIcon, ReelPackIcon, ReportIcon, SaveIcon, ShareIcon, ViewIcon } from '../components/icons/index.jsx';
 import PackCover from '../components/packs/PackCover.jsx';
 import ReportDialog, { Dialog } from '../components/ReportDialog.jsx';
 import ReelsPlayer from '../components/ui/ReelsPlayer.jsx';
@@ -14,6 +14,8 @@ import { useToast } from '../components/ui/Toast.jsx';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { clientId, useMessaging } from '../hooks/MessagingContext.jsx';
 import { formatDuration, formatPostResolution, imageDwellMs, imagePostLabel, packRuntime } from '../utils/mediaFormat.js';
+import useMasonry from '../hooks/useMasonry.js';
+import { tileAspect } from '../utils/aspect.js';
 
 const VISIBILITY_OPTIONS = [
   { label: 'PUBLIC · DISCOVERABLE', value: 'public' },
@@ -157,6 +159,7 @@ export default function PackPage() {
   }, [load]);
 
   const items = pack?.items || [];
+  const masonryRef = useMasonry(items.map((item) => ({ key: item.id, aspect: item.available && item.post ? tileAspect(item.post) : 1 })), density);
 
   const openPlayer = ({ item = null, forceRestart = false } = {}) => {
     const next = new URLSearchParams(searchParams);
@@ -347,13 +350,11 @@ export default function PackPage() {
   const playItem = (index) => openPlayer({ item: index, forceRestart: true });
   const liked = !!pack.liked_by_me;
   const runtime = packRuntime(items);
+  // Likes and saves read on their buttons; availability reads in the gallery footer.
   const stats = [
-    ['REELS', pack.reel_count ?? items.length],
-    ['AVAILABLE', playable],
-    ['LIKES', formatCompactCount(pack.likes)],
-    ['VIEWS', formatCompactCount(pack.views)],
-    ['COMMENTS', formatCompactCount(pack.comments)],
-    ['SAVES', formatCompactCount(pack.saves)],
+    ['REELS', ReelPackIcon, pack.reel_count ?? items.length],
+    ['VIEWS', ViewIcon, formatCompactCount(pack.views)],
+    ['COMMENTS', CommentIcon, formatCompactCount(pack.comments)],
   ];
 
   return (
@@ -400,43 +401,64 @@ export default function PackPage() {
             ) : null}
           </div>
 
-          <dl className="sx-pk-stats" aria-label="Pack statistics">
-            {stats.map(([label, value]) => (
-              <div key={label}>
-                <dd>{value}</dd>
-                <dt>{label}</dt>
-              </div>
-            ))}
-          </dl>
+          <div className="sx-pk-bar">
+            <dl className="sx-pk-stats" aria-label="Pack statistics">
+              {stats.map(([label, Icon, value]) => (
+                <div key={label} title={value + ' ' + label.toLowerCase()}>
+                  <dt>
+                    <Icon className="sx-pk-icon" />
+                    <span className="sx-sr-only">{label}</span>
+                  </dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
 
-          <div className="sx-pk-actions">
-            <button
-              type="button"
-              className={'sx-pk-act' + (liked ? ' sx-pk-act--on' : '')}
-              aria-pressed={liked}
-              disabled={busy === 'like'}
-              onClick={toggleLike}
-            >
-              <LikeIcon filled={liked} />{liked ? 'LIKED' : 'LIKE'}
-            </button>
-            <button
-              type="button"
-              className={'sx-pk-act' + (pack.saved_by_me ? ' sx-pk-act--on' : '')}
-              aria-pressed={!!pack.saved_by_me}
-              disabled={busy === 'save'}
-              onClick={toggleSave}
-            >
-              {pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK'}
-            </button>
-            <button type="button" className="sx-pk-act" onClick={() => messaging.openShare({ kind: 'pack', id: pack.id, title: pack.title })}>
-              SHARE PACK
-            </button>
-            {hasResume ? (
-              <button type="button" className="sx-pk-act" onClick={() => openPlayer({ item: 0, forceRestart: true })}>START OVER</button>
-            ) : null}
-            {!isOwner ? (
-              <button type="button" className="sx-pk-act sx-pk-act--quiet" onClick={openReport}>REPORT</button>
-            ) : null}
+            <div className="sx-pk-actions">
+              <button
+                type="button"
+                className={'sx-pk-act' + (liked ? ' sx-pk-act--on' : '')}
+                aria-pressed={liked}
+                aria-label={liked ? 'LIKED' : 'LIKE'}
+                title={liked ? 'Liked' : 'Like'}
+                disabled={busy === 'like'}
+                onClick={toggleLike}
+              >
+                <LikeIcon className="sx-pk-icon" filled={liked} />
+                {formatCompactCount(pack.likes)}
+              </button>
+              <button
+                type="button"
+                className={'sx-pk-act' + (pack.saved_by_me ? ' sx-pk-act--on' : '')}
+                aria-pressed={!!pack.saved_by_me}
+                aria-label={pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK'}
+                title={pack.saved_by_me ? 'Saved pack' : 'Save pack'}
+                disabled={busy === 'save'}
+                onClick={toggleSave}
+              >
+                <SaveIcon className="sx-pk-icon" />
+                {formatCompactCount(pack.saves)}
+              </button>
+              <button
+                type="button"
+                className="sx-pk-act"
+                aria-label="SHARE PACK"
+                title="Share pack"
+                onClick={() => messaging.openShare({ kind: 'pack', id: pack.id, title: pack.title })}
+              >
+                <ShareIcon className="sx-pk-icon" />
+              </button>
+              {hasResume ? (
+                <button type="button" className="sx-pk-act" aria-label="START OVER" title="Start over" onClick={() => openPlayer({ item: 0, forceRestart: true })}>
+                  <RedoIcon className="sx-pk-icon" />
+                </button>
+              ) : null}
+              {!isOwner ? (
+                <button type="button" className="sx-pk-act sx-pk-act--quiet" aria-label="REPORT" title="Report" onClick={openReport}>
+                  <ReportIcon className="sx-pk-icon" />
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {isOwner ? (
@@ -504,13 +526,12 @@ export default function PackPage() {
               text={'This pack has no reels yet.' + (isOwner ? ' Use EDIT PACK to add some.' : '')}
             />
           ) : view === 'gallery' ? (
-            <div className={gridClassName(density) + ' sx-pk-gallery'} aria-label="Reels in this pack">
+            <div ref={masonryRef} className={gridClassName(density) + ' sx-pk-gallery'} aria-label="Reels in this pack">
               {items.map((item, index) => (
                 item.available && item.post ? (
                   <ExploreTile
                     key={item.id}
                     video={item.post}
-                    orderLabel={String(index + 1).padStart(2, '0')}
                     onOpen={() => playItem(index)}
                     onShare={(post) => messaging.openShare({ ...post, kind: 'reel' })}
                   />

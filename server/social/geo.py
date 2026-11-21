@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 
 # Static coordinates for the seeded LOCATION_POOL cities so proximity
 # ranking works even when reels carry no per-reel lat/lon.
@@ -36,9 +37,13 @@ CITY_COORDS = {
 
 
 def location_key(city: str, country: str) -> str:
-    """Return the stable URL key for a city+country place."""
-    city_slug = re.sub(r"[^\w]+|_+", "-", str(city or "").casefold()).strip("-")
-    country_slug = re.sub(r"[^\w]+|_+", "-", str(country or "").casefold()).strip("-")
+    """Return the stable URL key for a city+country place.
+
+    NFC first, so a decomposed "ã" (a + U+0303) keys like the composed one.
+    The web locationKey() in ExploreTile.jsx builds the same key.
+    """
+    city_slug = re.sub(r"[^\w]+|_+", "-", unicodedata.normalize("NFC", str(city or "")).casefold()).strip("-")
+    country_slug = re.sub(r"[^\w]+|_+", "-", unicodedata.normalize("NFC", str(country or "")).casefold()).strip("-")
     if not city_slug:
         return ""
     return city_slug + ("--" + country_slug if country_slug else "")
@@ -51,7 +56,7 @@ def location_coords(city: str, country: str, lat=None, lon=None) -> tuple[float,
             return (float(lat), float(lon))
     except (TypeError, ValueError):
         pass
-    lookup = (str(city or "").casefold().strip() + "," + str(country or "").casefold().strip())
+    lookup = unicodedata.normalize("NFC", str(city or "").casefold().strip() + "," + str(country or "").casefold().strip())
     return CITY_COORDS.get(lookup)
 
 

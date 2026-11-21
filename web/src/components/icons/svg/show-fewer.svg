@@ -1,0 +1,11 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Faceted Thumb-Down Chassis (fingers up, thumb dropping) -->
+  <path d="M15 3.5H7.5L5.5 5.5L3.5 12.5V14L5 15.5H9.5L8.5 19.5L10 21H11L15 15.5V3.5Z" stroke="#f2f3f5" stroke-width="1.6" stroke-linejoin="bevel" stroke-linecap="square"/>
+
+  <!-- Leica Vermilion Cuff Datum Beam -->
+  <line x1="19" y1="3.5" x2="19" y2="15.5" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>
+
+  <!-- Leica Vermilion Diamond Pulse Node -->
+  <polygon points="10.5,7.5 12.5,9.5 10.5,11.5 8.5,9.5" fill="#ff3b1f"/>
+  <circle cx="10.5" cy="9.5" r="0.6" fill="#f2f3f5"/>
+</svg>

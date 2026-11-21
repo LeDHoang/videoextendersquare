@@ -185,8 +185,8 @@ export function DensityToggle({ value, onChange }) {
         type="button"
         className={'sx-xh-icon-btn' + (value === 'grid' ? ' sx-xh-icon-btn--on' : '')}
         aria-pressed={value === 'grid'}
-        title="Compact square grid"
-        aria-label="Compact square grid"
+        title="Compact grid"
+        aria-label="Compact grid"
         onClick={() => onChange('grid')}
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">

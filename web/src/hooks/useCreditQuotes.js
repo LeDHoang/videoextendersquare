@@ -30,8 +30,9 @@ export function useCreditQuotes({ kind, items, parameters, enabled: requested })
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const parameterKey = useMemo(() => priceKey(parameters), [parameters]);
-  // Callers rebuild `items` on every settings change; only the staged ids matter.
-  const itemsKey = items.map((item) => item.stage_id).join('|');
+  // Callers rebuild `items` on every settings change; only the staged ids (and
+  // any per-item parameters, e.g. each file's own shape) matter.
+  const itemsKey = items.map((item) => (item.parameters ? `${item.stage_id}:${priceKey(item.parameters)}` : item.stage_id)).join('|');
   // Latest values for the fetch itself, without re-pricing on neutral edits.
   const parametersRef = useRef(parameters);
   parametersRef.current = parameters;
@@ -57,7 +58,7 @@ export function useCreditQuotes({ kind, items, parameters, enabled: requested })
     setError('');
     try {
       const current = parametersRef.current;
-      const next = await Promise.all(items.map((item) => fetchPrice(kind, item.stage_id, current, controller.signal)));
+      const next = await Promise.all(items.map((item) => fetchPrice(kind, item.stage_id, item.parameters || current, controller.signal)));
       if (seq !== seqRef.current) return []; // A newer refresh won; drop stale results.
       setQuotes(next);
       return next;

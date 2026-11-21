@@ -1,0 +1,12 @@
+{
+  "_comment": "Place names whose URL key must agree between server/social/geo.py location_key() and the web locationKey(). slug is the server key; client_slug, when set, is the web key the server must still accept (JS toLowerCase keeps ß where Python casefold makes ss). Shared by tests/test_location_names.py and web/src/components/explore/locationKey.test.js.",
+  "cases": [
+    {"label": "São Paulo NFC", "city": "São Paulo", "country": "Brazil", "slug": "são-paulo--brazil"},
+    {"label": "São Paulo NFD", "city": "São Paulo", "country": "Brazil", "slug": "são-paulo--brazil"},
+    {"label": "Zürich", "city": "Zürich", "country": "Switzerland", "slug": "zürich--switzerland"},
+    {"label": "Côte d'Ivoire", "city": "Abidjan", "country": "Côte d'Ivoire", "slug": "abidjan--côte-d-ivoire"},
+    {"label": "slash", "city": "Biel/Bienne", "country": "Switzerland", "slug": "biel-bienne--switzerland"},
+    {"label": "ampersand", "city": "Sarajevo", "country": "Bosnia & Herzegovina", "slug": "sarajevo--bosnia-herzegovina"},
+    {"label": "Gießen", "city": "Gießen", "country": "Germany", "slug": "giessen--germany", "client_slug": "gießen--germany"}
+  ]
+}

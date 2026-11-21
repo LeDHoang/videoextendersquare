@@ -29,6 +29,29 @@ describe('shelves', () => {
     expect(shelfOf({ ...wide, render: ready('j1'), posted: { post_id: 'p1' } })).toBe('posted');
   });
 
+  it('counts a file ready when it already has the target shape, or any shape for a null target', () => {
+    const wide = item('wide.png', 1600, 900);
+    const tall = item('tall.mp4', 1080, 1920);
+    expect(shelfOf(wide, '16:9')).toBe('ready');
+    expect(postSource(wide, '16:9')).toEqual({ stage_id: 'st-wide.png' });
+    expect(shelfOf(wide, '9:16')).toBe('needs');
+    expect(shelfOf(tall, '9:16')).toBe('ready');
+    expect(shelfOf(item('square.png', 512, 512), '16:9')).toBe('needs');
+    expect(shelfOf(item('odd.png', 1500, 1200), null)).toBe('ready');
+    // Within 1% still counts as the shape.
+    expect(shelfOf(item('near.png', 1910, 1080), '16:9')).toBe('ready');
+  });
+
+  it('posts a manual 9:8 / 8:9 stereo frame in 3D only with a picked layout', () => {
+    const frame = item('pair.png', 2304, 2048);
+    expect(frame.stereoOn).toBe(false);
+    expect(stereoOf({ ...frame, stereoOn: true })).toBeNull();
+    expect(stereoOf({ ...frame, stereoOn: true, stereoPick: 'sbs' })).toBe('sbs');
+    expect(stereoOf({ ...frame, stereoOn: true, stereoPick: 'tb' })).toBe('tb');
+    expect(shelfOf({ ...frame, stereoOn: true, stereoPick: 'tb' })).toBe('ready');
+    expect(storedItem({ ...frame, stereoPick: 'tb' }).stereoPick).toBe('tb');
+  });
+
   it('keeps a detected 3D upload ready while 3D is on, and sends it to be made square when off', () => {
     const eyes = item('eyes.png', 800, 400, SBS);
     expect(stereoOf(eyes)).toBe('sbs');
@@ -86,7 +109,8 @@ describe('groupProblem', () => {
     expect(groupProblem(flat)).toBe('');
     expect(groupProblem([eyes, item('eyes2.png', 800, 400, SBS)])).toBe('');
     expect(groupProblem([...flat, eyes])).toMatch(/3D and flat/);
-    expect(groupProblem([...flat, item('clip.mp4', 480, 480)])).toMatch(/one video/);
+    expect(groupProblem([...flat, item('clip.mp4', 480, 480)])).toBe('Images and videos can’t be posted together.');
+    expect(groupProblem([item('a.mp4', 480, 480), item('b.mp4', 480, 480)])).toBe('A video can only be posted on its own.');
     expect(groupProblem(Array.from({ length: 11 }, (_, i) => item(`i${i}.png`, 400, 400)))).toMatch(/at most 10 images \(you picked 11\)/);
     expect(groupProblem([flat[0], { ...flat[1], convert: ready('j3d') }])).toMatch(/posted on its own/);
   });

@@ -144,3 +144,57 @@ def test_worker_refuses_long_ray_source_before_upload(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="10 s or less"):
         video_worker.process_video(str(source), "", fal_key="key", outpaint_model=RAY)
     assert uploads == []
+
+
+@pytest.mark.parametrize(
+    ("model", "field", "value"),
+    [
+        ("minimax/h3-max/reframe-video", "minimax_resolution", "4k"),
+        ("minimax/h3-max/reframe-video", "minimax_seed", "-1"),
+        ("minimax/h3-max/reframe-video", "minimax_seed", "4294967296"),
+        ("lightricks/ltx-2.5/reframe", "ltx25_resolution", "480p"),
+        ("lightricks/ltx-2.5/reframe", "ltx25_anchor", "middle"),
+    ],
+)
+def test_process_refuses_invalid_h3_and_ltx25_settings(app, tmp_path, monkeypatch, model, field, value):
+    monkeypatch.setattr(video_router, "get_video_dimensions_and_duration", lambda *_a, **_k: (1080, 1920, 5.0))
+    monkeypatch.setattr(video_router, "create_billing_job", _no_billing)
+    monkeypatch.setattr(video_router, "require_billing_secrets", lambda: None)
+    with TestClient(app) as client:
+        user = _register(client, "reframe_settings_user")
+        _stage(tmp_path, user, "reframe-settings")
+        try:
+            response = _submit(client, "reframe-settings", outpaint_model=model, **{field: value})
+            assert response.status_code == 400, response.text
+            assert response.json()["detail"] == f"Invalid {field}"
+        finally:
+            video_router.STAGED_UPLOADS.pop("reframe-settings", None)
+
+
+def test_process_gate_lets_byok_h3_run_to_three_hundred_seconds(app, tmp_path, monkeypatch):
+    reached = []
+
+    def _billing_reached(*_args, **_kwargs):
+        reached.append(True)
+        raise video_router.BillingError("stop here")
+
+    duration = [60.0]
+    monkeypatch.setattr(video_router, "get_video_dimensions_and_duration", lambda *_a, **_k: (1080, 1920, duration[0]))
+    monkeypatch.setattr(video_router, "create_billing_job", _billing_reached)
+    monkeypatch.setattr(video_router, "resolve_fal_key", lambda *_a, **_k: "key")
+    monkeypatch.setattr(video_router, "require_billing_secrets", lambda: None)
+    with TestClient(app) as client:
+        user = _register(client, "h3_limit_user")
+        _stage(tmp_path, user, "h3-long")
+        try:
+            response = _submit(client, "h3-long", outpaint_model="minimax/h3-max/reframe-video")
+            # Past the length gate: the stubbed billing step answered.
+            assert response.status_code == 409, response.text
+            assert reached == [True]
+            duration[0] = 301.0
+            too_long = _submit(client, "h3-long", outpaint_model="minimax/h3-max/reframe-video")
+            assert too_long.status_code == 400, too_long.text
+            assert too_long.json()["detail"]["code"] == "SOURCE_TOO_LONG"
+            assert reached == [True]
+        finally:
+            video_router.STAGED_UPLOADS.pop("h3-long", None)

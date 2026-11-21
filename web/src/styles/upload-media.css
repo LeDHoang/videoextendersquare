@@ -242,8 +242,8 @@
 }
 
 /* ── Tile ──
-   A small screening room: carbon in both themes, so the bars of a file that is
-   not square yet show as black, and the chips read on any picture. */
+   A small screening room: carbon in both themes, so the bars around a file of
+   any shape show as black, and the chips read on any picture. */
 .sx-media-tile {
   --sx-tile-carbon: var(--sx-carbon);
   --sx-tile-chip: color-mix(in srgb, var(--sx-carbon) 74%, transparent);
@@ -290,11 +290,6 @@
   height: 100%;
   object-fit: contain;
   transition: transform var(--sx-duration-normal) var(--sx-ease-out), opacity var(--sx-duration-normal) var(--sx-ease-out);
-}
-
-.sx-media-tile.sx-ready .sx-media-open img,
-.sx-media-tile.sx-posted .sx-media-open img {
-  object-fit: cover;
 }
 
 .sx-media-tile:hover .sx-media-open img,
@@ -588,6 +583,14 @@
   margin: 0;
 }
 
+/* A tall stage is sized by its height, so it fits the dialog. */
+.sx-media-dialog-body .sx-studio-stage.sx-portrait {
+  width: auto;
+  height: var(--sx-media-stage);
+  max-width: 100%;
+  margin-inline: auto;
+}
+
 .sx-media-side {
   display: flex;
   flex-direction: column;
@@ -683,19 +686,6 @@
 /* Two fields side by side line up on their inputs when one label wraps. */
 .sx-media-options .sx-studio-grid-2 {
   align-items: end;
-}
-
-.sx-media-trim-bar {
-  position: relative;
-  height: 6px;
-  background: var(--sx-rule);
-}
-
-.sx-media-trim-bar i {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: var(--sx-accent);
 }
 
 .sx-media-fine {

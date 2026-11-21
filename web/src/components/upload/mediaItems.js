@@ -1,11 +1,12 @@
 import { stereoCandidate } from '../../utils/mediaFormat.js';
+import { matchesTarget } from '../../utils/cloudBilling.js';
 
 // The Upload page's media list. One item is one file the person added, with the
-// jobs made from it: `render` (made square), `convert` (MAKE 3D) and `spatial`
+// jobs made from it: `render` (filled or upscaled), `convert` (MAKE 3D) and `spatial`
 // (the depth version published beside a 2D post). Everything here is pure.
 //
 // item: { id, kind, name, addedAt, lastActionAt, meta, live, stagedAt, file, url,
-//         thumb, stereoOn, checked, draft, render, convert, spatial, posted }
+//         thumb, stereoOn, stereoPick, checked, draft, render, convert, spatial, posted }
 // job:  { jobId, status: 'working' | 'ready' | 'failed' | 'cancelled', result,
 //         state, startedAt, kept, expiresAt }
 
@@ -28,9 +29,11 @@ export function kindOf(name) {
 
 export const isSquareMeta = (meta) => !!meta && (meta.orientation === 'SQUARE' || (!!meta.width && meta.width === meta.height));
 // Stereo layout a staged upload could hold: the server's detection block, or
-// the exact 2:1 / 1:2 geometry for older stage responses.
+// the frame geometry for older stage responses.
 export const metaStereoCandidate = (meta) => meta?.stereo?.candidate || stereoCandidate(meta?.width, meta?.height);
 export const metaStereoDetected = (meta) => !!(meta?.stereo?.detected && metaStereoCandidate(meta));
+// Whether the file already has `target` ('1:1' | '16:9' | '9:16'; null: any shape).
+const metaMatches = (meta, target) => (target === '1:1' && isSquareMeta(meta)) || matchesTarget(meta, target);
 export const titleFromName = (name) => (name || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, TITLE_MAX);
 
 export const emptyDraft = (title = '') => ({ title, caption: '', tags: [], location: { city: '', country: '', display_name: '' }, visibility: 'public' });
@@ -49,6 +52,7 @@ export function stagedItem(file, meta, kind, now) {
     url: null,
     thumb: null,
     stereoOn: metaStereoDetected(meta),
+    stereoPick: null,
     checked: true,
     draft: emptyDraft(titleFromName(file.name)),
     render: null,
@@ -58,28 +62,30 @@ export function stagedItem(file, meta, kind, now) {
   };
 }
 
-// The 3D layout an as-is upload is published with, or null. A made-square
-// result is always flat.
+// The 3D layout an as-is upload is published with, or null: the person's SBS/TB
+// pick for a 9:8 / 8:9 frame, else the detected one. A made result is always flat.
 export function stereoOf(item) {
   if (!item.stereoOn || !item.live || item.render?.status === 'ready') return null;
-  return metaStereoCandidate(item.meta) || null;
+  return item.stereoPick || metaStereoCandidate(item.meta) || null;
 }
 
-// What a post of this item points at, or null while it still needs to be made square.
-export function postSource(item) {
+// What a post of this item points at, or null while it still needs to be made.
+// `target` is the shape a live upload must already have to post as it is
+// (null: any shape; false: none, an upscale is picked).
+export function postSource(item, target = '1:1') {
   if (item.convert?.status === 'ready') return { job_id: item.convert.jobId, stereo_layout: item.convert.result?.stereo_layout };
   if (item.render?.status === 'ready') return { job_id: item.render.jobId };
-  if (item.live && item.meta && (isSquareMeta(item.meta) || stereoOf(item))) return { stage_id: item.meta.stage_id };
+  if (item.live && item.meta && ((target !== false && metaMatches(item.meta, target)) || stereoOf(item))) return { stage_id: item.meta.stage_id };
   return null;
 }
 
-export function shelfOf(item) {
+export function shelfOf(item, target = '1:1') {
   if (item.posted) return 'posted';
   if (item.render?.status === 'working') return 'working';
-  return postSource(item) ? 'ready' : 'needs';
+  return postSource(item, target) ? 'ready' : 'needs';
 }
 
-// The file a spatial (depth) version is made from: the made-square result, else the upload.
+// The file a spatial (depth) version is made from: the made result, else the upload.
 export const spatialSource = (item) => (item.render?.status === 'ready' ? { job_id: item.render.jobId } : { stage_id: item.id });
 export function spatialOf(item) {
   const source = spatialSource(item);
@@ -88,7 +94,9 @@ export function spatialOf(item) {
 
 // Why these items cannot be one post, or ''.
 export function groupProblem(items) {
-  if (items.some((item) => item.kind === 'video')) return 'A post holds one video. Only images can be posted together.';
+  const videos = items.filter((item) => item.kind === 'video').length;
+  if (videos && videos < items.length) return 'Images and videos can’t be posted together.';
+  if (videos) return 'A video can only be posted on its own.';
   if (items.length > MAX_POST_IMAGES) return `A post holds at most ${MAX_POST_IMAGES} images (you picked ${items.length}).`;
   if (items.some((item) => item.convert)) return 'An image made 3D is posted on its own.';
   if (new Set(items.map((item) => stereoOf(item) || 'flat')).size > 1) return '3D and flat images cannot share a post.';
@@ -96,11 +104,11 @@ export function groupProblem(items) {
 }
 
 // The body of POST /api/uploads/publish. `items` are in post order (the first is
-// the cover); `spatialJobIds` is every slide's depth version, or null.
+// the cover) and all ready to post; `spatialJobIds` is every slide's depth version, or null.
 export function publishBody(items, draft, spatialJobIds) {
   const [cover, ...rest] = items;
-  const source = postSource(cover);
-  const extras = rest.map(postSource);
+  const source = postSource(cover, null);
+  const extras = rest.map((item) => postSource(item, null));
   const stereo = stereoOf(cover);
   const location = draft.location;
   return {
@@ -262,6 +270,7 @@ export function storedItem(item) {
     stagedAt: item.stagedAt,
     thumb: item.thumb,
     stereoOn: item.stereoOn,
+    stereoPick: item.stereoPick,
     draft: item.draft,
   };
 }

@@ -76,6 +76,9 @@
     profile: [PROFILE_COLS, GRID_ROWS],
   };
 
+  // Tile-grid sections (VRShellCanvas GRID_SECTIONS).
+  const GRID_SECTIONS = { explore: 1, search: 1, tag: 1, location: 1, profile: 1, pack: 1 };
+
   // /api/reels grids load this many tiles; scrolling near the end fetches the next page.
   const REEL_PAGE = 24;
 
@@ -148,7 +151,12 @@
   function sourceFor(route) {
     switch (route.section) {
       case 'explore': return { path: '/api/reels', query: { sort: 'for_you', limit: REEL_PAGE }, paged: true };
-      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'for_you', limit: REEL_PAGE }, paged: true };
+      // Search: matching reels, plus up to two matching places as chips beside the field.
+      case 'search': return {
+        path: '/api/reels', query: { search: route.arg, sort: 'for_you', limit: REEL_PAGE }, paged: true,
+        places: { path: '/api/reels/locations', query: { q: route.arg, limit: 2 } },
+        related: (r, pl) => chips(pl && pl.locations, '/explore/location/'),
+      };
       case 'tag': return {
         path: '/api/reels/tags/' + enc(route.arg), query: {},
         related: (r) => chips(r.related_tags, '/explore/tag/'),
@@ -224,6 +232,8 @@
     // The focused text field: 'search', 'compose' (the open thread) or 'people' (new message). focused shows the keyboard;
     // layout is the keyboard page (alpha | symbols | emoji); shift capitalises the next letter.
     let field = { id: 'search', text: '', focused: false, layout: 'alpha', shift: false };
+    // Search dropdown: { users, locations, tags } for the focused search field's text, or null.
+    let suggest = null;
     let unread = { total: 0, inbox: 0, requests: 0 };
     // Last reel-reward claim reply: { progress, remaining, capped } for the wallet's progress line.
     let rewards = null;
@@ -360,7 +370,9 @@
         src.detail ? d.request(src.detail, {}) : null,
         // Highlights are extra: a failed fetch leaves the strip empty, not the page.
         src.highlights ? Promise.resolve().then(() => d.request(src.highlights, {})).catch(() => null) : null,
-      ])).then(([res, det, hl]) => {
+        // So are place matches: a failed fetch leaves the search without chips.
+        src.places ? Promise.resolve().then(() => d.request(src.places.path, src.places.query)).catch(() => null) : null,
+      ])).then(([res, det, hl, pl]) => {
         if (stack.indexOf(route) < 0) return;
         const r = res || {};
         route.items = src.items ? src.items(r) : (Array.isArray(r.videos) ? r.videos : []);
@@ -368,7 +380,7 @@
         route.detail = src.detailOf ? src.detailOf(r, det) : null;
         if (route.section === 'wallet') setCredits(route.detail);
         route.highlights = ((hl && hl.items) || []).filter((p) => p.status === 'published');
-        route.related = src.related ? src.related(r) : [];
+        route.related = src.related ? src.related(r, pl) : [];
         if (src.label) route.label = src.label(r);
         route.status = 'ready';
         if (route.section === 'thread') {
@@ -389,14 +401,18 @@
       });
     }
 
-    // delta in rows; clamped so the last row stays on screen.
+    // delta in rows; clamped so the last row stays on screen. Tile grids scroll
+    // in the canvas's masonry steps when deps.gridMaxScroll gives their limit,
+    // and fetch the next page about a screen (6 steps) before the end.
     function scroll(delta) {
       const route = top();
       if (handoff || !route || !route.items) return false;
-      const next = Math.max(0, Math.min(maxScroll(route), (route.scroll || 0) + (delta | 0)));
+      const masonry = d.gridMaxScroll && GRID_SECTIONS[route.section];
+      const max = masonry ? d.gridMaxScroll(route) : maxScroll(route);
+      const next = Math.max(0, Math.min(max, (route.scroll || 0) + (delta | 0)));
       if (next === route.scroll) return false;
       route.scroll = next;
-      if (next >= maxScroll(route) - 1) loadMore(route);
+      if (next >= max - (masonry ? 6 : 1)) loadMore(route);
       dirty();
       return true;
     }
@@ -460,6 +476,25 @@
       return true;
     }
 
+    // Search dropdown: people, places, tags and posts for the typed text, as the 2D header lists
+    // them (an empty field gets the trending ones). A reply for older text is dropped.
+    function findSuggestions() {
+      const q = field.text.trim();
+      if (!d.request) return;
+      Promise.resolve().then(() => d.request('/api/search/suggestions', { q, limit: 6 })).then((r) => {
+        if (!field.focused || field.id !== 'search' || field.text.trim() !== q) return;
+        suggest = { users: (r && r.users) || [], locations: (r && r.locations) || [], tags: (r && r.tags) || [], posts: (r && r.posts) || [] };
+        dirty();
+      }, () => {});
+    }
+
+    // The search field starts from the search text, or the open tag or place.
+    function barText(route) {
+      if (!route) return '';
+      if (route.section === 'search') return route.arg;
+      return route.section === 'tag' || route.section === 'location' ? route.label || '' : '';
+    }
+
     // id: 'search' (default), 'compose' or 'people'. Compose keeps an unsent draft on the thread route.
     function focusField(focused, id) {
       const route = top();
@@ -469,12 +504,14 @@
         field.shift = false;
         if (field.id === 'compose') field.text = (route && route.draft) || '';
         else if (field.id === 'people') field.text = (route && route.query) || '';
-        else field.text = route && route.section === 'search' ? route.arg : '';
+        else field.text = barText(route);
+        suggest = null;
       }
       if (!focused && field.focused && field.id === 'compose' && route && route.section === 'thread') {
         route.draft = field.text;
       }
       field.focused = !!focused;
+      if (field.focused && field.id === 'search') findSuggestions();
       dirty();
     }
 
@@ -497,7 +534,11 @@
         }
         if (field.id === 'people') { focusField(false); return true; }
         field.focused = false;
-        if (q) open('/explore?q=' + enc(q)); else dirty();
+        const route = top();
+        const picked = route && (route.section === 'tag' || route.section === 'location');
+        // On a tag or place page, an erased field drops the pick back to explore; untouched text stays put.
+        if (picked && !q) { stack.pop(); open('/explore'); return true; }
+        if (q && !(picked && q === barText(route))) open('/explore?q=' + enc(q)); else dirty();
         return true;
       }
       let add = '';
@@ -513,6 +554,7 @@
       // People search runs on every keystroke; laser typing is slow enough not to need a debounce.
       const route = top();
       if (field.id === 'people' && route && route.section === 'newchat') { findPeople(route, field.text); dirty(); return true; }
+      if (field.id === 'search') findSuggestions();
       dirty(true);
       return true;
     }
@@ -685,6 +727,14 @@
         case 'chip':
           open(hit.arg);
           return true;
+        case 'play-suggested': {
+          // A post row from the search dropdown plays on its own, as the 2D one does.
+          const post = suggest && suggest.posts && suggest.posts[hit.arg | 0];
+          if (!post) return false;
+          if (d.playFeed) d.playFeed({ videoData: [post], startIndex: 0, label: '' });
+          close();
+          return true;
+        }
         case 'scroll':
           scroll(hit.arg);
           return true;
@@ -760,6 +810,7 @@
         field: {
           id: field.id, text: field.text, focused: field.focused && !handoff && !!route,
           layout: field.layout, shift: field.shift,
+          suggest: field.focused && field.id === 'search' ? suggest : null,
         },
         scene: d.getScene ? d.getScene() : 'reels',
         earthOff: !!(d.earthAvailable && !d.earthAvailable()),

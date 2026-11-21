@@ -152,19 +152,19 @@ h1, h2, h3, h4, h5, h6 {
    the tiles (which sit on photos) and the reels player, the lines take the text
    colour, the cut-outs take the paper and the vermilion takes the accent. On carbon
    the art's own colours already fit, so dark mode leaves them alone. */
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [stroke='#f2f3f5'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *, .reels-pack-card *, .reels-pack-queue *)) [stroke='#f2f3f5'] {
   stroke: currentColor;
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [fill='#f2f3f5'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *, .reels-pack-card *, .reels-pack-queue *)) [fill='#f2f3f5'] {
   fill: currentColor;
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [fill='#121315'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *, .reels-pack-card *, .reels-pack-queue *)) [fill='#121315'] {
   fill: var(--sx-bg);
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [stroke='#ff3b1f'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *, .reels-pack-card *, .reels-pack-queue *)) [stroke='#ff3b1f'] {
   stroke: var(--sx-accent);
 }
-:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *)) [fill='#ff3b1f'] {
+:root:not([data-theme='dark']) svg:not(.sx-echo-mark, .sx-icon-button--primary *, .sx-explore-tile *, .sx-explore-grid .sx-pack-tile *, #sxReelsRoot :not(.reels-side *, .reels-comments-drawer *, .reels-cluster *, .reels-edge-nav *, .reels-pack-card *, .reels-pack-queue *)) [fill='#ff3b1f'] {
   fill: var(--sx-accent);
 }
 
@@ -352,8 +352,7 @@ h1, h2, h3, h4, h5, h6 {
 .sx-explore-grid {
   gap: 6px;
 }
-.sx-explore-kind,
-.sx-explore-order {
+.sx-explore-kind {
   background: var(--sx-accent);
   color: var(--sx-on-accent);
 }
@@ -531,7 +530,6 @@ button.sx-explore-loc-link:hover {
 .sx-message-composer textarea,
 .sx-explore-tile,
 .sx-explore-kind,
-.sx-explore-order,
 .sx-explore-title,
 .sx-explore-stats,
 .sx-explore-share button,
@@ -547,7 +545,6 @@ button.sx-explore-loc-link:hover {
 .sx-pk-play,
 .sx-pk-kind,
 .sx-pk-status,
-.sx-pk-act,
 .sx-pk-foot,
 .sx-pk-dialog,
 .sx-pk-dialog textarea,
@@ -557,7 +554,7 @@ button.sx-explore-loc-link:hover {
   border-radius: var(--sx-radius);
 }
 /* These paint their own corners with children, so they clip to the radius. */
-.sx-pk-stats,
+.sx-pk-actions,
 .sx-au {
   overflow: hidden;
   border-radius: var(--sx-radius);
@@ -606,6 +603,26 @@ button.sx-explore-loc-link:hover {
 }
 :root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot :is(.action-btn, .edge-chevron):active {
   color: var(--sx-on-accent);
+}
+
+/* Light theme: the pack end card and the pack queue print on paper. Their injected
+   rules paint carbon with literal colours, so the backgrounds are restated here. */
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-pack-card {
+  background:
+    radial-gradient(ellipse at 10% 105%, var(--sx-accent-dim), transparent 55%),
+    linear-gradient(var(--sx-rule-subtle) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, var(--sx-rule-subtle) 1px, transparent 1px) 0 0 / 32px 32px,
+    color-mix(in srgb, var(--sx-bg) 92%, transparent);
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-pack-card-inner,
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-pack-queue {
+  background: var(--sx-surface);
+  border-color: var(--sx-rule-strong);
+  border-top-color: var(--sx-accent);
+  box-shadow: var(--sx-shadow-reels-cluster-paper);
+}
+:root:not([data-theme='dark']) #sxReelsRoot#sxReelsRoot .reels-pack-card.is-unavailable .reels-pack-card-inner {
+  border-top-color: var(--sx-warn);
 }
 
 /* Light theme: pause/play flash and the pop-up comment pills are paper chips. */

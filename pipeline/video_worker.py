@@ -1,3 +1,5 @@
+import json
+import math
 import os
 import time
 import tempfile
@@ -17,18 +19,29 @@ from pipeline.utils import (
     get_video_dimensions_and_duration,
     get_video_codec,
     get_video_bitrate,
+    calculate_aspect_padding,
     calculate_square_padding,
     has_audio_stream,
     fetch_fal_result,
     attach_civitai_token,
+    _even_up,
+    master_size,
+    needs_extend,
+    parse_aspect,
+    stream_rotation,
 )
 
 # Final 2K square scale. setsar=1 makes the pixels square too: scale alone
 # records a stretched source's old shape as the sample aspect ratio, so a
 # 720x1280 clip came out square but tagged 9:16 and played portrait.
+def scale_vf(width: int, height: int) -> str:
+    """The ffmpeg filter that makes a frame width x height with square pixels."""
+    return f"scale={width}:{height}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,setsar=1"
+
+
 def square_scale_vf(side: int) -> str:
     """The ffmpeg filter that makes a frame side x side with square pixels."""
-    return f"scale={side}:{side}:flags=lanczos+accurate_rnd+full_chroma_int+full_chroma_inp,setsar=1"
+    return scale_vf(side, side)
 
 
 # Side of the square master every upscale engine delivers (2K).
@@ -40,6 +53,27 @@ def native_square_side(width: int, height: int) -> int:
     """Side of the square a frame becomes with no upscale: its longer edge, made even for the encoders."""
     side = max(int(width), int(height))
     return side + side % 2
+
+
+def master_dims(width: int, height: int, target: str, keep_shape: bool = False, upscale: bool = True) -> tuple[int, int]:
+    """(width, height) of the master delivered for a width x height frame.
+
+    An upscale gives the 2K master at *target* (or at the frame's own shape
+    when *keep_shape*). With no upscale the frame keeps its native size:
+    square uses the longer edge as today, other targets keep the short side
+    and take the long side from the target ratio.
+    """
+    if upscale:
+        return master_size(width, height, None if keep_shape else target)
+    if keep_shape:
+        return _even_up(width), _even_up(height)
+    if target == "1:1":
+        side = native_square_side(width, height)
+        return side, side
+    ratio = parse_aspect(target)
+    short = _even_up(min(int(width), int(height)))
+    long_side = _even_up(math.ceil(short * max(ratio, 1 / ratio)))
+    return (long_side, short) if ratio >= 1 else (short, long_side)
 
 def extract_video_url(result):
     """
@@ -115,11 +149,27 @@ def poll_job_status(
     return result
 
 
-def _is_already_square(path: str, target: int = MASTER_SIDE) -> bool:
-    """True if *path* already probes as target x target (skip a no-op scale)."""
+def _is_already_square(path: str, target=MASTER_SIDE) -> bool:
+    """True if *path* already shows as the master size (skip a no-op scale).
+
+    *target* is a square side or a (width, height) pair."""
+    want = target if isinstance(target, tuple) else (target, target)
     try:
-        w, h, _ = get_video_dimensions_and_duration(path)
-        return w == target and h == target
+        w, h, _ = get_video_dimensions_and_duration(path, display=True)
+        return (w, h) == tuple(want)
+    except Exception:
+        return False
+
+
+def _is_rotated(path: str) -> bool:
+    """True if *path*'s video stream carries a display rotation. False if unreadable."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_streams",
+             "-of", "json", path],
+            capture_output=True, text=True, check=True, timeout=15,
+        )
+        return stream_rotation(json.loads(result.stdout)["streams"][0]) != 0
     except Exception:
         return False
 
@@ -143,19 +193,21 @@ def _within_bitrate_cap(path: str) -> bool:
     return bitrate is not None and bitrate <= STREAM_COPY_MAX_BITRATE
 
 
-def _master_can_stream_copy(path: str, sharpening: float, target: int = MASTER_SIDE) -> bool:
+def _master_can_stream_copy(path: str, sharpening: float, target=MASTER_SIDE) -> bool:
     """True if *path* is already the deliverable 2K-square HEVC master, so the
     final encode can be replaced by a lossless stream copy.
 
     All of these must hold or a re-encode is still needed: already target
     dimensions (else scale), already HEVC (else codec conversion), no
-    sharpening (else the cas filter needs a decode+encode), and a bitrate
-    within the cap (else the copy would keep an uncapped bitrate)."""
+    sharpening (else the cas filter needs a decode+encode), a bitrate
+    within the cap (else the copy would keep an uncapped bitrate), and no
+    display rotation (a copy keeps the rotation tag the master must not carry)."""
     return (
         sharpening <= 0.0
         and _is_already_square(path, target)
         and _is_already_hevc(path)
         and _within_bitrate_cap(path)
+        and not _is_rotated(path)
     )
 
 
@@ -320,10 +372,20 @@ def _process_video_impl(
     if status_callback:
         status_callback("Analyzing video dimensions and duration...")
 
-    # 1. Get video metadata
-    width, height, duration = get_video_dimensions_and_duration(video_to_process)
-    top, bottom, left, right = calculate_square_padding(width, height)
-    
+    # None is a legacy caller that names no shape: today's square behaviour.
+    target_aspect = kwargs.get("target_aspect")
+    extend_aspect = target_aspect or "1:1"
+    # Keep shape: an upscale-only job that names a shape stays at its own ratio.
+    keep_shape = upscale_only and target_aspect is not None
+    skipped_stages = []
+
+    # 1. Get video metadata (as shown: a rotated phone clip is portrait)
+    width, height, duration = get_video_dimensions_and_duration(video_to_process, display=True)
+    if extend_aspect == "1:1":
+        top, bottom, left, right = calculate_square_padding(width, height)
+    else:
+        top, bottom, left, right = calculate_aspect_padding(width, height, extend_aspect)
+
     if status_callback:
         status_callback(f"Native size: {width}x{height}, Duration: {duration:.2f}s. Padding: top={top}, bottom={bottom}, left={left}, right={right}")
 
@@ -331,14 +393,25 @@ def _process_video_impl(
         temp_outpaint_path = video_to_process
         outpaint_url = None
     else:
-        if top == 0 and bottom == 0 and left == 0 and right == 0:
+        if not needs_extend(width, height, extend_aspect):
             if status_callback:
-                status_callback("Video is already square. Skipping outpainting phase.")
+                status_callback(
+                    "Video is already square. Skipping outpainting phase." if extend_aspect == "1:1"
+                    else f"Video is already {extend_aspect}. Skipping outpainting phase."
+                )
+            skipped_stages.append("outpaint")
             outpaint_url = None
             temp_outpaint_path = video_to_process
         else:
             if not fal_key and not os.environ.get("FAL_KEY"):
                 raise ValueError("A Fal API key is required for cloud outpainting.")
+            aspect_ratios = next(
+                (e.get("aspect_ratios") for e in _models.VIDEO_OUTPAINT
+                 if e["model"].lower() == (outpaint_model or "").lower()),
+                None,
+            )
+            if aspect_ratios is not None and extend_aspect not in aspect_ratios:
+                raise ValueError(f"{outpaint_model} cannot output {extend_aspect}; pick another model or shape.")
             source_limit = next(
                 (e.get("max_source_seconds") for e in _models.VIDEO_OUTPAINT
                  if e["model"].lower() == (outpaint_model or "").lower()),
@@ -365,7 +438,31 @@ def _process_video_impl(
                 "neutral color temperature, matching original white balance and color palette."
             )
             model_lower = (outpaint_model or "").lower()
-            if "luma" in model_lower or "reframe" in model_lower:
+            # Exact ids first: both contain "reframe", and LTX 2.5 contains "ltx".
+            if model_lower == "minimax/h3-max/reframe-video":
+                # H3 captions the source itself, so the prompt and seed are
+                # sent only when the user set them.
+                minimax_resolution = kwargs.get("minimax_resolution", "768p")
+                arguments = {"video_url": video_url, "aspect_ratio": extend_aspect, "resolution": minimax_resolution}
+                if (prompt or "").strip():
+                    arguments["prompt"] = prompt.strip()
+                seed = str(kwargs.get("minimax_seed") or "").strip()
+                if seed:
+                    arguments["seed"] = int(seed)
+                _, outpaint_cost = _models.estimate_outpaint_cost(
+                    outpaint_model, duration=duration, resolution=minimax_resolution,
+                )
+            elif model_lower == "lightricks/ltx-2.5/reframe":
+                # LTX 2.5 takes no prompt. Omitting placement centres the source.
+                ltx25_resolution = kwargs.get("ltx25_resolution", "1080p")
+                arguments = {"video_url": video_url, "aspect_ratio": extend_aspect, "resolution": ltx25_resolution}
+                anchor = kwargs.get("ltx25_anchor", "center")
+                if anchor and anchor != "center":
+                    arguments["placement"] = {"anchor": anchor}
+                _, outpaint_cost = _models.estimate_outpaint_cost(
+                    outpaint_model, duration=duration, resolution=ltx25_resolution,
+                )
+            elif "luma" in model_lower or "reframe" in model_lower:
                 # Ray 3.2 reframe: prompt is required, resolution sets the
                 # per-second rate, and duration is left to default to the
                 # source length (the source length was checked before upload).
@@ -373,7 +470,7 @@ def _process_video_impl(
                 arguments = {
                     "video_url": video_url,
                     "prompt": (prompt or "").strip() or default_prompt,
-                    "aspect_ratio": kwargs.get("luma_aspect_ratio", "1:1"),
+                    "aspect_ratio": target_aspect or kwargs.get("luma_aspect_ratio", "1:1"),
                     "resolution": luma_resolution,
                 }
                 _, outpaint_cost = _models.estimate_outpaint_cost(
@@ -384,23 +481,24 @@ def _process_video_impl(
                 if neg_prompt is None or not str(neg_prompt).strip():
                     neg_prompt = "yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated"
 
+                ltx_frames = _models.frame_limits(outpaint_model, (9, 481))
                 arguments = {
                     "video_url": video_url,
                     "prompt": prompt or default_prompt,
                     "negative_prompt": str(neg_prompt).strip(),
                     "enable_prompt_expansion": bool(kwargs.get("ltx_prompt_expansion", kwargs.get("ltx_enable_prompt_expansion", False))),
-                    "aspect_ratio": kwargs.get("ltx_aspect_ratio", "1:1"),
+                    "aspect_ratio": target_aspect or kwargs.get("ltx_aspect_ratio", "1:1"),
                     "output_resolution": kwargs.get("ltx_resolution", "720p"),
                     "source_scale": float(kwargs.get("ltx_source_scale", 1.0)),
                     "video_strength": float(kwargs.get("ltx_video_strength", 1.0)),
                     "num_inference_steps": int(kwargs.get("ltx_steps", 15)),
                     "guidance_scale": float(kwargs.get("ltx_guidance", 1.0)),
                     "generate_audio": bool(kwargs.get("ltx_audio", True)),
-                    "num_frames": max(9, int(duration * 24 + 0.5) + 1),
+                    "num_frames": max(ltx_frames[0], int(duration * 24 + 0.5) + 1),
                     "frames_per_second": 24,
                 }
-                if arguments["num_frames"] > 481:
-                    raise ValueError("LTX outpaint supports at most 481 frames; trim the source video.")
+                if arguments["num_frames"] > ltx_frames[1]:
+                    raise ValueError(f"LTX outpaint supports at most {ltx_frames[1]} frames; trim the source video.")
                 if "/lora" in model_lower:
                     loras = kwargs.get("ltx_loras") or []
                     loras = [
@@ -420,37 +518,13 @@ def _process_video_impl(
                 _, outpaint_cost = _models.estimate_outpaint_cost(
                     outpaint_model, duration=duration,
                     resolution=kwargs.get("ltx_resolution", "720p"),
+                    aspect=arguments["aspect_ratio"],
                 )
-            elif "wan" in model_lower or "vace" in model_lower:
-                wan_frames = max(17, int(duration * 16 + 0.5) + 1)
-                if wan_frames > 241:
-                    raise ValueError("Wan VACE outpaint supports at most 241 frames; trim the source video.")
-                horizontal = left > 0 or right > 0
-                vertical = top > 0 or bottom > 0
-                per_side_ratio = (max(left, right) / max(1, width)) if horizontal else (max(top, bottom) / max(1, height))
-                if per_side_ratio > 1:
-                    raise ValueError("Wan VACE cannot expand this aspect ratio to square in one request.")
-                arguments = {
-                    "video_url": video_url,
-                    "prompt": prompt or default_prompt,
-                    "aspect_ratio": "1:1",
-                    "resolution": kwargs.get("wan_resolution", "720p"),
-                    "match_input_num_frames": False,
-                    "num_frames": wan_frames,
-                    "match_input_frames_per_second": False,
-                    "frames_per_second": 16,
-                    "expand_left": left > 0,
-                    "expand_right": right > 0,
-                    "expand_top": top > 0,
-                    "expand_bottom": bottom > 0,
-                    "expand_ratio": max(0.0, min(1.0, per_side_ratio)),
-                }
-                _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
             else:
                 arguments = {
                     "video_url": video_url,
                     "prompt": prompt or default_prompt,
-                    "aspect_ratio": "1:1",
+                    "aspect_ratio": extend_aspect,
                 }
                 _, outpaint_cost = _models.estimate_outpaint_cost(outpaint_model, duration=duration)
 
@@ -482,7 +556,9 @@ def _process_video_impl(
     output_video_path = os.path.join(tempfile.gettempdir(), f"delivery_4k_square_{uid}.mp4")
     if os.path.exists(output_video_path):
         os.unlink(output_video_path)
-    
+    # The 2K master size of the upscale engines (fal and studio).
+    master_w, master_h = master_dims(width, height, extend_aspect, keep_shape)
+
     t_up_stage_start = time.time()
     if upscale_engine == "fal":
         if not fal_key and not os.environ.get("FAL_KEY"):
@@ -513,12 +589,15 @@ def _process_video_impl(
             _, upscale_cost = _models.estimate_upscale_cost(
                 upscale_model, duration=duration,
                 seedvr_target=kwargs.get("seedvr_target", "1080p"),
+                # The outpainted canvas has the target shape, else the source shape.
+                shape=(master_w, master_h) if outpaint_url else (width, height),
             )
         elif "bytedance" in upscale_lower:
             arguments = {
                 "video_url": video_url_to_upscale,
                 "target_resolution": kwargs.get("bytedance_target_res", "2k"),
-                "target_fps": kwargs.get("bytedance_target_fps", "30fps"),
+                # fal takes a number (24 to 120); our "30fps"/"60fps" labels key the price.
+                "target_fps": int(str(kwargs.get("bytedance_target_fps", "30fps")).removesuffix("fps")),
                 "enhancement_preset": kwargs.get("bytedance_preset", "general"),
                 "enhancement_tier": kwargs.get("bytedance_tier", "fast"),
                 "fidelity": kwargs.get("bytedance_fidelity", "medium"),
@@ -566,7 +645,7 @@ def _process_video_impl(
         elif has_audio_stream(video_to_process):
             audio_src = video_to_process
 
-        vf_parts = [] if _is_already_square(temp_fal_vid) else [SQUARE_UPSCALE_VF]
+        vf_parts = [] if _is_already_square(temp_fal_vid, (master_w, master_h)) else [scale_vf(master_w, master_h)]
         if sharpening > 0.0:
             vf_parts.append(f"cas={sharpening}")
         vf_filter = ",".join(vf_parts)
@@ -599,9 +678,9 @@ def _process_video_impl(
 
         # If the fal result is already the deliverable 2K-square HEVC master,
         # a lossless stream copy replaces the redundant re-encode entirely.
-        if _master_can_stream_copy(temp_fal_vid, sharpening):
+        if _master_can_stream_copy(temp_fal_vid, sharpening, (master_w, master_h)):
             if status_callback:
-                status_callback("FAL result is already 2K-square HEVC — stream-copying master (no re-encode).")
+                status_callback(f"FAL result is already the {master_w}x{master_h} HEVC master — stream-copying (no re-encode).")
             copy_cmd = ["ffmpeg", "-y", "-i", temp_fal_vid]
             if audio_src and audio_src != temp_fal_vid:
                 copy_cmd += ["-i", audio_src,
@@ -639,6 +718,18 @@ def _process_video_impl(
 
         vpy_path = os.path.join(tempfile.gettempdir(), f"upscale_{uid}.vpy")
 
+        # ffms2 decodes the coded frame and ignores the display rotation, so a
+        # rotated clip is first re-encoded upright (ffmpeg applies the rotation).
+        studio_source = temp_outpaint_path
+        if _is_rotated(temp_outpaint_path):
+            studio_source = os.path.join(tempfile.gettempdir(), f"studio_upright_{uid}.mp4")
+            temp_paths.append(studio_source)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", temp_outpaint_path, "-map", "0:v:0",
+                 "-c:v", "libx264", "-preset", "fast", "-crf", "17", studio_source],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
         # Same lines the ffms2/znedi3 health probes smoke-test (core.tooling).
         load_ffms2 = ffms2_load_lines(find_ffms2_plugin())
         load_znedi3 = znedi3_load_lines(find_znedi3_plugin())
@@ -648,10 +739,10 @@ def _process_video_impl(
 
 core = vs.core
 {load_ffms2}{load_znedi3}
-abs_video_path = r'{os.path.abspath(temp_outpaint_path)}'
+abs_video_path = r'{os.path.abspath(studio_source)}'
 clip = core.ffms2.Source(abs_video_path)
 clip = core.znedi3.nnedi3(clip, field=1, dh=True, nsize=0, nns=3, qual=2, pscrn=2)
-clip = core.resize.Spline36(clip, width={MASTER_SIDE}, height={MASTER_SIDE})
+clip = core.resize.Spline36(clip, width={master_w}, height={master_h})
 clip.set_output()
 ''')
 
@@ -716,20 +807,22 @@ clip.set_output()
                 os.unlink(vpy_path)
             if os.path.exists(stderr_log_path):
                 os.unlink(stderr_log_path)
+            if studio_source != temp_outpaint_path and os.path.exists(studio_source):
+                os.unlink(studio_source)
         upscale_time = time.time() - t_up_stage_start
     else:
-        # "none" keeps the frame's own resolution: square it, do not upscale to 2K.
-        target = MASTER_SIDE
+        # "none" keeps the frame's own resolution: shape it, do not upscale to 2K.
+        target = (master_w, master_h)
         if upscale_engine == "none":
-            src_w, src_h, _ = get_video_dimensions_and_duration(temp_outpaint_path)
-            target = native_square_side(src_w, src_h)
+            src_w, src_h, _ = get_video_dimensions_and_duration(temp_outpaint_path, display=True)
+            target = master_dims(src_w, src_h, extend_aspect, keep_shape, upscale=False)
         if status_callback:
             status_callback(
-                f"Encoding the {target}x{target} square master with no upscale..." if upscale_engine == "none"
+                f"Encoding the {target[0]}x{target[1]} master with no upscale..." if upscale_engine == "none"
                 else "Performing hardware-accelerated 2K upscale via FFmpeg..."
             )
 
-        vf_parts = [] if _is_already_square(temp_outpaint_path, target) else [square_scale_vf(target)]
+        vf_parts = [] if _is_already_square(temp_outpaint_path, target) else [scale_vf(*target)]
         if sharpening > 0.0:
             vf_parts.append(f"cas={sharpening}")
         vf_filter = ",".join(vf_parts)
@@ -767,7 +860,7 @@ clip.set_output()
         # lossless stream copy replaces the redundant re-encode.
         if _master_can_stream_copy(temp_outpaint_path, sharpening, target):
             if status_callback:
-                status_callback("Source is already 2K-square HEVC — stream-copying master (no re-encode).")
+                status_callback(f"Source is already the {target[0]}x{target[1]} HEVC master — stream-copying (no re-encode).")
             copy_cmd = ["ffmpeg", "-y", "-i", temp_outpaint_path]
             if audio_src and audio_src != temp_outpaint_path:
                 copy_cmd += ["-i", audio_src,
@@ -824,6 +917,7 @@ clip.set_output()
         "master_time": round(master_time, 2),
         "custom_outpaint_args": use_extra_out,
         "custom_upscale_args": use_extra_up if upscale_engine == "fal" else {},
+        "skipped_stages": skipped_stages,
     }
         
     return (outpaint_url, output_video_path), metrics

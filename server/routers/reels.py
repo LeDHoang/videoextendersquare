@@ -10,6 +10,7 @@ import os
 import random
 import re
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -52,6 +53,7 @@ from server.social.services import (
     rerecord_media_files,
     scoped_media_paths,
     slide_media_paths,
+    post_aspect,
     stereo_fields,
 )
 
@@ -77,6 +79,7 @@ PLAYER_SCRIPTS = {
     "__REELS_FEED_STATE_JS__": "reels_feed_state.js",
     "__REELS_REWARDS_JS__": "reels_rewards.js",
     "__REELS_PACK_STATE_JS__": "reels_pack_state.js",
+    "__REELS_PACK_CANVAS_JS__": "reels_pack_canvas.js",
     "__THREE_JS__": "three.min.js",
     "__VR_UI_CANVAS_JS__": "vr_ui_canvas.js",
     "__VR_SHELL_CANVAS_JS__": "vr_shell_canvas.js",
@@ -359,8 +362,13 @@ def _tag_slug(value: str) -> str:
 
 
 def _search_key(value: str) -> str:
-    """Collapse punctuation so queries like sci fi match sci-fi."""
-    return "".join(character for character in str(value or "").casefold() if character.isalnum())
+    """Collapse punctuation so queries like sci fi match sci-fi.
+
+    NFKD splits accents off as combining marks, which are not alnum, so
+    "sao paulo" matches "São Paulo" and "zurich" matches "Zürich".
+    """
+    folded = unicodedata.normalize("NFKD", str(value or "").casefold())
+    return "".join(character for character in folded if character.isalnum())
 
 
 def _safe_int(value) -> int:
@@ -628,10 +636,10 @@ def _related_location_rows(slug: str, catalog: dict[str, dict], limit: int = 5) 
 
 
 def _rank_location_catalog(catalog: dict[str, dict], q: str = "", limit: int = 8) -> list[dict]:
-    query = str(q or "").casefold().strip()
+    query = _search_key(q)
     rows = list(catalog.values())
     if query:
-        rows = [row for row in rows if query in (row["name"] or "").casefold()]
+        rows = [row for row in rows if query in _search_key(row["name"])]
     rows.sort(key=lambda row: (-row["reel_count"], row["name"]))
     return [
         {key: row[key] for key in ("name", "slug", "city", "country", "reel_count", "views", "likes")}
@@ -1557,10 +1565,11 @@ def _build_payload_entries(
         # Auto captions (<stem>.vtt) of a video's original; the 2D rendition and stereo file share its audio.
         base["captions_url"] = None if _is_image_item(item) else _sibling_media_url(
             src_path, SM.captions_path(src_path), output_root, files)
-        # VR rendition (<stem>-2k.mp4): the player picks it over the master in VR on slow links.
+        # 2k rendition (<stem>-2k.mp4): the player picks it over the master on links measured under 35 Mbps (in 2D only where HEVC decodes).
         base["vr2k_url"] = None if _is_image_item(item) else _sibling_media_url(
             src_path, SM.vr2k_path(src_path), output_root, files)
         base["stereo_layout"] = stereo["stereo_layout"]
+        base["aspect"] = post_aspect(meta.get("width"), meta.get("height"), stereo["stereo_layout"])
         base["stereo_url"] = stereo["stereo_url"]
         base["stereo_crop"] = stereo["stereo_crop"]
         base["depth_url"] = stereo["depth_url"]
@@ -1715,6 +1724,7 @@ def _pack_feed_data(
             "duration_ms": card.get("duration_ms"),
             "width": card.get("width"),
             "height": card.get("height"),
+            "aspect": card.get("aspect") or 1,
             "stereo_layout": card.get("stereo_layout") or "mono",
             "stereo_url": card.get("stereo_url"),
             "stereo_crop": bool(card.get("stereo_crop")),
@@ -2469,17 +2479,22 @@ def get_reel_tag(
     }
 
 
-@router.get("/locations", dependencies=[HEAVY_READ])
-def list_reel_locations(q: str = "", limit: int = 8):
-    """Return ranked location suggestions for discovery UI."""
+def location_suggestions(q: str = "", limit: int = 8, db: Session | None = None) -> dict:
+    """Ranked place suggestions; callers holding a request ``db`` pass it (see tag_suggestions)."""
     bounded_limit = max(1, min(int(limit), 20))
-    hidden_paths = unavailable_media_paths_for_viewer(None)
-    catalog = _location_catalog([item for item in _scan_cached() if item["rel_path"] not in hidden_paths])
+    hidden_paths = unavailable_media_paths_for_viewer(None, db=db)
+    catalog = _location_catalog([item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths], db)
     return {
         "query": q,
         "strategy": "reel-count-v1",
         "locations": _rank_location_catalog(catalog, q, bounded_limit),
     }
+
+
+@router.get("/locations", dependencies=[HEAVY_READ])
+def list_reel_locations(q: str = "", limit: int = 8):
+    """Return ranked location suggestions for discovery UI."""
+    return location_suggestions(q, limit)
 
 
 _EARTH_ASSET_DIR = Path(__file__).resolve().parent.parent.parent / "web" / "public" / "assets"
@@ -2681,7 +2696,8 @@ def _gen_explore_assets(
         # The publish job is building these; the tile keeps its fallback.
         return rel, None, None, "pending"
     # A 3D original's grid assets come from its left-eye 2D rendition, so
-    # tiles stay square (the rendition only exists for stereo posts).
+    # tiles show one eye at its own aspect (the rendition only exists for
+    # stereo posts).
     # Before that rendition exists, crop the left eye of the original.
     mono, _stereo = SM.stereo_paths(str(p), files)
     crop = None
@@ -3408,9 +3424,11 @@ def _inline_player_template() -> tuple[list[str], str, str]:
     for href in re.findall(r'<link[^>]+href="([^"]+)"[^>]*>', html):
         if ("fonts.googleapis" in href or "material" in href.lower() or "gstatic" in href) and href not in css:
             css = f'@import url("{href}");\n' + css
+    # The frame fills the mount: .sx-reels-mount (global.css) already caps the square by the
+    # viewport, so a second cap here left black bands inside the mount's border.
     css += (
         "\n#sxReelsRoot .reels-phone-frame {"
-        " width: min(92vw, 84dvh, 860px, 100%);"
+        " width: 100%;"
         " height: auto;"
         " aspect-ratio: 1 / 1;"
         "}"

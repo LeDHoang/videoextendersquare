@@ -13,8 +13,10 @@ export function useRenderFunding({ kind, items, config, user, wallet, catalog, f
   const parameters = config.parameters;
 
   const quoteItems = useMemo(
-    () => items.filter((item) => stagedItemNeedsCloud(item, parameters)).map((item) => ({ stage_id: item.stage_id })),
-    [items, parameters],
+    () => items
+      .map((item) => ({ stage_id: item.stage_id, parameters: config.parametersFor(item) }))
+      .filter((item, index) => stagedItemNeedsCloud(items[index], item.parameters)),
+    [items, parameters], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const cloudRequired = quoteItems.length > 0;
   const byokOnly = config.byokOnlyFor(items);
@@ -60,6 +62,6 @@ export function useRenderFunding({ kind, items, config, user, wallet, catalog, f
     quoteState,
     quoteStale,
     fundingBlocked,
-    needsCloud: (item) => stagedItemNeedsCloud(item, parameters),
+    needsCloud: (item) => stagedItemNeedsCloud(item, config.parametersFor(item)),
   };
 }

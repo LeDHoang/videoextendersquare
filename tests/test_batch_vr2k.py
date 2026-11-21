@@ -97,15 +97,22 @@ def test_a_failed_build_exits_nonzero(setup, tmp_path, capsys):
 @pytest.mark.parametrize(("width", "height", "stereo", "shrinks"), [
     (3840, 2160, None, True),
     (2160, 3840, None, True),
+    (2048, 2048, None, False),
+    (2050, 2050, None, True),
     (2048, 1152, None, False),
     (1920, 1080, None, False),
+    # 3.7 MP: within the 2048² pixel budget although the long side is 2560.
+    (2560, 1440, None, False),
+    (1440, 2560, None, False),
+    (2880, 1620, None, True),
     (5760, 2880, "sbs", True),
     (4096, 2048, "sbs", False),
+    (5120, 1440, "sbs", False),
     (2880, 5760, "tb", True),
     (2048, 4096, "tb", False),
     (None, None, None, True),
 ])
-def test_only_sources_larger_than_2k_per_eye_shrink(width, height, stereo, shrinks):
+def test_only_sources_over_2048_squared_pixels_per_eye_shrink(width, height, stereo, shrinks):
     assert SM.vr2k_shrinks(width, height, stereo) is shrinks
 
 

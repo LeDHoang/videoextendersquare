@@ -40,6 +40,8 @@ def _template() -> str:
     pack_state_path = assets / "reels_pack_state.js"
     pack_state_js = pack_state_path.read_text(encoding="utf-8") if pack_state_path.exists() else ""
     html = html.replace("__REELS_PACK_STATE_JS__", pack_state_js)
+    pack_canvas_path = assets / "reels_pack_canvas.js"
+    html = html.replace("__REELS_PACK_CANVAS_JS__", pack_canvas_path.read_text(encoding="utf-8") if pack_canvas_path.exists() else "")
     three_js_path = assets / "three.min.js"
     three_js = three_js_path.read_text(encoding="utf-8") if three_js_path.exists() else ""
     html = html.replace("__THREE_JS__", three_js)
@@ -235,7 +237,7 @@ def render(ctx: dict) -> None:
             st.info(f"🔗 Active Media Tunnel: `{st.session_state.get('sx.reels.media_tunnel')}`")
 
         st.divider()
-        st.caption("Re-encode all HEVC 4K master videos into ultra-sharp 3840×3840 H.264 streams for WebXR & browser playback.")
+        st.caption("Re-encode all HEVC 4K master videos into H.264 streams of at most 2160² pixels, in each video's own shape, for WebXR & browser playback.")
         if st.button("⚡ FORCE RE-TRANSCODE ALL 4K H.264 PROXIES", key="sx.reels.force_retranscode"):
             with st.spinner("Force re-encoding all 4K H.264 streams…"):
                 for item in raw_videos:
@@ -258,7 +260,7 @@ def render(ctx: dict) -> None:
         )
         return
 
-    # Render HTML5 1:1 Square Reels Component with 4K Master URLs
+    # Render HTML5 Reels Component (1:1, 16:9 and 9:16) with 4K Master URLs
     # Stable cache buster: uses webxr_vr.js file modification time.
     # Only changes when the JS file itself is updated → no unnecessary iframe reloads.
     vr_js_path = Path(__file__).parent.parent / "assets" / "webxr_vr.js"

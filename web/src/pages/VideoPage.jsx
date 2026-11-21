@@ -14,6 +14,7 @@ import { useCreditQuotes } from '../hooks/useCreditQuotes.js';
 import { useAuth } from '../hooks/AuthContext.jsx';
 import { useWallet } from '../hooks/WalletContext.jsx';
 import { appendProcessingParameters, stagedItemNeedsCloud, videoBillingParameters } from '../utils/cloudBilling.js';
+import { H3_REFRAME, LTX25_ANCHORS, LTX25_REFRAME, offeredValue, rateTiers, topTier, videoOptions } from '../utils/modelOptions.js';
 import { billingErrorMessage } from '../utils/billingErrors.js';
 import { assertUploadSize } from '../utils/uploadLimits.js';
 
@@ -23,7 +24,8 @@ const CREDIT_OUTPAINT_MODELS = new Set([
   'fal-ai/ltx-2.3-quality/outpaint',
   'fal-ai/ltx-2.3-quality/outpaint/lora',
   'luma/agent/ray/v3.2/reframe',
-  'fal-ai/wan-vace-14b/outpainting',
+  H3_REFRAME,
+  LTX25_REFRAME,
 ]);
 const CREDIT_UPSCALE_MODELS = new Set([
   'fal-ai/bytedance-upscaler/upscale/video',
@@ -62,17 +64,21 @@ export default function VideoPage() {
   const [engine, setEngine] = useState('FAST');
   const [falUpscale, setFalUpscale] = useState(defaultUpscale);
   const [sharpening, setSharpening] = useState(0.5);
-  const [ltxRes, setLtxRes] = useState('720p');
+  const [ltxResPicked, setLtxRes] = useState('720p');
   const [ltxAudio, setLtxAudio] = useState(true);
   const [ltxGuidance, setLtxGuidance] = useState(1.0);
   const [ltxPromptExpansion, setLtxPromptExpansion] = useState(false);
   const [ltxNegativePrompt, setLtxNegativePrompt] = useState('yellow tint, sepia, warm cast, color distortion, discoloration, overexposure, oversaturated');
   const [ltxLoras, setLtxLoras] = useState([{ path: '', scale: 1, transformer: 'both' }]);
+  const [minimaxResPicked, setMinimaxRes] = useState('768p');
+  const [minimaxSeed, setMinimaxSeed] = useState('');
+  const [ltx25ResPicked, setLtx25Res] = useState('1080p');
+  const [ltx25Anchor, setLtx25Anchor] = useState('center');
   const [seedvrFactor, setSeedvrFactor] = useState(2.0);
-  const [seedvrTarget, setSeedvrTarget] = useState('1080p');
-  const [btdRes, setBtdRes] = useState('2k');
-  const [btdFps, setBtdFps] = useState('30fps');
-  const [btdTier, setBtdTier] = useState('fast');
+  const [seedvrTargetPicked, setSeedvrTarget] = useState('1080p');
+  const [btdResPicked, setBtdRes] = useState('2k');
+  const [btdFpsPicked, setBtdFps] = useState('30fps');
+  const [btdTierPicked, setBtdTier] = useState('fast');
   const [btdPreset, setBtdPreset] = useState('general');
   const [btdFidelity, setBtdFidelity] = useState('medium');
   const [trimEnabled, setTrimEnabled] = useState(false);
@@ -91,6 +97,17 @@ export default function VideoPage() {
   const studioPicked = engine === 'STUDIO';
   const outpaintEntry = outpaintCatalog.find((e) => e.label === outpaintOpt) || outpaintCatalog[0];
   const upscaleEntry = upscaleCatalog.find((e) => e.label === falUpscale) || upscaleCatalog[0];
+  // Options fal still accepts; the server withdraws the others (server/fal_schemas.py).
+  const offered = videoOptions(outpaintEntry, upscaleEntry);
+  const ltxRes = offeredValue(ltxResPicked, offered.ltxRes);
+  const seedvrTarget = offeredValue(seedvrTargetPicked, offered.seedvrTarget);
+  const btdRes = offeredValue(btdResPicked, offered.btdRes);
+  const btdFps = offeredValue(btdFpsPicked, offered.btdFps);
+  const btdTier = offeredValue(btdTierPicked, offered.btdTier);
+  const minimaxResOptions = rateTiers(outpaintCatalog, H3_REFRAME, ['480p', '768p', '1080p']);
+  const minimaxRes = offeredValue(minimaxResPicked, minimaxResOptions);
+  const ltx25ResOptions = rateTiers(outpaintCatalog, LTX25_REFRAME, ['720p', '1080p']);
+  const ltx25Res = offeredValue(ltx25ResPicked, ltx25ResOptions);
   const outpaintModel = outpaintEntry?.model || models.outpaint_vid;
   const upscaleModel = upscaleEntry?.model || models.upscale_vid;
 
@@ -127,12 +144,12 @@ export default function VideoPage() {
     ltxPromptExpansion,
     ltxNegativePrompt,
     ltxLoras: loraList,
-    // No WAN resolution selector in the UI yet: pin the top tier so quotes
-    // never understate the charge (backend bills 480p/580p/720p at
-    // $0.04/$0.06/$0.08 per second).
-    wanResolution: '720p',
     // No Ray 3.2 resolution selector either: default to 1080p ($0.36/s).
-    lumaResolution: '1080p',
+    lumaResolution: topTier(outpaintCatalog, 'luma/agent/ray/v3.2/reframe', '1080p'),
+    minimaxResolution: minimaxRes,
+    minimaxSeed,
+    ltx25Resolution: ltx25Res,
+    ltx25Anchor,
     seedvrFactor,
     seedvrTarget,
     bytedanceTargetRes: btdRes,
@@ -145,7 +162,7 @@ export default function VideoPage() {
     trimDuration: trimDur,
     customOutpaintArgs: outpaintEntry?.is_custom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, falPicked, studioPicked, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, falPicked, studioPicked, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, minimaxRes, minimaxSeed, ltx25Res, ltx25Anchor, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
   const quoteItems = useMemo(
     () => items.filter((item) => stagedItemNeedsCloud(item, parameters)).map((item) => ({ stage_id: item.stage_id })),
     [items, parameters],
@@ -332,22 +349,71 @@ export default function VideoPage() {
                 {outpaintEntry?.is_custom ? (
                   <CustomModelPanel model={outpaintEntry.model} kind="outpaint" entry={outpaintEntry} onArgs={setOutArgs} />
                 ) : null}
-                <Field label="OUTPAINT EXTENSION PROMPT">
-                  <textarea
-                    className="sx-textarea"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="Describe the extended square background environment..."
-                  />
-                </Field>
+                {outpaintModel !== LTX25_REFRAME ? (
+                  <Field label="OUTPAINT EXTENSION PROMPT">
+                    <textarea
+                      className="sx-textarea"
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder="Describe the extended square background environment..."
+                    />
+                  </Field>
+                ) : null}
 
-                {outpaintOpt.includes('LTX') ? (
+                {outpaintModel === H3_REFRAME ? (
+                  <details className="sx-expander">
+                    <summary>▸ MINIMAX H3 MAX SETTINGS</summary>
+                    <div className="sx-expander-body sx-cols sx-cols-2">
+                      <Field label="OUTPUT RESOLUTION">
+                        <select className="sx-select" value={minimaxRes} onChange={(e) => setMinimaxRes(e.target.value)}>
+                          {minimaxResOptions.map((o) => (
+                            <option key={o}>{o}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="SEED (EMPTY = RANDOM)">
+                        <input
+                          className="sx-input"
+                          type="text"
+                          inputMode="numeric"
+                          value={minimaxSeed}
+                          onChange={(e) => setMinimaxSeed(e.target.value.replace(/\D/g, ''))}
+                          placeholder="random"
+                        />
+                      </Field>
+                    </div>
+                  </details>
+                ) : null}
+
+                {outpaintModel === LTX25_REFRAME ? (
+                  <details className="sx-expander">
+                    <summary>▸ LTX 2.5 REFRAME SETTINGS</summary>
+                    <div className="sx-expander-body sx-cols sx-cols-2">
+                      <Field label="OUTPUT RESOLUTION">
+                        <select className="sx-select" value={ltx25Res} onChange={(e) => setLtx25Res(e.target.value)}>
+                          {ltx25ResOptions.map((o) => (
+                            <option key={o}>{o}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="KEEP SOURCE AT">
+                        <select className="sx-select" value={ltx25Anchor} onChange={(e) => setLtx25Anchor(e.target.value)}>
+                          {LTX25_ANCHORS.map((o) => (
+                            <option key={o}>{o}</option>
+                          ))}
+                        </select>
+                      </Field>
+                    </div>
+                  </details>
+                ) : null}
+
+                {outpaintOpt.includes('LTX') && outpaintModel !== LTX25_REFRAME ? (
                   <details className="sx-expander">
                     <summary>▸ LTX 2.3 ADVANCED OUTPAINT SETTINGS</summary>
                     <div className="sx-expander-body sx-cols sx-cols-2">
                       <Field label="OUTPUT RESOLUTION TIER">
                         <select className="sx-select" value={ltxRes} onChange={(e) => setLtxRes(e.target.value)}>
-                          {['720p', '1080p', '480p'].map((o) => (
+                          {offered.ltxRes.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>
@@ -484,21 +550,21 @@ export default function VideoPage() {
                     <div className="sx-expander-body sx-cols sx-cols-2">
                       <Field label="TARGET RESOLUTION">
                         <select className="sx-select" value={btdRes} onChange={(e) => setBtdRes(e.target.value)}>
-                          {['4k', '2k', '1080p'].map((o) => (
+                          {offered.btdRes.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>
                       </Field>
                       <Field label="TARGET FPS">
                         <select className="sx-select" value={btdFps} onChange={(e) => setBtdFps(e.target.value)}>
-                          {['30fps', '60fps'].map((o) => (
+                          {offered.btdFps.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>
                       </Field>
                       <Field label="QUALITY TIER">
                         <select className="sx-select" value={btdTier} onChange={(e) => setBtdTier(e.target.value)}>
-                          {['fast', 'standard', 'pro'].map((o) => (
+                          {offered.btdTier.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>
@@ -538,7 +604,7 @@ export default function VideoPage() {
                       </Field>
                       <Field label="TARGET RESOLUTION TIER">
                         <select className="sx-select" value={seedvrTarget} onChange={(e) => setSeedvrTarget(e.target.value)}>
-                          {['1080p', '2160p', '1440p', '720p'].map((o) => (
+                          {offered.seedvrTarget.map((o) => (
                             <option key={o}>{o}</option>
                           ))}
                         </select>

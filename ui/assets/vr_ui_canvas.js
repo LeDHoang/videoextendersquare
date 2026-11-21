@@ -45,9 +45,16 @@
   const CP_ITEM_GAP = 8;
   // Close sits top-right, to the right of FOLLOW.
   const CP_CLOSE_BTN = { x: 504, y: 26, w: 36, h: 36 };
-  const CP_STATS_Y = 198;
+  // The stats row sits this far below the last line of title / caption / chips;
+  // the creator block ends CP_STATS_PAD below the row, so it is CP_INFO_H tall
+  // only with the fullest content and shrinks with less.
+  const CP_STATS_GAP = 8;
+  const CP_STATS_PAD = 58;
+  // Last drawn creator block height; the header, list and hit tests follow it.
+  let cpInfoH = CP_INFO_H;
+  function cpListTop() { return cpInfoH + CP_HEADER_H; }
   // One time-sync toggle replaces the ALL / SYNC / GENERAL tabs.
-  const CP_SYNC_BTN = { x: 504, y: CP_INFO_H + 12, w: 36, h: 32 };
+  function cpSyncBtn() { return { x: 504, y: cpInfoH + 12, w: 36, h: 32 }; }
   // Comment name advance (600 11px IBM Plex Mono, 0.6em per glyph).
   const CP_NAME_CHAR_W = 6.6;
   // Replies sit indented under the comment they answer.
@@ -222,6 +229,21 @@
       ['M21 15L19 17H7L3 21V5L5 3H19L21 5V15Z', 's', 'i', 1.5],
       [ring(17, 7, 2), 'f', 'a'],
     ],
+    // Liked heart for the reel details stats: edge filled vermilion, like the 2D side panel.
+    liked: [
+      ['M12 8.5L9.2 5.8H5.8L4.2 7.8L5.5 11.5L12 18.5L18.5 11.5L19.8 7.8L18.2 5.8H14.8L12 8.5Z', 'f', 'a'],
+      ['M12 8.5L9.2 5.8H5.8L4.2 7.8L5.5 11.5L12 18.5L18.5 11.5L19.8 7.8L18.2 5.8H14.8L12 8.5Z', 's', 'a', 1.6],
+      ['M5.5 11.5H18.5M12 8.5V18.5', 's', 'i', 1.2, 0.25],
+      ['M12 9.8L15.2 13L12 16.2L8.8 13Z', 'f', 'a'],
+      [ring(12, 13, 0.9), 'f', 'i'],
+    ],
+    // web/src/components/icons/svg/view.svg: the static eye from the Echo Glass logo.
+    view: [
+      ['M1.5 12L6.75 6.3H17.25L22.5 12L17.25 17.7H6.75Z', 'f', 'i'],
+      ['M12 6.3L17.7 12L12 17.7L6.3 12Z', 'f', 'a'],
+      ['M12 9.4L14.6 12L12 14.6L9.4 12Z', 'f', 'k'],
+      ['M13.2 8.85H14.6V10.25H13.2Z', 'f', 'i'],
+    ],
     share: [
       [ring(6, 12, 2.5), 'f', 'k'],
       [ring(6, 12, 2.5), 's', 'i', 1.5],
@@ -374,6 +396,12 @@
       ['M8.1 2.5H15.9L21.5 8.1V15.9L15.9 21.5H8.1L2.5 15.9V8.1Z', 's', 'i', 1.5],
       ['M17 7L7 17L12 7V17', 's', 'i', 1.8],
       ['M12 12L17 17', 's', 'a', 1.8],
+    ],
+    // industrial-image.svg: the image-reel mark on explore tile badges.
+    image: [
+      ['M3 3H21V21H3V3Z', 's', 'i', 1.5],
+      ['M3 16L8 11L13 16M11 14L16 9L21 14', 's', 'a', 1.5],
+      [ring(16, 7, 1.5), 'f', 'i'],
     ],
   };
   const DOCK_ICON_PATHS = {};
@@ -1079,7 +1107,7 @@
     const shownIds = new Set(filtered.map((c) => c.id));
     const inBox = (b) => canvasX >= b.x && canvasX < b.x + b.w && canvasY >= b.y && canvasY < b.y + b.h;
 
-    if (canvasY < CP_INFO_H) {
+    if (canvasY < cpInfoH) {
       if (inBox(CP_CLOSE_BTN)) return 'close';
       if (cpFollowVisible(item, itemState) && inBox(cpFollowBtn(!!itemState.following))) return 'follow';
       const creator = cpCreator(item);
@@ -1087,9 +1115,9 @@
       return 'panel';
     }
 
-    if (canvasY < CP_LIST_TOP) {
+    if (canvasY < cpListTop()) {
       // Time-sync toggle: on lists every comment, off lists general only.
-      if (inBox(CP_SYNC_BTN)) return cPanelTab === 'general' ? 'tab:all' : 'tab:general';
+      if (inBox(cpSyncBtn())) return cPanelTab === 'general' ? 'tab:all' : 'tab:general';
       return 'panel';
     }
 
@@ -1100,16 +1128,16 @@
     }
 
     if (canvasX >= CP_SCROLL_X) {
-      if (canvasY >= CP_LIST_TOP && canvasY < CP_LIST_TOP + 26) return 'scrollup';
+      if (canvasY >= cpListTop() && canvasY < cpListTop() + 26) return 'scrollup';
       if (canvasY >= CP_LIST_BOTTOM - 26 && canvasY < CP_LIST_BOTTOM) return 'scrolldown';
       return 'scrollbar';
     }
 
-    const relY = canvasY - CP_LIST_TOP + cPanelScrollY;
+    const relY = canvasY - cpListTop() + cPanelScrollY;
     const idx = Math.floor(relY / (CP_ITEM_H + CP_ITEM_GAP));
     if (idx >= 0 && idx < filtered.length) {
       const c = filtered[idx];
-      const y = CP_LIST_TOP + idx * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
+      const y = cpListTop() + idx * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
       const { itemX, itemW } = cpRowBox(c, shownIds);
       if (canvasY >= y + 4 && canvasY < y + 36) {
         const head = cpCommentHead(c, itemX, y);
@@ -1203,7 +1231,7 @@
       });
     }
 
-    // Chips: #tags, place, then specs (3D layout, duration). One row; extras drop.
+    // Chips: #tags, place, then the 3D layout spec. One row; extras drop.
     const chips = [];
     if (!unavailable) {
       (item.tags || []).forEach((tag) => {
@@ -1217,11 +1245,11 @@
       if (Number(item.width) > 0 && Number(item.height) > 0 && (stereo === 'sbs' || stereo === 'tb')) {
         chips.push({ kind: 'spec', key: '3D', text: stereo === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM' });
       }
-      const durationMs = Number(item.duration_ms);
-      if (durationMs > 0 && item.media_type !== 'image') chips.push({ kind: 'spec', key: 'DUR', text: formatTime(durationMs / 1000) });
     }
+    let chipsEnd = y;
     if (chips.length) {
       const chipY = y + 8;
+      chipsEnd = chipY + 22;
       let x = 20;
       ctx.font = `600 10px ${TOKENS.font.mono}`;
       ctx.textBaseline = 'middle';
@@ -1247,35 +1275,35 @@
       }
     }
 
-    // Stats row
+    // Stats: icon + mono count, like the 2D side panel (.side-stats). A liked
+    // reel shows the red-filled heart and a vermilion count.
+    const liked = !unavailable && !!itemState.liked;
     const stats = [
-      ['LIKES', unavailable ? '0' : fmtCount(item.likes)],
-      ['COMMENTS', unavailable ? '0' : fmtCount(comments.length)],
-      ['VIEWS', unavailable ? '0' : fmtCount(item.views)],
+      [liked ? 'liked' : 'like', unavailable ? '0' : fmtCount(item.likes), liked],
+      ['comment', unavailable ? '0' : fmtCount(comments.length), false],
+      ['view', unavailable ? '0' : fmtCount(item.views), false],
     ];
-    const statsW = CPANEL_W - 40;
-    const cellW = statsW / stats.length;
-    ctx.fillStyle = TOKENS.hex.surface2;
-    roundRectPath(ctx, 20, CP_STATS_Y, statsW, 46, TOKENS.radiusPx);
-    ctx.fill();
-    ctx.strokeStyle = TOKENS.hex.rule;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = TOKENS.hex.rule;
-    for (let i = 1; i < stats.length; i++) ctx.fillRect(20 + cellW * i, CP_STATS_Y, 1, 46);
-    ctx.textAlign = 'center';
-    stats.forEach(([label, value], i) => {
-      const cx = 20 + cellW * i + cellW / 2;
-      ctx.fillStyle = TOKENS.hex.ink3;
-      ctx.font = `600 9px ${TOKENS.font.mono}`;
-      ctx.fillText(label, cx, CP_STATS_Y + 15);
-      ctx.fillStyle = TOKENS.hex.ink;
-      ctx.font = `700 15px ${TOKENS.font.sans}`;
-      ctx.fillText(value, cx, CP_STATS_Y + 32);
+    const statsTop = (chips.length ? chipsEnd : y) + CP_STATS_GAP;
+    cpInfoH = statsTop + CP_STATS_PAD;
+    const statsCy = statsTop + 23;
+    let statX = 20;
+    ctx.font = `600 15px ${TOKENS.font.mono}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    stats.forEach(([icon, value, lit]) => {
+      drawIcon(ctx, icon, statX + 10, statsCy, 20, TOKENS.hex.ink, accent, TOKENS.hex.surface);
+      ctx.fillStyle = lit ? accent : TOKENS.hex.ink2;
+      ctx.fillText(value, statX + 28, statsCy + 1);
+      statX += 28 + ctx.measureText(value).width + 20;
     });
 
+    // A shorter block hands its unused band back to the list's paper.
+    if (cpInfoH < CP_INFO_H) {
+      ctx.fillStyle = TOKENS.hex.surface;
+      ctx.fillRect(0, cpInfoH, CPANEL_W, CP_INFO_H - cpInfoH);
+    }
     ctx.fillStyle = TOKENS.hex.rule;
-    ctx.fillRect(0, CP_INFO_H - 1, CPANEL_W, 1);
+    ctx.fillRect(0, cpInfoH - 1, CPANEL_W, 1);
   }
 
   function renderCommentsPanelCanvas(ctx, options = {}) {
@@ -1295,7 +1323,7 @@
     const filtered = filterPanelComments(comments, cPanelTab);
     const shownIds = new Set(filtered.map((c) => c.id));
 
-    const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
+    const listH = CP_LIST_BOTTOM - cpListTop();
     const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
     const accent = TOKENS.hex.accent;
 
@@ -1314,9 +1342,9 @@
     renderCommentsPanelInfo(ctx, item, itemState || {}, comments, hover);
 
     // Header
-    const headY = CP_INFO_H + CP_HEADER_H / 2;
+    const headY = cpInfoH + CP_HEADER_H / 2;
     ctx.fillStyle = TOKENS.hex.bg;
-    ctx.fillRect(0, CP_INFO_H, CPANEL_W, CP_HEADER_H);
+    ctx.fillRect(0, cpInfoH, CPANEL_W, CP_HEADER_H);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = accent;
@@ -1330,7 +1358,7 @@
     // Time-sync toggle: lit while synced comments are included (default).
     const syncOn = cPanelTab !== 'general';
     const syncHover = hover.indexOf('tab:') === 0;
-    const sb = CP_SYNC_BTN;
+    const sb = cpSyncBtn();
     ctx.fillStyle = syncHover ? TOKENS.hex.surfaceHover : TOKENS.hex.surface2;
     roundRectPath(ctx, sb.x, sb.y, sb.w, sb.h, TOKENS.radiusPx);
     ctx.fill();
@@ -1356,7 +1384,7 @@
     // List items
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, CP_LIST_TOP, CP_LIST_X + CP_LIST_W, listH);
+    ctx.rect(0, cpListTop(), CP_LIST_X + CP_LIST_W, listH);
     ctx.clip();
 
     if (filtered.length === 0) {
@@ -1364,11 +1392,11 @@
       ctx.font = `600 10px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('NO COMMENTS YET', CPANEL_W / 2, CP_LIST_TOP + 40);
+      ctx.fillText('NO COMMENTS YET', CPANEL_W / 2, cpListTop() + 40);
     } else {
       filtered.forEach((c, i) => {
-        const y = CP_LIST_TOP + i * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
-        if (y + CP_ITEM_H < CP_LIST_TOP || y > CP_LIST_BOTTOM) return;
+        const y = cpListTop() + i * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
+        if (y + CP_ITEM_H < cpListTop() || y > CP_LIST_BOTTOM) return;
 
         const { itemX, itemW } = cpRowBox(c, shownIds);
         const border = c.avatar_color || accent;
@@ -2621,6 +2649,7 @@
     CPANEL_W,
     CPANEL_H,
     CP_LIST_TOP,
+    commentsListTop: cpListTop,
     CP_LIST_BOTTOM,
     CP_ITEM_H,
     CP_ITEM_GAP,

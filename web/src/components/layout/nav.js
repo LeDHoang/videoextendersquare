@@ -4,7 +4,11 @@ import {
   IndustrialExploreIcon,
   IndustrialImageIcon,
   IndustrialMessageIcon,
+  IndustrialProfileIcon,
   IndustrialReelsIcon,
+  IndustrialSavedIcon,
+  IndustrialSettingsIcon,
+  IndustrialStaffIcon,
   IndustrialUploadIcon,
   IndustrialVideoIcon,
 } from '../icons/index.jsx';
@@ -23,8 +27,8 @@ export const NAV = {
   image: { to: '/image', label: 'Image', Icon: IndustrialImageIcon, adminOnly: true },
   video: { to: '/video', label: 'Video', Icon: IndustrialVideoIcon, adminOnly: true },
   compare: { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon, adminOnly: true },
-  settings: { to: '/settings/profile', label: 'Settings' },
-  staff: { to: '/moderation', label: 'Staff' },
+  settings: { to: '/settings/profile', label: 'Settings', Icon: IndustrialSettingsIcon },
+  staff: { to: '/moderation', label: 'Staff', Icon: IndustrialStaffIcon },
 };
 
 export const HEADER_NAV = [NAV.reels, NAV.explore];
@@ -33,14 +37,19 @@ export const SIDEBAR_NAV = [NAV.reels, NAV.explore, NAV.messages, NAV.upload, NA
 
 export const BOTTOM_NAV = [NAV.reels, NAV.explore, NAV.upload, NAV.messages];
 
-// The account menu: the user's own profile and saved reels, then settings, credits and, for staff, moderation.
+// The signed-in user's saved reels and packs: the SAVED tab of their own profile.
+export function savedNav(user) {
+  return { to: '/profile/' + encodeURIComponent(user.username) + '?tab=saved', label: 'Saved', Icon: IndustrialSavedIcon };
+}
+
+// The account menu: the user's own profile and saved reels, then settings and, for staff, moderation.
+// Credits is not a row: the balance in the menu head links there.
 export function accountNav(user) {
   const profile = '/profile/' + encodeURIComponent(user.username);
   return [
-    { to: profile, label: 'Profile' },
-    { to: profile + '?tab=saved', label: 'Saved' },
+    { to: profile, label: 'Profile', Icon: IndustrialProfileIcon },
+    savedNav(user),
     NAV.settings,
-    NAV.credits,
     ...(user.can_moderate ? [NAV.staff] : []),
   ];
 }

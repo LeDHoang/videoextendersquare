@@ -1,6 +1,13 @@
+import { aspectMatches } from './aspect.js';
+
+// `targetAspect` ('1:1' | '16:9' | '9:16') is the Fill with AI shape. It is sent
+// only with extend on; Keep shape (upscale_only) and the legacy pages leave it out.
+const targetAspectOf = (upscaleOnly, targetAspect) => (!upscaleOnly && targetAspect ? { target_aspect: targetAspect } : {});
+
 export function imageBillingParameters({
   prompt,
   upscaleOnly,
+  targetAspect,
   sharpening,
   falPicked,
   noUpscale,
@@ -18,12 +25,14 @@ export function imageBillingParameters({
     outpaint_model: outpaintModel,
     custom_outpaint_args: customOutpaintArgs || {},
     custom_upscale_args: customUpscaleArgs || {},
+    ...targetAspectOf(upscaleOnly, targetAspect),
   };
 }
 
 export function videoBillingParameters({
   prompt,
   upscaleOnly,
+  targetAspect,
   falPicked,
   studioPicked,
   noUpscale,
@@ -36,8 +45,11 @@ export function videoBillingParameters({
   ltxPromptExpansion,
   ltxNegativePrompt,
   ltxLoras,
-  wanResolution = '720p',
   lumaResolution = '1080p',
+  minimaxResolution = '768p',
+  minimaxSeed = '',
+  ltx25Resolution = '1080p',
+  ltx25Anchor = 'center',
   seedvrFactor,
   seedvrTarget,
   bytedanceTargetRes,
@@ -64,8 +76,11 @@ export function videoBillingParameters({
     ltx_prompt_expansion: Boolean(ltxPromptExpansion),
     ltx_negative_prompt: ltxNegativePrompt ?? '',
     ltx_loras: ltxLoras || [],
-    wan_resolution: wanResolution,
     luma_resolution: lumaResolution,
+    minimax_resolution: minimaxResolution,
+    minimax_seed: String(minimaxSeed ?? '').trim(),
+    ltx25_resolution: ltx25Resolution,
+    ltx25_anchor: ltx25Anchor,
     seedvr_factor: Number(seedvrFactor ?? 2),
     seedvr_target: seedvrTarget,
     bytedance_target_res: bytedanceTargetRes,
@@ -78,6 +93,7 @@ export function videoBillingParameters({
     trim_duration: Number(trimDuration ?? 15),
     custom_outpaint_args: customOutpaintArgs || {},
     custom_upscale_args: customUpscaleArgs || {},
+    ...targetAspectOf(upscaleOnly, targetAspect),
   };
 }
 
@@ -90,12 +106,18 @@ export function appendProcessingParameters(formData, parameters) {
   return formData;
 }
 
-export function stagedItemNeedsCloud(item, parameters) {
-  if (parameters?.upscale_engine === 'fal') return true;
-  if (parameters?.upscale_only) return false;
-
+// Whether a file (staged metadata) already has the `target` shape, so nothing is
+// filled. A null target (Keep shape) takes any shape; unknown dims never match.
+export function matchesTarget(item, target) {
+  if (!target) return true;
   const width = Number(item?.width);
   const height = Number(item?.height);
   const hasDimensions = Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0;
-  return !hasDimensions || width !== height;
+  return hasDimensions && aspectMatches(width, height, target);
+}
+
+export function stagedItemNeedsCloud(item, parameters) {
+  if (parameters?.upscale_engine === 'fal') return true;
+  if (parameters?.upscale_only) return false;
+  return !matchesTarget(item, parameters?.target_aspect || '1:1');
 }

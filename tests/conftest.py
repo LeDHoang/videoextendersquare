@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
+from core import models
 from server.social import database, safety, turnstile
 
 
@@ -47,6 +48,15 @@ def _fallback_session_factory(tmp_path_factory):
     database.Base.metadata.create_all(engine)
     yield sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _no_live_fal_prices(monkeypatch):
+    """No test calls fal's pricing API, and each one starts on the code prices."""
+    monkeypatch.setenv("SX_FAL_PRICE_SYNC_S", "0")
+    yield
+    models.apply_synced_prices({})
+    models.apply_fal_schemas({})
 
 
 @pytest.fixture(autouse=True)

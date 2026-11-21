@@ -21,7 +21,7 @@ def test_representative_video_prices():
     assert ltx["credits"] == 21
     assert ltx["stages"][0]["details"]["frames"] == 121
     assert ltx["stages"][0]["details"]["billed_megapixels"] == 63
-    assert ltx["stages"][0]["pricing_version"] == "2026-10-20"
+    assert ltx["stages"][0]["pricing_version"] == "2026-11-20"
     assert ltx["stages"][0]["pricing_verified_at"] == "2026-09-13"
     assert ltx["stages"][0]["pricing_source"].startswith("https://fal.ai/models/")
     assert "ceil" in ltx["stages"][0]["rounding_rule"]
@@ -38,15 +38,6 @@ def test_representative_video_prices():
     assert luma["stages"][0]["details"]["resolution"] == "1080p"
     assert luma["stages"][0]["pricing_verified_at"] == "2026-10-20"
 
-    wan = quote_video(
-        width=1920,
-        height=1080,
-        duration=5,
-        params={"outpaint_model": "fal-ai/wan-vace-14b/outpainting", "wan_resolution": "720p"},
-    )
-    assert wan["credits"] == 54
-    assert wan["stages"][0]["details"]["frames"] == 81
-
     bytedance = quote_video(
         width=1080,
         height=1080,
@@ -61,6 +52,20 @@ def test_representative_video_prices():
         },
     )
     assert bytedance["credits"] == 20
+
+    for resolution, cost in (("6k", "0.2870"), ("8k", "0.5740")):
+        quote = quote_video(
+            width=1080,
+            height=1080,
+            duration=5,
+            params={
+                "upscale_only": True,
+                "upscale_engine": "fal",
+                "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
+                "bytedance_target_res": resolution,
+            },
+        )
+        assert Decimal(quote["stages"][0]["provider_cost_usd"]) == Decimal(cost)
 
 
 def test_image_apps_one_megapixel_and_square_skip():
@@ -97,22 +102,6 @@ def test_byok_only_and_provider_limits_are_rejected():
             params={"upscale_engine": "fal", "upscale_model": "fal-ai/ccsr"},
         )
 
-    with pytest.raises(PricingError, match="at most"):
-        quote_video(
-            width=1920,
-            height=1080,
-            duration=16,
-            params={"outpaint_model": "fal-ai/wan-vace-14b/outpainting"},
-        )
-
-    with pytest.raises(PricingError, match="cannot expand"):
-        quote_video(
-            width=4000,
-            height=1000,
-            duration=5,
-            params={"outpaint_model": "fal-ai/wan-vace-14b/outpainting"},
-        )
-
     with pytest.raises(PricingError, match="Unsupported LTX resolution"):
         quote_video(
             width=1920,
@@ -141,7 +130,7 @@ def test_luma_to_seedvr_is_refused_for_quotes_but_estimated_approximately():
         "upscale_model": "fal-ai/seedvr/upscale/video",
         "seedvr_target": "1080p",
     }
-    with pytest.raises(PricingError, match="Luma-to-SeedVR"):
+    with pytest.raises(PricingError, match="Reframe-to-SeedVR"):
         quote_video(width=1920, height=1080, duration=5, params=params, source_fps=24, source_frames=120)
 
     estimate = quote_video(

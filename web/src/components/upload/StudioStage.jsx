@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import UploadZone from '../ui/UploadZone.jsx';
-import { AccentBlock } from '../ui/primitives.jsx';
 import { onRovingKeyDown } from '../ui/roving.js';
-import { MASTER_SIDE, formatClock, stageLayout } from './stageGeometry.js';
+import { formatClock, stageLayout } from './stageGeometry.js';
+import { TARGET_ASPECTS, aspectMatches, masterSize } from '../../utils/aspect.js';
 import { STEREO_LABELS, stereoEyeSize } from '../../utils/mediaFormat.js';
 
-// Left half of the Upload Studio: the 1:1 master stage. Shows where the
-// source sits inside the square, which bands the outpaint model will
-// generate, and — once a render finishes — the extended result.
+// Left half of the Upload Studio: the master stage in the target shape
+// (`target`: '1:1' | '16:9' | '9:16', null for the file's own). Shows where the
+// source sits inside it, which bands the outpaint model will generate, and —
+// once a render finishes — the extended result.
 
 // Square transport glyphs in currentColor; the Unicode media symbols render as emoji on some platforms.
 function TransportGlyph({ name }) {
@@ -40,17 +41,116 @@ function StageVideo({ src, label, onElement, className, style }) {
   );
 }
 
+const TRIM_STEP = 0.5;
+const roundTenth = (value) => Math.round(value * 10) / 10;
+
+// The part of a long clip a cloud job makes, as a window on a lane under the
+// seek track. Drag its body to move it, its edges to make it shorter or longer
+// (1 s up to `max`). `onMove(start, dur, edge)` reports each change while it
+// moves; `onDone(start)` fires when a drag or key press ends.
+// It lies over the seek track: a click on the range that does not drag seeks
+// there through `onSeek(time)`.
+function TrimLane({ duration, start, dur, max, onMove, onDone, onSeek }) {
+  const laneRef = useRef(null);
+  const end = start + dur;
+  // New { start, dur } for `part` moved by `delta` seconds from `from`.
+  const shift = (part, from, delta) => {
+    const fromEnd = from.start + from.dur;
+    if (part === 'start') {
+      const next = Math.min(Math.max(from.start + delta, 0, fromEnd - max), fromEnd - 1);
+      return { start: next, dur: fromEnd - next };
+    }
+    if (part === 'end') {
+      const next = Math.max(Math.min(fromEnd + delta, duration, from.start + max), from.start + 1);
+      return { start: from.start, dur: next - from.start };
+    }
+    return { start: Math.min(Math.max(from.start + delta, 0), duration - from.dur), dur: from.dur };
+  };
+  const report = (part, next) => {
+    onMove(roundTenth(next.start), roundTenth(next.dur), part === 'end' ? 'end' : 'start');
+    return roundTenth(next.start);
+  };
+  const onPointerDown = (part) => (event) => {
+    const rect = laneRef.current?.getBoundingClientRect();
+    const width = rect?.width;
+    if (!width || event.button > 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const from = { start, dur };
+    const x = event.clientX;
+    const target = event.currentTarget;
+    target.focus();
+    target.setPointerCapture?.(event.pointerId);
+    let last = from.start;
+    let moved = false;
+    const move = (moveEvent) => {
+      if (!moved && Math.abs(moveEvent.clientX - x) < 3) return;
+      moved = true;
+      last = report(part, shift(part, from, ((moveEvent.clientX - x) / width) * duration));
+    };
+    const up = () => {
+      target.removeEventListener('pointermove', move);
+      target.removeEventListener('pointerup', up);
+      target.removeEventListener('pointercancel', up);
+      if (!moved && part === 'body') onSeek(((x - rect.left) / width) * duration);
+      else onDone(last);
+    };
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', up);
+    target.addEventListener('pointercancel', up);
+  };
+  const onKeyDown = (part) => (event) => {
+    const step = { ArrowLeft: -TRIM_STEP, ArrowDown: -TRIM_STEP, ArrowRight: TRIM_STEP, ArrowUp: TRIM_STEP }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onDone(report(part, shift(part, { start, dur }, step)));
+  };
+  const handle = (part, label, value, min, maxValue, text) => ({
+    role: 'slider',
+    tabIndex: 0,
+    'aria-label': label,
+    'aria-valuemin': roundTenth(min),
+    'aria-valuemax': roundTenth(maxValue),
+    'aria-valuenow': roundTenth(value),
+    'aria-valuetext': text,
+    onPointerDown: onPointerDown(part),
+    onKeyDown: onKeyDown(part),
+  });
+  return (
+    <div className="sx-studio-trim" ref={laneRef}>
+      <div
+        className="sx-studio-trim-window"
+        style={{ left: `${(start / duration) * 100}%`, width: `${(dur / duration) * 100}%` }}
+        {...handle('body', 'Trim range', start, 0, duration - dur, `${formatClock(start)} to ${formatClock(end)}`)}
+      >
+        <span
+          className="sx-studio-trim-edge sx-start"
+          {...handle('start', 'Trim start', start, Math.max(0, end - max), end - 1, formatClock(start))}
+        />
+        <span
+          className="sx-studio-trim-edge sx-end"
+          {...handle('end', 'Trim end', end, start + 1, Math.min(duration, start + max), formatClock(end))}
+        />
+      </div>
+    </div>
+  );
+}
+
 // Transport for the stage <video>: play/pause, restart, ±1s, seek, loop.
-// With trimming on, playback of the original stays inside the trim window
-// so the cut that will be rendered can be previewed.
+// `trim` ({ start, dur, max, duration, onChange }) is the part of a long clip a
+// cloud job makes: playback stays inside it, and moving it plays it from its
+// start. It is laid out on the clip's staged duration, known before the
+// <video> loads its metadata.
 export function StageTransport({ video, trim, status }) {
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(true);
-  const [muted, setMuted] = useState(true);
-  const trimWindow = trim?.enabled && duration
-    ? { start: Math.min(Math.max(0, Number(trim.start) || 0), duration), end: Math.min(duration, (Number(trim.start) || 0) + (Number(trim.dur) || 0)) }
+  const [muted, setMuted] = useState(false);
+  const trimSpan = Number(trim?.duration) || duration;
+  const trimWindow = trim && trimSpan
+    ? { start: Math.min(Math.max(0, Number(trim.start) || 0), trimSpan), end: Math.min(trimSpan, (Number(trim.start) || 0) + (Number(trim.dur) || 0)) }
     : null;
 
   useEffect(() => {
@@ -109,18 +209,26 @@ export function StageTransport({ video, trim, status }) {
     }
   };
 
+  // While the range moves the frame at its moving edge shows; once it settles
+  // the range plays from its start (and loops when LOOP is on).
+  const moveTrim = (start, dur, edge) => {
+    trim.onChange(start, dur);
+    if (!video) return;
+    video.pause();
+    video.currentTime = edge === 'end' ? start + dur : start;
+    setTime(video.currentTime);
+  };
+  const playTrim = (start) => {
+    if (!video) return;
+    video.currentTime = start;
+    video.play().catch(() => {});
+  };
+
   const progress = duration ? (time / duration) * 100 : 0;
   return (
     <div className="sx-studio-transport" role="group" aria-label="Stage playback">
-      <div className="sx-studio-track">
+      <div className={`sx-studio-track ${trimWindow ? 'sx-trimmed' : ''}`}>
         <div className="sx-studio-track-fill" style={{ width: `${progress}%` }} />
-        {trimWindow ? (
-          <div
-            className="sx-studio-track-trim"
-            style={{ left: `${(trimWindow.start / duration) * 100}%`, width: `${((trimWindow.end - trimWindow.start) / duration) * 100}%` }}
-            aria-hidden="true"
-          />
-        ) : null}
         <input
           type="range"
           className="sx-studio-track-input"
@@ -133,7 +241,24 @@ export function StageTransport({ video, trim, status }) {
           aria-valuetext={`${formatClock(time)} of ${formatClock(duration)}`}
           disabled={!duration}
         />
+        {trimWindow ? (
+          <TrimLane
+            duration={trimSpan}
+            start={trimWindow.start}
+            dur={trimWindow.end - trimWindow.start}
+            max={Math.min(trim.max, trimSpan)}
+            onMove={moveTrim}
+            onDone={playTrim}
+            onSeek={playTrim}
+          />
+        ) : null}
       </div>
+      {trimWindow ? (
+        <div className="sx-studio-readout">
+          <span>MAKES <b>{formatClock(trimWindow.start)} → {formatClock(trimWindow.end)}</b> ({(trimWindow.end - trimWindow.start).toFixed(1)}s)</span>
+          <span className="sx-studio-accent">MAX {trim.max}s</span>
+        </div>
+      ) : null}
       <div className="sx-studio-transport-row">
         <div className="sx-studio-transport-buttons">
           <button type="button" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'} className="sx-studio-tbtn sx-primary"><TransportGlyph name={playing ? 'pause' : 'play'} /></button>
@@ -145,7 +270,7 @@ export function StageTransport({ video, trim, status }) {
         <div className="sx-studio-transport-buttons">
           <label className="sx-studio-check">
             <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
-            <span>LOOP{trimWindow ? ' TRIM' : ''}</span>
+            <span>LOOP{trimWindow ? ' RANGE' : ''}</span>
           </label>
           <label className="sx-studio-check">
             <input type="checkbox" checked={!muted} onChange={(e) => setMuted(!e.target.checked)} />
@@ -180,6 +305,7 @@ export default function StudioStage({
   stereo,
   upscaleOnly,
   targetLabel,
+  target = '1:1',
   trim,
   outpaintActive,
   onMoveGalleryItem,
@@ -193,7 +319,7 @@ export default function StudioStage({
   const [videoEl, setVideoEl] = useState(null);
   const selected = entries.find((entry) => entry.key === selectedKey) || entries[0] || null;
   const result = selected?.result || null;
-  const geometry = selected ? stageLayout(selected.meta) : null;
+  const geometry = selected ? stageLayout(selected.meta, target) : null;
   const isSlideshow = layout === 'slideshow';
   const kind = selected?.kind || null;
 
@@ -206,8 +332,19 @@ export default function StudioStage({
   const showExtended = view === 'extended' && resultUrl;
   // A MAKE 3D result is a side-by-side pair; the stage shows its left eye.
   const resultStereo = result?.stereo_layout || null;
-  // 3D stereo uploads show their left eye filling the square, as 2D views will.
+  // 3D stereo uploads show their left eye filling the stage, as 2D views will.
   const stereoEye = stereo && geometry ? stereoEyeSize(stereo, geometry.width, geometry.height) : null;
+  // The stage takes the shape of what it shows: the result (its left eye for 3D),
+  // the source's eye, the first slide of a post, else the target canvas.
+  const cover = entries[0]?.meta;
+  const frame = showExtended && result.width
+    ? stereoEyeSize(resultStereo, result.width, result.height)
+    : stereoEye
+      || (isSlideshow && cover?.width && cover?.height ? { width: cover.width, height: cover.height } : null)
+      || (geometry && !isSlideshow ? { width: geometry.stageWidth, height: geometry.stageHeight } : null);
+  const [masterWidth, masterHeight] = masterSize(1, 1, target || '1:1');
+  // The shape a file already has and is kept in: the target, else its own when it is one of the three.
+  const already = target || (geometry && TARGET_ASPECTS.find((shape) => aspectMatches(geometry.width, geometry.height, shape))) || null;
   const showZones = !showExtended && !isSlideshow && !stereo && geometry && !geometry.square && extendPath && !upscaleOnly;
   const meta = selected?.meta || {};
   const stageLabel = showExtended
@@ -215,7 +352,7 @@ export default function StudioStage({
     : stereoEye
       ? `LEFT EYE · 2D VIEW (${stereoEye.width}×${stereoEye.height})`
       : isSlideshow
-        ? 'PLAYER VIEW · 1:1 CROP'
+        ? 'PLAYER VIEW · FIRST SLIDE SETS THE SHAPE'
         : '';
 
   return (
@@ -249,10 +386,10 @@ export default function StudioStage({
               </>
             ) : geometry && !isSlideshow ? (
               <>
-                <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{[selected.sourceKnown === false ? null : `${geometry.width}×${geometry.height}`, result?.width ? `${result.width}×${result.height}` : targetLabel].filter(Boolean).join(' ➔ ') || '1:1 SQUARE'}</span>
+                <span className="sx-studio-pill"><i className="sx-studio-dot" aria-hidden="true" />{[selected.sourceKnown === false ? null : `${geometry.width}×${geometry.height}`, result?.width ? `${result.width}×${result.height}` : targetLabel].filter(Boolean).join(' ➔ ') || target || 'SAME SHAPE'}</span>
               </>
             ) : (
-              <span className="sx-studio-pill">{isSlideshow ? `${entries.length} IMAGES · AS-IS` : `TARGET ${MASTER_SIDE}×${MASTER_SIDE} · 1:1`}</span>
+              <span className="sx-studio-pill">{isSlideshow ? `${entries.length} IMAGES · AS-IS` : target ? `TARGET ${masterWidth}×${masterHeight} · ${target}` : 'SAME SHAPE'}</span>
             )}
           </div>
           {selected && onFiles && !locked ? (
@@ -280,7 +417,12 @@ export default function StudioStage({
           ) : null}
         </div>
 
-        <div className={`sx-studio-stage ${layout === 'empty' ? 'sx-empty' : ''}`} role="region" aria-label="Square master stage">
+        <div
+          className={`sx-studio-stage ${layout === 'empty' ? 'sx-empty' : ''} ${frame && frame.height > frame.width ? 'sx-portrait' : ''}`}
+          style={frame ? { aspectRatio: `${frame.width} / ${frame.height}` } : undefined}
+          role="region"
+          aria-label="Master stage"
+        >
           <div className="sx-studio-reticle" aria-hidden="true" />
           {layout === 'empty' && !staging ? (
             <div className="sx-studio-drop">
@@ -292,14 +434,14 @@ export default function StudioStage({
             kind === 'video' ? (
               <StageVideo
                 src={resultUrl}
-                label={resultStereo ? `Left eye of the 3D result for ${selected.name}` : `Rendered square video for ${selected.name}`}
+                label={resultStereo ? `Left eye of the 3D result for ${selected.name}` : `Rendered video for ${selected.name}`}
                 onElement={setVideoEl}
                 className={resultStereo ? `sx-studio-fill sx-stereo-${resultStereo}` : 'sx-studio-fill'}
               />
             ) : resultStereo ? (
               <img className={`sx-studio-fill sx-stereo-${resultStereo}`} src={resultUrl} alt={`3D result for ${selected.name} (left eye)`} />
             ) : (
-              <img className="sx-studio-fill" src={resultUrl} alt={`Rendered square result for ${selected.name}`} />
+              <img className="sx-studio-fill" src={resultUrl} alt={`Rendered result for ${selected.name}`} />
             )
           ) : null}
 
@@ -311,12 +453,9 @@ export default function StudioStage({
                 <img className={`sx-studio-fill sx-stereo-${stereo}`} src={selected.url} alt={`${selected.name} (left eye)`} />
               )
             ) : isSlideshow ? (
-              <img className="sx-studio-fill sx-cover" src={selected.url} alt={selected.name} />
+              <img className="sx-studio-fill" src={selected.url} alt={selected.name} />
             ) : (
-              <div
-                className={`sx-studio-source ${upscaleOnly && extendPath && geometry && !geometry.square ? 'sx-stretched' : ''}`}
-                style={upscaleOnly && extendPath ? { left: 0, top: 0, width: '100%', height: '100%' } : geometry?.source}
-              >
+              <div className="sx-studio-source" style={geometry?.source}>
                 {kind === 'video' ? (
                   <StageVideo src={selected.url} label="Source video preview" onElement={setVideoEl} className="sx-studio-media" />
                 ) : (
@@ -337,14 +476,11 @@ export default function StudioStage({
           ) : null}
 
           {selected && stageLabel ? <span className="sx-studio-stage-label">{stageLabel}</span> : null}
-          {selected && !showExtended && geometry?.square && !isSlideshow ? (
-            <span className="sx-studio-flag sx-ok">ALREADY 1:1</span>
+          {selected && !showExtended && geometry?.square && !isSlideshow && already ? (
+            <span className="sx-studio-flag sx-ok">ALREADY {already}</span>
           ) : null}
           {selected && !showExtended && !extendPath && layout !== 'batch' ? (
             <span className={`sx-studio-flag ${stereo ? 'sx-ok' : ''}`}>{stereo ? '3D · PUBLISHED AS-IS' : 'PUBLISHED AS-IS'}</span>
-          ) : null}
-          {selected && !showExtended && extendPath && upscaleOnly && geometry && !geometry.square ? (
-            <span className="sx-studio-flag sx-warn">UPSCALE ONLY · STRETCHED TO 1:1</span>
           ) : null}
           {showExtended && kind === 'video' && !result.preview_url && !resultStereo ? (
             <span className="sx-studio-flag sx-warn">HEVC MASTER — BROWSER PREVIEW NEEDS AN H.264 PROXY</span>
@@ -371,14 +507,6 @@ export default function StudioStage({
             <div className="sx-error-title">FILES NOT ADDED</div>
             <div>{pickError}</div>
           </div>
-        ) : null}
-
-        {layout !== 'batch' && kind === 'video' && outpaintActive && Number(meta.duration) > 10 ? (
-          <AccentBlock
-            tone="warn"
-            title={`${meta.duration}s EXCEEDS THE 10s THRESHOLD`}
-            lines={['Cloud video outpainting is billed per second. Consider enabling the 15s Trimmer to optimize costs.']}
-          />
         ) : null}
 
         {isSlideshow ? (

@@ -2,6 +2,7 @@ import { act, render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../../api/client.js';
 import HeaderBar from './HeaderBar.jsx';
 
 const mocks = vi.hoisted(() => ({
@@ -271,5 +272,32 @@ describe('HeaderBar beta navigation', () => {
   it('keeps the tool shortcuts for an admin', async () => {
     mocks.user = { id: 'usr-1', username: 'boss', role: 'admin' };
     expect(await searchFor('compare')).toBe('/compare');
+  });
+
+  it('lists matching places and opens the location page on Enter', async () => {
+    const saoPaulo = { name: 'São Paulo, Brazil', slug: 'são-paulo--brazil', reel_count: 11, views: 1200 };
+    const get = vi.spyOn(api, 'get').mockImplementation(async (_path, params) => ({
+      users: [],
+      tags: [],
+      posts: [],
+      locations: params.q ? [saoPaulo] : [],
+    }));
+    try {
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter initialEntries={['/reels']}>
+          <HeaderBar onToggleSidebar={vi.fn()} />
+          <Where />
+        </MemoryRouter>
+      );
+      await user.type(screen.getByRole('combobox', { name: 'Search people, tags, and reels' }), 'sao paulo');
+      expect(await screen.findByRole('option', { name: /São Paulo, Brazil/ })).toBeInTheDocument();
+      expect(screen.getByText('PLACES')).toBeInTheDocument();
+      await user.keyboard('{Enter}');
+      expect(screen.getByTestId('where').textContent).toBe('/explore/location/' + encodeURIComponent('são-paulo--brazil'));
+      expect(get).toHaveBeenCalledWith('/api/search/suggestions', { q: 'sao paulo', limit: 6 });
+    } finally {
+      get.mockRestore();
+    }
   });
 });

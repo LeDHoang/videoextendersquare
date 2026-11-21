@@ -317,7 +317,7 @@ _VIDEO_PARAMS = {
     "upscale_model": "fal-ai/bytedance-upscaler/upscale/video",
     "ltx_resolution": "720p", "ltx_audio": True, "ltx_guidance": 1.0,
     "ltx_prompt_expansion": False, "ltx_negative_prompt": "", "ltx_loras": [],
-    "wan_resolution": "720p", "seedvr_factor": 2.0, "seedvr_target": "1080p",
+    "seedvr_factor": 2.0, "seedvr_target": "1080p",
     "bytedance_target_res": "4k", "bytedance_target_fps": "30fps",
     "bytedance_tier": "fast", "bytedance_preset": "general",
     "bytedance_fidelity": "medium", "trim_enabled": False,

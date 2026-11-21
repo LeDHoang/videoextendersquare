@@ -130,10 +130,9 @@ test('every place that used to treat an open sheet as blocking now asks drawerBl
 
 test('the rail keeps its structure and every icon, and gains accessible names', () => {
   const rail = body.slice(body.indexOf('id="reelsActions"'), body.indexOf('id="edgeNav"'));
-  for (const token of ['SOUND_MUTE', 'BACK', 'LIKE', 'COMMENT', 'SHARE', 'FULLSCREEN', 'VR', 'MORE', 'SAVE', 'REPORT', 'PRELOAD']) {
+  for (const token of ['SOUND_MUTE', 'BACK', 'LIKE', 'COMMENT', 'SHARE', 'FULLSCREEN', 'VR', 'MORE', 'SAVE', 'REPORT', 'SHOW_FEWER', 'HIDE_CREATOR', 'PRELOAD']) {
     assert.ok(rail.includes('__ICON_' + token + '__'), token + ' icon kept');
   }
-  assert.ok(rail.includes('thumb_down') && rail.includes('person_off'));
   const buttons = [...rail.matchAll(/<button[^>]*>/g)].map((m) => m[0]);
   assert.ok(buttons.length >= 13);
   for (const tag of buttons) assert.match(tag, /aria-label="[^"]+"/, tag);

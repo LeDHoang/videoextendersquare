@@ -1,0 +1,10 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Chamfered Head, corner trimmed clear of the strike -->
+  <path d="M10.4 10.5H10L8.5 9V5L10 3.5H14L15.5 5V5.4" stroke="#f2f3f5" stroke-width="1.6" stroke-linejoin="bevel" stroke-linecap="square"/>
+
+  <!-- Chamfered Shoulders -->
+  <path d="M4.5 20.5V17.5L7.5 14H16.5L19.5 17.5V20.5" stroke="#f2f3f5" stroke-width="1.6" stroke-linejoin="bevel" stroke-linecap="square"/>
+
+  <!-- Leica Vermilion Strike Beam -->
+  <line x1="20" y1="4" x2="4" y2="20" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>
+</svg>

@@ -44,10 +44,13 @@ def _png(path: Path, size: tuple[int, int]) -> Path:
 
 @pytest.mark.parametrize("size, tile, two_d, vr", [
     ((1080, 1080), (720, 720), (1080, 1080), (1080, 1080)),
-    ((1080, 1920), (405, 720), (1080, 1920), (1080, 1920)),
-    ((1920, 1080), (720, 405), (1920, 1080), (1920, 1080)),
-    ((4000, 3000), (720, 540), (1440, 1080), (2048, 1536)),
+    ((1080, 1920), (720, 1280), (1080, 1920), (1080, 1920)),
+    ((1920, 1080), (1280, 720), (1920, 1080), (1920, 1080)),
+    ((3840, 2160), (1280, 720), (1920, 1080), (3640, 2048)),
+    ((2160, 3840), (720, 1280), (1080, 1920), (2048, 3640)),
+    ((4000, 3000), (960, 720), (1440, 1080), (2730, 2048)),
     ((3000, 3000), (720, 720), (1080, 1080), (2048, 2048)),
+    ((5000, 5000), (720, 720), (1080, 1080), (2048, 2048)),
     ((64, 64), (64, 64), (64, 64), (64, 64)),
 ])
 def test_rendition_sizes_fit_their_box_and_never_upscale(size, tile, two_d, vr):
@@ -67,12 +70,12 @@ def test_renditions_of_a_1080_still_skip_vr_and_are_webp(tmp_path):
     assert not media.image_rendition_path(str(src), "vr").exists()
 
 
-def test_a_large_still_gets_a_2048_vr_rendition(tmp_path):
+def test_a_large_still_gets_a_vr_rendition_up_to_2048_on_the_short_side(tmp_path):
     src = _png(tmp_path / "big.png", (3000, 2000))
     built = media.make_image_renditions(str(src))
     assert set(built) == {"tile", "2d", "vr"}
     with Image.open(built["vr"]) as img:
-        assert img.size == (2048, 1365)
+        assert img.size == (3000, 2000)
     with Image.open(built["2d"]) as img:
         assert img.size == (1620, 1080)
 

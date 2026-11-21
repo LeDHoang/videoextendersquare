@@ -7,7 +7,7 @@
 window.WebXRVR = window.WebXRVR || (function () {
   'use strict';
 
-  const VR_VERSION = 'v8.30-20261110-vr-fixes-integration';
+  const VR_VERSION = 'v8.31-20261120-vr-screen-aspect';
   console.log('[WebXRVR] Module loaded:', VR_VERSION);
 
   // ─── Constants & Configuration ──────────────────────────────────────
@@ -46,6 +46,13 @@ window.WebXRVR = window.WebXRVR || (function () {
   ];
   const ARC_ANGLE = 0.65; // ~37.24 deg
   const SPHERE_RADIUS = 1 / ARC_ANGLE; // ~1.5385m
+  // Non-square screens: the long edge stays within this angle of the eye
+  // (default size and distance) by bending the long axis less.
+  const LONG_EDGE_MAX_DEG = 60;
+  // Locked mode follows lazily: the screen holds still while the gaze stays
+  // within this fraction of its angular half-extent and drags only past it.
+  // 0 is the old hard lock (the screen copies the head pose every frame).
+  const LAZY_FOLLOW_EDGE = 1;
 
   // ─── State ──────────────────────────────────────────────────────────
   let videoElement = null;
@@ -65,6 +72,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   let previewHiFi = false;
   let sceneMode = 'reels'; // 'reels' | 'earth'
   let curvatureMode = 1; // 1: DOME, 2: SQ CURVE, 0: FLAT
+  // Applied screen shape (width/height of one eye); 1 = the square screen.
+  let screenAspect = 1;
+  // How much further the applied screen's edges bulge toward the eye than
+  // the square screen's (local z, short-side 2.4 units).
+  let screenBulgeExtra = 0;
   let isCurved = true;
   let stereoMode = false;
   let lockToViewer = false;
@@ -189,6 +201,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let screenQuat = null; // THREE.Quaternion once Three loads (identity until then)
   let screenScale = DEFAULT_SCALE;
   let screenDistance = -DEFAULT_POS.z; // 2.24
+  let followAngles = null; // lazy-follow { yaw, pitch } of the locked screen; null snaps to the gaze
   let isInitialPoseSet = false;
   let controlsVisible = true;
 
@@ -461,6 +474,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   let prevBtnState = { rightA: false, rightB: false };
   let flickedX = false;
   let flickedY = false;
+  // Stick held on an open card list (pack queue): next repeat step time, ms.
+  let cardScrollRepeatAt = 0;
+  // Preview wheel travel not yet spent on card list steps.
+  let cardWheelCarry = 0;
   // Controls auto-hide (upstream: dock hides 5s after last interaction
   // while playing; B / tap / pause reveals it again).
   let controlsAutoHideTimer = null;
@@ -666,8 +683,16 @@ window.WebXRVR = window.WebXRVR || (function () {
   let stereoCanvas = null;
   let stereoCtx = null;
   let stereoTexture = null;
-  let stereoCanvasLayout = '';
+  let stereoCanvasLayout = ''; // layout + frame size of the stereo proxy
   let eyeTextures = null; // { base, layout, L, R }
+  // Per-post screen aspect (width/height of one eye) from the host
+  // (setSourceAspect); 0 = unknown. It takes effect at the first committed
+  // frame of a new source (aspectAppliedFor), never mid-post.
+  let sourceAspectHint = 0;
+  let aspectAppliedFor = null;
+  const ASPECT_TOLERANCE = 0.01; // pipeline/utils.py, web/src/utils/aspect.js
+  const VR_PROXY_LONG_MAX = 4096; // proxy long side; the short side keeps its cap
+  let maxTextureSize = 0; // gl MAX_TEXTURE_SIZE, read once
   let eyeMeshL = null;
   let eyeMeshR = null;
   const DEPTH_WARP_MAX_SHIFT = 0.013867; // far-plane parallax per eye width (spatial_worker.py MAX_SHIFT)
@@ -1822,6 +1847,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   const GROUND_PIN_H = 0.12;
   const GROUND_BEAM_H = 0.28; // short enough that beam and tag stay well below the dome video's lower edge (~43° down)
   const GROUND_TAG_LIFT = 0.33; // tag centre above the place, m: the tag sits on the beam's top
+  // A portrait screen's lower edge reaches ~60° down: a shorter beam drops
+  // the tag below it, and the globe fades while the screen hangs past its top.
+  const GROUND_BEAM_H_TALL = 0.14;
+  const GROUND_SCREEN_FADE_DEG = 5; // overlap over which the globe fades out
   const GROUND_TAG_W_M = 0.4;
   let groundGlobe = null; // { mesh, rim }
   let groundGlobeTexture = null;
@@ -1837,6 +1866,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   let groundHighlightTarget = 0;
   let groundTag = null; // { mesh, ctx, texture, key }
   let groundLastT = -1;
+  let groundScreenFade = 1; // groundFadeUnderScreen, once a frame
   let groundEyeY = null; // smoothed live eye height; null until the first frame
 
   // Pose that brings (lat, lon) to the resting point with north pointing away.
@@ -2046,7 +2076,11 @@ window.WebXRVR = window.WebXRVR || (function () {
     const mat = mesh.material;
     if (mat.map) mat.color.setRGB(k, k, k);
     else { mat.color.set(earthPalette().sea); mat.color.multiplyScalar(k); }
-    if (groundGlobe.rim) groundGlobe.rim.material.opacity = earthRimOpacity * k;
+    groundScreenFade = groundFadeUnderScreen();
+    const transparent = groundScreenFade < 1;
+    if (mat.transparent !== transparent) { mat.transparent = transparent; mat.needsUpdate = true; }
+    mat.opacity = groundScreenFade;
+    if (groundGlobe.rim) groundGlobe.rim.material.opacity = earthRimOpacity * k * groundScreenFade;
     const step = reducedMotion ? 1 : dt / GROUND_FADE_MS;
     groundHighlightAlpha = groundHighlightAlpha < groundHighlightTarget
       ? Math.min(groundHighlightTarget, groundHighlightAlpha + step)
@@ -2054,8 +2088,27 @@ window.WebXRVR = window.WebXRVR || (function () {
     applyGroundHighlight(now);
   }
 
+  // Portrait only: 1 while the screen's lowest point stays above the globe's
+  // top as seen from the eye, falling to 0 over GROUND_SCREEN_FADE_DEG of
+  // overlap. A video faded out by looking down gives the globe back.
+  function groundFadeUnderScreen() {
+    if (screenAspect >= 1 || !screenMesh || !screenMesh.visible) return 1;
+    const head = getHeadPosition();
+    const low = screenLowestElevation(head);
+    if (low === null) return 1;
+    const drop = head.y - groundGlobe.mesh.position.y;
+    const top = Math.asin(Math.min(1, GROUND_GLOBE_R / drop)) - Math.PI / 2;
+    const t = Math.max(0, Math.min(1, (top - low) / (GROUND_SCREEN_FADE_DEG * Math.PI / 180)));
+    return 1 - t * t * (3 - 2 * t) * screenLookFade;
+  }
+
+  // The portrait beam is GROUND_BEAM_H_TALL; the tag still sits on its top.
+  function groundTagLift() {
+    return screenAspect < 1 ? GROUND_TAG_LIFT - GROUND_BEAM_H + GROUND_BEAM_H_TALL : GROUND_TAG_LIFT;
+  }
+
   function applyGroundHighlight(now) {
-    const a = groundHighlightAlpha;
+    const a = groundHighlightAlpha * groundScreenFade;
     const parts = groundHighlight && groundHighlight.userData;
     if (parts && parts.pin) {
       groundHighlight.visible = a > 0.001;
@@ -2064,6 +2117,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       parts.ring.scale.setScalar(1 + 1.2 * phase);
       parts.ring.material.opacity = a * 0.9 * (1 - phase);
       parts.beam.material.uniforms.uOpacity.value = a * 0.55;
+      parts.beam.scale.y = screenAspect < 1 ? GROUND_BEAM_H_TALL / GROUND_BEAM_H : 1;
     }
     if (!groundTag) return;
     groundTag.mesh.visible = a > 0.001 && !!groundHighlight;
@@ -2080,13 +2134,16 @@ window.WebXRVR = window.WebXRVR || (function () {
   function groundTagCentre() {
     const local = groundHighlight.position;
     const n = vNorm(qRotate(groundQuat, { x: local.x, y: local.y, z: local.z }));
-    const r = GROUND_GLOBE_R + GROUND_TAG_LIFT;
+    const r = GROUND_GLOBE_R + groundTagLift();
     return { x: n.x * r, y: n.y * r + groundGlobe.mesh.position.y, z: n.z * r };
   }
 
   // Looking down at the ground globe fades the head-locked video out, so it
   // never draws over the globe; looking back up brings it back. Runs after
   // applySceneVisibility, which resets the meshes' visibility every frame.
+  // Keyed on the screen's bottom edge: the angles are the square screen's
+  // centre pitch, and a taller screen (lower bottom edge) fades sooner. A
+  // lazily following screen uses its own pitch, not the head's.
   const SCREEN_FADE_FROM_DEG = 30;
   const SCREEN_FADE_TO_DEG = 40;
   let screenLookFade = 1;
@@ -2096,7 +2153,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       const q = getHeadQuaternion();
       if (q) {
         const fwd = qRotate(q, { x: 0, y: 0, z: -1 });
-        const down = -Math.asin(Math.max(-1, Math.min(1, fwd.y))) * 180 / Math.PI;
+        const pitch = followAngles ? followAngles.pitch : Math.asin(Math.max(-1, Math.min(1, fwd.y)));
+        const d = lockDistance();
+        const lower = Math.atan2(screenScale * screenSpan(screenAspect).h / 2, d) - Math.atan2(screenScale / 2, d);
+        const down = -(pitch - lower) * 180 / Math.PI;
         const t = Math.max(0, Math.min(1, (down - SCREEN_FADE_FROM_DEG) / (SCREEN_FADE_TO_DEG - SCREEN_FADE_FROM_DEG)));
         f = 1 - t * t * (3 - 2 * t);
       }
@@ -2428,6 +2488,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       panelFwdOffset: PANEL_FWD_OFFSET,
       commentsScale: CPANEL_SCALE_FACTOR,
       guideScale: GUIDE_SCALE_FACTOR,
+      longEdgeMaxDeg: LONG_EDGE_MAX_DEG,
+      lazyFollowEdge: LAZY_FOLLOW_EDGE,
     };
   }
   let layoutTuning = defaultLayoutTuning();
@@ -2530,6 +2592,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Head-locked screen mode (upstream applyLockToViewer, Three.js port):
   // keeps the screen at screenDistance in front of the face, perpendicular
   // to the view direction, so the user always looks into the center.
+  // With lazyFollowEdge > 0 the screen holds still (level, no roll) while
+  // the gaze stays inside it and drags only as far as the gaze crosses its edge.
+  let scratchEuler = null;
   function applyLockToViewer() {
     const head = getHeadPosition();
     const q = getHeadQuaternion();
@@ -2542,14 +2607,63 @@ window.WebXRVR = window.WebXRVR || (function () {
         fx = scratchVec.x; fy = scratchVec.y; fz = scratchVec.z;
       } catch (e) {}
     }
+    const dist = lockDistance();
+    const edge = layoutTuning.lazyFollowEdge;
+    if (edge > 0) {
+      const flat = Math.hypot(fx, fz);
+      const gazePitch = Math.atan2(fy, flat);
+      // Straight up or down the yaw is noise: hold the screen's.
+      const gazeYaw = flat > 1e-4 ? Math.atan2(-fx, -fz) : (followAngles ? followAngles.yaw : 0);
+      const span = screenSpan(screenAspect);
+      const rising = !!(followAngles && followAngles.rising);
+      followAngles = followAngles
+        ? lazyFollowAngles(followAngles.yaw, followAngles.pitch, gazeYaw, gazePitch,
+          edge * Math.atan2(screenScale * span.w / 2, dist), edge * Math.atan2(screenScale * span.h / 2, dist))
+        : { yaw: gazeYaw, pitch: gazePitch };
+      // A screen faded by looking down rises with the gaze, and keeps rising
+      // until the gaze turns down again, so looking back up brings it level.
+      if (screenLookFade < 1 || rising) {
+        if (gazePitch > followAngles.pitch) followAngles.pitch = gazePitch;
+        followAngles.rising = screenLookFade < 1 || gazePitch >= followAngles.pitch;
+      }
+      const cp = Math.cos(followAngles.pitch);
+      fx = -Math.sin(followAngles.yaw) * cp;
+      fy = Math.sin(followAngles.pitch);
+      fz = -Math.cos(followAngles.yaw) * cp;
+    } else {
+      followAngles = null;
+    }
     screenPos = {
-      x: head.x + fx * screenDistance,
-      y: head.y + fy * screenDistance,
-      z: head.z + fz * screenDistance,
+      x: head.x + fx * dist,
+      y: head.y + fy * dist,
+      z: head.z + fz * dist,
     };
     if (screenQuat && q) {
-      try { screenQuat.copy(q); } catch (e) {}
+      try {
+        if (followAngles) {
+          if (!scratchEuler) scratchEuler = new THREE.Euler();
+          screenQuat.setFromEuler(scratchEuler.set(followAngles.pitch, followAngles.yaw, 0, 'YXZ'));
+        } else {
+          screenQuat.copy(q);
+        }
+      } catch (e) {}
     }
+  }
+
+  // Lazy follow, pure (radians; yaw about +Y from −Z, pitch up): each axis
+  // moves only by how far the gaze sits past the screen's half-extent.
+  function lazyFollowAngles(screenYaw, screenPitch, gazeYaw, gazePitch, halfYaw, halfPitch) {
+    let dy = gazeYaw - screenYaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    const over = (d, h) => (d > h ? d - h : (d < -h ? d + h : 0));
+    return { yaw: screenYaw + over(dy, halfYaw), pitch: screenPitch + over(gazePitch - screenPitch, halfPitch) };
+  }
+
+  // Locked distance: a wide curved screen reaches nearer the eye than the
+  // square one, so its floor rises by the extra bulge. Clamped here at use,
+  // so one wide post never moves the stored distance.
+  function lockDistance() {
+    return Math.max(screenDistance, MIN_DIST + screenBulgeExtra * screenScale / 2.4);
   }
 
   // Pure pose math for the locked screen (head pos + head forward unit
@@ -2606,7 +2720,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
   function groundDockPose(headPos) {
     const a = GROUND_REST_DEG * Math.PI / 180;
-    const r = GROUND_GLOBE_R + GROUND_TAG_LIFT;
+    const r = GROUND_GLOBE_R + groundTagLift();
     const tag = { x: 0, y: groundGlobe.mesh.position.y + r * Math.cos(a), z: -r * Math.sin(a) };
     // Room-fixed like the globe: the smoothed eye over the globe's axis, so
     // head sway does not shake the dock.
@@ -2624,7 +2738,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     // edge; it shrinks further when needed so its top stays a gap below the video.
     const gap = GROUND_DOCK_GAP_DEG * Math.PI / 180;
     const floor = Math.atan2(dy, flat) + Math.atan(tagH / 2 / d) + gap;
-    const videoLow = screenLowestElevation({ x: hx, y: hy, z: hz });
+    // A portrait screen reaches down to the tag: its dock keeps full size
+    // and floats in front of the lower video instead of squeezing between.
+    const videoLow = screenAspect >= 1 ? screenLowestElevation({ x: hx, y: hy, z: hz }) : null;
     let k = d / SHELL_MAIN_RADIUS;
     if (videoLow !== null) {
       const room = videoLow - gap - floor;
@@ -2665,7 +2781,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       const navTop = a.y - SHELL_MAIN_DROP - SHELL_MAIN_SIZE.h / 2 - SHELL_NAV_DROP - navH / 2;
       pos = { x: a.x, y: navTop + fit.h - full.h / 2, z: -SHELL_MAIN_RADIUS };
     } else {
-      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale / 2 - layoutTuning.dockGap, z: 0 });
+      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale * screenSpan(screenAspect).h / 2 - layoutTuning.dockGap, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
     // Room-fixed like the globe: the smoothed eye over the globe's axis, so
@@ -2690,41 +2806,73 @@ window.WebXRVR = window.WebXRVR || (function () {
   function getCommentsPanelLayout() {
     const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = commentsPanelTargetSize(base);
+    const half = sidePanelHalf(base);
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x - base / 2 - size.w / 2 - layoutTuning.panelSideGap,
+        x: a.x - half - size.w / 2 - layoutTuning.panelSideGap,
         y: a.y,
         z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: -base / 2 - size.w / 2 - layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
+        x: -half - size.w / 2 - layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
-    return { center, w: size.w, h: size.h };
+    return pullSidePanel({ center, w: size.w, h: size.h });
   }
 
   function getGuidePanelLayout() {
     const base = lockToViewer ? layoutTuning.screenScale : screenScale;
     const size = guideTargetSize(base);
+    const half = sidePanelHalf(base);
     let center;
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x + base / 2 + size.w / 2 + layoutTuning.panelSideGap,
+        x: a.x + half + size.w / 2 + layoutTuning.panelSideGap,
         y: a.y,
         z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: base / 2 + size.w / 2 + layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
+        x: half + size.w / 2 + layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
-    return { center, w: size.w, h: size.h };
+    return pullSidePanel({ center, w: size.w, h: size.h });
+  }
+
+  // Side panels flank the square screen, or a narrower portrait one. A
+  // wider screen reaches past them, so they keep the square layout's angles
+  // and angular size but come in toward the eye, nearer than any point of
+  // the screen (which sits at or beyond its distance).
+  const PANEL_PULL_MARGIN = 0.9;
+  function sidePanelHalf(base) {
+    return base * Math.min(1, screenSpan(screenAspect).w) / 2;
+  }
+  function pullSidePanel(layout) {
+    if (screenSpan(screenAspect).w <= 1 + 1e-9) return layout;
+    let eye;
+    let dist;
+    if (lockToViewer) {
+      const a = getLockedAnchor();
+      eye = { x: a.x, y: a.y, z: 0 };
+      dist = lockDistance();
+    } else {
+      eye = getHeadPosition();
+      dist = Math.hypot(screenPos.x - eye.x, screenPos.y - eye.y, screenPos.z - eye.z);
+    }
+    const c = layout.center;
+    const r = Math.hypot(c.x - eye.x, c.y - eye.y, c.z - eye.z) || 1;
+    const f = Math.min(1, PANEL_PULL_MARGIN * dist / r);
+    return {
+      center: { x: eye.x + (c.x - eye.x) * f, y: eye.y + (c.y - eye.y) * f, z: eye.z + (c.z - eye.z) * f },
+      w: layout.w * f,
+      h: layout.h * f,
+    };
   }
 
   function getHeadPosition() {
@@ -2903,19 +3051,66 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // ─── Path A: Screen Geometry Generation ─────────────────────────────
-  function createScreenGeometry(mode, width = 2.4, height = 2.4, segX = 48, segY = 48) {
+  // Screen shape for a width/height aspect, in short-side units: the short
+  // side stays 1 (today's square), the long side grows with the aspect up to
+  // the 16:9 span. Wider/taller ratios keep that long span and shrink the
+  // short side instead.
+  function screenSpan(aspect) {
+    const a = Number(aspect) > 0 ? Number(aspect) : 1;
+    if (a >= 1) {
+      const long = Math.min(a, 16 / 9);
+      return { w: long, h: long / a };
+    }
+    const long = Math.min(1 / a, 16 / 9);
+    return { w: long * a, h: long };
+  }
+
+  // Long-axis bend angle so the long edge stays within longEdgeMaxDeg of
+  // the eye at the default size and distance. A screen whose edge is already
+  // inside the limit keeps ARC_ANGLE (1:1 and 4:3 are untouched).
+  function longAxisArc(long) {
+    const alpha = ARC_ANGLE;
+    if (long <= 1) return alpha;
+    const maxRad = (Number(layoutTuning.longEdgeMaxDeg) || LONG_EDGE_MAX_DEG) * Math.PI / 180;
+    // Eye distance in screen-local units (local scale = screenScale / 2.4).
+    const D = -DEFAULT_POS.z / (DEFAULT_SCALE / 2.4);
+    const edgeAngle = (al) => {
+      const th = long * al;
+      return Math.atan2(Math.sin(th) / al, D - (1 - Math.cos(th)) / al);
+    };
+    if (edgeAngle(alpha) <= maxRad) return alpha;
+    let lo = 1e-4, hi = alpha;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      if (edgeAngle(mid) > maxRad) hi = mid; else lo = mid;
+    }
+    return lo;
+  }
+
+  // base is the short side of a 1:1 screen; curved modes keep today's arc
+  // per short-side unit, so a 1:1 screen is vertex-identical to the square.
+  function createScreenGeometry(mode, aspect = 1, base = 2.4, segX = 48, segY = 48) {
     ensureThree();
     if (!THREE) return null;
+    const span = screenSpan(aspect);
+    const width = base * span.w;
+    const height = base * span.h;
     if (mode === 0) {
       return new THREE.PlaneGeometry(width, height);
     }
 
     const geo = new THREE.PlaneGeometry(width, height, segX, segY);
     const pos = geo.attributes.position;
-    const halfW = width / 2;
-    const halfH = height / 2;
+    const halfW = base / 2;
+    const halfH = base / 2;
     const R = SPHERE_RADIUS;
     const alpha = ARC_ANGLE;
+    const landscape = span.w >= span.h;
+    const alphaL = longAxisArc(Math.max(span.w, span.h));
+    const alphaX = landscape ? alphaL : alpha;
+    const alphaY = landscape ? alpha : alphaL;
+    const RX = alphaX === alpha ? R : R * alpha / alphaX;
+    const RY = alphaY === alpha ? R : R * alpha / alphaY;
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -2926,19 +3121,30 @@ window.WebXRVR = window.WebXRVR || (function () {
         // DOME: Concave spherical radial cap
         const r = Math.sqrt(x * x + y * y);
         if (r > 0.0001) {
-          const phi = (r / halfW) * alpha;
-          const factor = (R * Math.sin(phi)) / r;
+          // Long-axis directions bend less (alphaL), blended by direction.
+          let a = alpha;
+          if (alphaL !== alpha) {
+            const u2 = landscape ? (x * x) / (r * r) : (y * y) / (r * r);
+            a = alpha * (1 - u2) + alphaL * u2;
+          }
+          const Re = a === alpha ? R : R * alpha / a;
+          const phi = (r / halfW) * a;
+          const factor = (Re * Math.sin(phi)) / r;
           nx = x * factor;
           ny = y * factor;
-          nz = R * (1 - Math.cos(phi));
+          nz = Re * (1 - Math.cos(phi));
         }
       } else if (mode === 2) {
         // SQ CURVE: Biaxial pillow curve
-        const thX = (x / halfW) * alpha;
-        const thY = (y / halfH) * alpha;
-        nx = R * Math.sin(thX);
-        ny = R * Math.sin(thY);
-        nz = R * (1 - Math.cos(thX) * Math.cos(thY));
+        const thX = (x / halfW) * alphaX;
+        const thY = (y / halfH) * alphaY;
+        nx = RX * Math.sin(thX);
+        ny = RY * Math.sin(thY);
+        nz = RX === RY
+          ? R * (1 - Math.cos(thX) * Math.cos(thY))
+          : (landscape
+            ? RX * (1 - Math.cos(thX)) + RY * (1 - Math.cos(thY)) * Math.cos(thX)
+            : RY * (1 - Math.cos(thY)) + RX * (1 - Math.cos(thX)) * Math.cos(thY));
       }
 
       pos.setXYZ(i, nx, ny, nz);
@@ -6909,7 +7115,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     if (!screenMesh) {
       ensureScreenQuat();
-      const screenGeo = createScreenGeometry(curvatureMode);
+      const screenGeo = createScreenGeometry(curvatureMode, screenAspect);
       const screenMat = new THREE.MeshBasicMaterial({
         map: videoTexture,
         side: THREE.DoubleSide,
@@ -6959,7 +7165,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     // ?glow=0 skips the ambient glow entirely (fill-rate bisection).
     if (!ambilightMesh && debugFlags.glow) {
-      const glowGeo = createScreenGeometry(curvatureMode, 2.4 * 1.34, 2.4 * 1.34, 24, 24) ||
+      const glowGeo = createScreenGeometry(curvatureMode, screenAspect, 2.4 * 1.34, 24, 24) ||
         new THREE.PlaneGeometry(3.2, 3.2);
       const glowMat = new THREE.MeshBasicMaterial({
         color: new THREE.Color(glowColor[0], glowColor[1], glowColor[2]),
@@ -6990,7 +7196,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       try { if (THREE.SRGBColorSpace !== undefined) overlayTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
     }
     if (!overlayMesh && overlayTexture && debugFlags.overlay) {
-      const ovGeo = createScreenGeometry(curvatureMode);
+      const ovGeo = createOverlayGeometry();
       const ovMat = new THREE.MeshBasicMaterial({
         map: overlayTexture,
         transparent: true,
@@ -7438,17 +7644,49 @@ window.WebXRVR = window.WebXRVR || (function () {
     eyeTextures.R.needsUpdate = true;
   }
 
-  function stereoProxySize(layout) {
+  function evenRound(v) {
+    return Math.max(2, 2 * Math.round(v / 2));
+  }
+
+  // Proxy [w, h] for an aspect: the short side at cap, the long side at most
+  // VR_PROXY_LONG_MAX. A 1:1 source keeps cap x cap.
+  function proxySizeFor(aspect, cap) {
+    const a = Number(aspect) > 0 ? Number(aspect) : 1;
+    const k = Math.min(cap, VR_PROXY_LONG_MAX / Math.max(a, 1 / a));
+    return a >= 1 ? [evenRound(k * a), evenRound(k)] : [evenRound(k), evenRound(k / a)];
+  }
+
+  function readMaxTextureSize() {
+    if (!maxTextureSize && renderer) {
+      try {
+        const gl = renderer.getContext();
+        maxTextureSize = Number(gl.getParameter(gl.MAX_TEXTURE_SIZE)) || 0;
+      } catch (e) {}
+    }
+    return maxTextureSize;
+  }
+
+  // Stereo frame [w, h]: two eyes of the source eye aspect. A frame longer
+  // than the GPU's MAX_TEXTURE_SIZE scales both eyes down uniformly.
+  function stereoProxySize(layout, aspect = 1) {
     const eye = debugFlags.stereoEye || VR_STEREO_EYE_CAP;
-    return layout === 'tb' ? [eye, eye * 2] : [eye * 2, eye];
+    let [ew, eh] = proxySizeFor(aspect, eye);
+    const max = readMaxTextureSize();
+    const long = layout === 'tb' ? Math.max(ew, eh * 2) : Math.max(ew * 2, eh);
+    if (max && long > max) {
+      ew = Math.max(2, 2 * Math.floor(ew * max / long / 2));
+      eh = Math.max(2, 2 * Math.floor(eh * max / long / 2));
+    }
+    return layout === 'tb' ? [ew, eh * 2] : [ew * 2, eh];
   }
 
   // One stereo proxy canvas + texture, reshaped (and the GPU texture
-  // recreated) only when the layout flips between SBS and top-bottom.
-  function ensureStereoProxy(layout) {
+  // recreated) only when the layout or the frame size changes.
+  function ensureStereoProxy(layout, aspect = 1) {
     if (layout === 'mono' || typeof document === 'undefined' || !THREE) return null;
-    if (stereoTexture && stereoCanvasLayout === layout) return stereoTexture;
-    const size = stereoProxySize(layout);
+    const size = stereoProxySize(layout, aspect);
+    const key = layout + ':' + size[0] + 'x' + size[1];
+    if (stereoTexture && stereoCanvasLayout === key) return stereoTexture;
     if (!stereoCanvas) {
       stereoCanvas = document.createElement('canvas');
       stereoCtx = stereoCanvas.getContext('2d', { alpha: false });
@@ -7461,7 +7699,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     stereoTexture = applyLinearSampling(new THREE.CanvasTexture(stereoCanvas));
     try { if (THREE.SRGBColorSpace !== undefined) stereoTexture.colorSpace = THREE.SRGBColorSpace; } catch (e) {}
-    stereoCanvasLayout = layout;
+    stereoCanvasLayout = key;
     return stereoTexture;
   }
 
@@ -7490,7 +7728,11 @@ window.WebXRVR = window.WebXRVR || (function () {
       const eyeSign = layer === 1 ? -1 : 1;
       mesh.onBeforeRender = function () {
         // Half the parallax per eye, in a UV space where an eye is half the texture.
-        shift.value = textureStereo === 'sbsd' ? eyeSign * 0.25 * DEPTH_WARP_MAX_SHIFT * depthWarpStrength : 0;
+        // MAX_SHIFT is a fraction of the eye width: a landscape eye scales it
+        // down so the parallax stays the same physical size.
+        shift.value = textureStereo === 'sbsd'
+          ? eyeSign * 0.25 * DEPTH_WARP_MAX_SHIFT * depthWarpStrength / Math.max(1, screenAspect)
+          : 0;
       };
       mesh.material.onBeforeCompile = function (shader) {
         shader.uniforms.uDepthShift = shift;
@@ -7551,7 +7793,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   }
 
   // Record the layout of the frame now in `base` and rebind the screen.
-  function commitTextureStereo(base, layout) {
+  // With a source, the screen also takes that source's aspect.
+  function commitTextureStereo(base, layout, source) {
+    if (source) applyScreenAspect(source, pendingScreenAspect(source, layout));
     textureStereo = layout;
     if (layout !== 'mono') ensureEyeTextures(base, layout);
     bindScreenMap(monoScreenMap(base));
@@ -7563,6 +7807,103 @@ window.WebXRVR = window.WebXRVR || (function () {
     emitPreviewState();
   }
 
+  // Exactly 1, 16:9 or 9:16 when within ASPECT_TOLERANCE of one.
+  function snapAspect(aspect) {
+    for (const t of [1, 16 / 9, 9 / 16]) {
+      if (Math.abs(aspect / t - 1) <= ASPECT_TOLERANCE) return t;
+    }
+    return aspect;
+  }
+
+  // Host hint for the post being loaded (eye-adjusted width/height).
+  function setSourceAspect(aspect) {
+    const a = Number(aspect);
+    sourceAspectHint = Number.isFinite(a) && a > 0 ? a : 0;
+  }
+
+  function intrinsicSize(el) {
+    if (!el) return [0, 0];
+    const w = Number(el.videoWidth || el.naturalWidth || el.width) || 0;
+    const h = Number(el.videoHeight || el.naturalHeight || el.height) || 0;
+    return [w, h];
+  }
+
+  // Width/height of one eye of the element's frame; 0 when unknown.
+  function intrinsicEyeAspect(el, layout) {
+    let [w, h] = intrinsicSize(el);
+    if (!(w > 0 && h > 0)) return 0;
+    if (layout === 'sbs' || layout === 'sbsd') w /= 2;
+    else if (layout === 'tb') h /= 2;
+    return w / h;
+  }
+
+  // Static cards are square; else the host hint, else the element's own
+  // eye-adjusted size, else square.
+  function resolveScreenAspect(source, layout) {
+    // A static card is square unless it says its shape (the pack queue
+    // takes the paused post's shape so the screen keeps its size).
+    if (!source) return 1;
+    if (source.kind === 'static-card') return source.aspect > 0 ? snapAspect(source.aspect) : 1;
+    const a = sourceAspectHint || intrinsicEyeAspect(source.element, layout);
+    return a > 0 ? snapAspect(a) : 1;
+  }
+
+  // The aspect a commit of this source will show: the applied one while the
+  // same source keeps playing, a fresh resolve for a new one.
+  function pendingScreenAspect(source, layout) {
+    if (aspectAppliedFor === visualSourceSignature(source)) return screenAspect;
+    return resolveScreenAspect(source, layout);
+  }
+
+  function applyScreenAspect(source, aspect) {
+    aspectAppliedFor = visualSourceSignature(source);
+    if (aspect !== screenAspect) rebuildScreenGeometries(curvatureMode, aspect);
+  }
+
+  // Mono canvas proxy sized for the screen aspect. A resize clears the
+  // canvas, so it only runs right before a draw; the GPU texture is
+  // re-specified at the new size.
+  function ensureMonoProxySize(aspect) {
+    if (!vrProxyCanvas) return;
+    const size = proxySizeFor(aspect, debugFlags.texCap);
+    if (vrProxyCanvas.width === size[0] && vrProxyCanvas.height === size[1]) return;
+    vrProxyCanvas.width = size[0];
+    vrProxyCanvas.height = size[1];
+    if (videoTexture) {
+      try { videoTexture.dispose(); } catch (e) {}
+      videoTexture.needsUpdate = true;
+    }
+  }
+
+  // Draws the element over the whole proxy. A source whose eye shape differs
+  // from the proxy's (a mixed-shape image post) is contain-fit per eye.
+  function drawToProxy(ctx, el, layout, texW, texH, aspect) {
+    const srcAspect = intrinsicEyeAspect(el, layout);
+    if (!aspect || !srcAspect || Math.abs(srcAspect / aspect - 1) <= ASPECT_TOLERANCE) {
+      ctx.drawImage(el, 0, 0, texW, texH);
+      return;
+    }
+    const [sw, sh] = intrinsicSize(el);
+    const tb = layout === 'tb';
+    const eyes = layout === 'mono' ? 1 : 2;
+    const ew = tb || eyes === 1 ? texW : texW / 2;
+    const eh = tb ? texH / 2 : texH;
+    const esw = tb || eyes === 1 ? sw : sw / 2;
+    const esh = tb ? sh / 2 : sh;
+    const fit = Math.min(ew / esw, eh / esh);
+    const dw = esw * fit;
+    const dh = esh * fit;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, texW, texH);
+    for (let i = 0; i < eyes; i++) {
+      const sx = tb ? 0 : i * esw;
+      const sy = tb ? i * esh : 0;
+      const ex = tb ? 0 : i * ew;
+      const ey = tb ? i * eh : 0;
+      ctx.drawImage(el, sx, sy, esw, esh, ex + (ew - dw) / 2, ey + (eh - dh) / 2, dw, dh);
+    }
+  }
+
   function bindScreenMap(tex) {
     try {
       if (screenMesh && screenMesh.material && screenMesh.material.map !== tex) {
@@ -7572,8 +7913,22 @@ window.WebXRVR = window.WebXRVR || (function () {
     } catch (e) {}
   }
 
-  function directVideoEligible(source) {
+  // A frame larger than the GPU's MAX_TEXTURE_SIZE cannot upload whole, so
+  // such a video takes the canvas proxy (scaled to fit) instead.
+  function directVideoTooLarge(el) {
+    const max = readMaxTextureSize();
+    const [w, h] = intrinsicSize(el);
+    return !!(max && (w > max || h > max));
+  }
+
+  // The direct VideoTexture path shows this source.
+  function usesDirectVideo(source) {
     return !!(debugFlags.vrtex && source && source.kind === 'video' && source.element &&
+      !directVideoTooLarge(source.element));
+  }
+
+  function directVideoEligible(source) {
+    return !!(usesDirectVideo(source) &&
       typeof THREE !== 'undefined' && THREE.VideoTexture && screenMesh && screenMesh.material);
   }
 
@@ -7590,7 +7945,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const layout = sourceStereoLayout(source);
     if (directVideoTexture && directVideoElement === el && directVideoVersion === source.version &&
         screenMesh.material.map === monoScreenMap(directVideoTexture)) {
-      if (layout !== textureStereo) commitTextureStereo(directVideoTexture, layout);
+      if (layout !== textureStereo) commitTextureStereo(directVideoTexture, layout, source);
       return true;
     }
     const rs = Number((el && el.readyState) || 0);
@@ -7607,7 +7962,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     directVideoElement = el;
     directVideoVersion = source.version;
-    commitTextureStereo(directVideoTexture, layout);
+    commitTextureStereo(directVideoTexture, layout, source);
     lastUploadedSource = el;
     lastVisualKind = source.kind;
     lastVisualVersion = visualSourceSignature(source);
@@ -7681,18 +8036,27 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!vrProxyCtx || !source.element) return false;
     // v8.13: sources that don't use the direct texture (static cards/images,
     // or the flag off) render through the canvas proxy — make sure it is bound.
-    if (!(debugFlags.vrtex && source.kind === 'video')) {
+    if (!usesDirectVideo(source)) {
       bindScreenMap(monoScreenMap(textureStereo !== 'mono' && stereoTexture ? stereoTexture : videoTexture));
     }
     if (!force && !shouldUploadVisual(source)) return false;
-    // Stereo frames blit whole into the 2:1 / 1:2 stereo proxy; each eye
+    // Stereo frames blit whole into the two-eye stereo proxy; each eye
     // then samples its half (see ensureEyeTextures).
     const layout = sourceStereoLayout(source);
-    const stereoBase = layout !== 'mono' ? ensureStereoProxy(layout) : null;
-    const ctx = stereoBase ? stereoCtx : vrProxyCtx;
-    const monoCap = vrProxyCanvas ? vrProxyCanvas.width : debugFlags.texCap;
-    const texW = stereoBase ? stereoCanvas.width : monoCap;
-    const texH = stereoBase ? stereoCanvas.height : monoCap;
+    const aspect = pendingScreenAspect(source, layout);
+    let stereoBase = null;
+    let ctx = vrProxyCtx;
+    let texW = 0;
+    let texH = 0;
+    // Sized right before the draw: a resize clears the canvas, so the held
+    // frame stays until the new one is ready.
+    const prepareProxy = () => {
+      stereoBase = layout !== 'mono' ? ensureStereoProxy(layout, aspect) : null;
+      if (!stereoBase) ensureMonoProxySize(aspect);
+      ctx = stereoBase ? stereoCtx : vrProxyCtx;
+      texW = stereoBase ? stereoCanvas.width : vrProxyCanvas.width;
+      texH = stereoBase ? stereoCanvas.height : vrProxyCanvas.height;
+    };
     try {
       if (source.kind === 'static-card' || source.kind === 'image') {
         // Trust the caller's ready flag: a genuinely incomplete image
@@ -7700,9 +8064,11 @@ window.WebXRVR = window.WebXRVR || (function () {
         // frame). Refusing here would stall mock/test elements that carry
         // no complete/naturalWidth signals.
         if (source.ready === false && !force) return false;
+        prepareProxy();
         ctx.clearRect(0, 0, texW, texH);
         try {
-          ctx.drawImage(source.element, 0, 0, texW, texH);
+          // Static cards fill the screen: square, or drawn at its shape.
+          drawToProxy(ctx, source.element, layout, texW, texH, source.kind === 'static-card' ? 0 : aspect);
         } catch (drawErr) {
           return false;
         }
@@ -7723,8 +8089,9 @@ window.WebXRVR = window.WebXRVR || (function () {
             return false;
           }
         }
+        prepareProxy();
         try {
-          ctx.drawImage(source.element, 0, 0, texW, texH);
+          drawToProxy(ctx, source.element, layout, texW, texH, aspect);
         } catch (drawErr) {
           return false;
         }
@@ -7744,7 +8111,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         markEyeTexturesUploaded(uploaded);
         // ?vrtex=video keeps the direct texture bound for videos (it tracks
         // its own layout in updateDirectVideoBinding).
-        if (!(debugFlags.vrtex && source.kind === 'video')) commitTextureStereo(uploaded, layout);
+        if (!usesDirectVideo(source)) commitTextureStereo(uploaded, layout, source);
       }
       lastUploadedSource = source.element;
       lastVisualKind = source.kind;
@@ -7790,7 +8157,7 @@ window.WebXRVR = window.WebXRVR || (function () {
 
   // Per-frame screen texture update, shared by the preview and XR loops.
   function updateVisualTexture(source) {
-    if (debugFlags.vrtex && source && source.kind === 'video' && source.element) {
+    if (usesDirectVideo(source)) {
       // v8.13 direct-texture path: no canvas blit/re-upload; three uploads
       // the current frame per render. Telemetry counts decoded frames.
       if (updateDirectVideoBinding(source, false)) {
@@ -7896,7 +8263,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ui = getUICanvas();
     if (!ui || ui.CP_LIST_TOP === undefined) return;
     const filtered = ui.filterPanelComments(comments, cPanelTab);
-    const listH = ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP;
+    const listH = ui.CP_LIST_BOTTOM - (ui.commentsListTop ? ui.commentsListTop() : ui.CP_LIST_TOP);
     const contentH = filtered.length * (ui.CP_ITEM_H + ui.CP_ITEM_GAP);
     cPanelMaxScroll = Math.max(0, contentH - listH);
     if (cPanelScrollY > cPanelMaxScroll) cPanelScrollY = cPanelMaxScroll;
@@ -8215,6 +8582,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       send: (method, path, body) => (callbacks.shellSend
         ? callbacks.shellSend(method, path, body) : Promise.reject(new Error('shell requests unavailable'))),
       getScene: () => sceneMode,
+      gridMaxScroll: (route) => getShellCanvas().gridMaxScroll(route),
       earthAvailable: () => !isPackExperience(),
       setTheme: setVRTheme,
       // REELS from the open shell just returns to the feed; from the dock it
@@ -8346,7 +8714,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     return !!(shellDrag && shellDrag.active() && shellDrag.end(Date.now()));
   }
 
-  // Preview wheel over the main panel: one row per notch, throttled.
+  // Preview wheel over the main panel: one scroll step per notch, throttled.
   function shellWheel(deltaY) {
     const now = Date.now();
     if (!deltaY || now - shellWheelT < 120) return;
@@ -8873,6 +9241,8 @@ window.WebXRVR = window.WebXRVR || (function () {
     // centered on the simulated gaze (upstream parity).
     if (sceneMode === 'reels' && lockApplies() && previewCameraMode === 'headset' && !isPackExperience()) {
       applyLockToViewer();
+    } else {
+      followAngles = null; // the next lock snaps to the gaze
     }
     commitScreenTransform();
     layoutControlsDock();
@@ -9137,15 +9507,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       // Track hover over a pop-up comment on the reels screen (panel closed).
       overlayHoverId = null;
       if (!commentsPanelVisible && overScreen && screenHitUv && overlayRegions.length > 0) {
-        try {
-          const ui = getUICanvas();
-          if (ui && typeof ui.resolveOverlayCommentAt === 'function') {
-            const w = overlayCanvas ? overlayCanvas.width : ui.OVERLAY_W;
-            const h = overlayCanvas ? overlayCanvas.height : ui.OVERLAY_H;
-            overlayHoverId = ui.resolveOverlayCommentAt(
-              screenHitUv.x * w, (1 - screenHitUv.y) * h, overlayRegions);
-          }
-        } catch (e) {}
+        overlayHoverId = overlayCommentFromUV(screenHitUv);
       }
     } catch (e) {}
     const isHover = hovering >= 0 || overScreen || hovering === -2;
@@ -9743,6 +10105,16 @@ window.WebXRVR = window.WebXRVR || (function () {
         vrLastUiUploadT = -1;
         return;
       }
+      // Wheel on an open card list (pack queue) steps its rows.
+      if (callbacks.onMainScreenScroll && getVisualSource().kind === 'static-card') {
+        cardWheelCarry += event.deltaY || 0;
+        const steps = Math.trunc(cardWheelCarry / 60);
+        if (callbacks.onMainScreenScroll(0)) {
+          if (steps) { cardWheelCarry -= steps * 60; callbacks.onMainScreenScroll(steps); }
+          return;
+        }
+        cardWheelCarry = 0;
+      }
       if (previewCameraMode === 'orbit') {
         previewOrbitDistance = Math.max(1.2, Math.min(12, previewOrbitDistance + (event.deltaY || 0) * 0.006));
         applyPreviewCamera();
@@ -9983,7 +10355,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     next.screenScale = clampScreenScale(next.screenScale);
     next.screenDistance = clampScreenDistance(next.screenDistance);
+    const reshape = next.longEdgeMaxDeg !== layoutTuning.longEdgeMaxDeg;
     layoutTuning = next;
+    if (reshape) rebuildScreenGeometries(curvatureMode, screenAspect);
     screenScale = next.screenScale;
     screenDistance = next.screenDistance;
     screenPos = { x: DEFAULT_POS.x, y: next.screenHeight, z: -next.screenDistance };
@@ -10029,26 +10403,47 @@ window.WebXRVR = window.WebXRVR || (function () {
       // 'curved' is the legacy alias kept for older CDP probes/callers.
       mode = key === 'dome' ? 1 : (key === 'sq_curve' || key === 'curved' ? 2 : 0);
     }
-    curvatureMode = Number(mode) || 0;
+    rebuildScreenGeometries(Number(mode) || 0, screenAspect);
+    emitPreviewState();
+  }
+
+  // Rebuilds the screen, stereo eye, overlay and glow meshes for a curvature
+  // mode and screen aspect. Shared by setCurvatureMode and the per-post
+  // aspect change (applied at texture commit, never mid-post).
+  function maxLocalZ(geo) {
+    const pos = geo.attributes.position;
+    let z = -Infinity;
+    for (let i = 0; i < pos.count; i++) z = Math.max(z, pos.getZ(i));
+    return z;
+  }
+
+  function rebuildScreenGeometries(mode, aspect) {
+    curvatureMode = mode;
     isCurved = (curvatureMode !== 0);
+    screenAspect = aspect;
     if (screenMesh) {
       if (screenMesh.geometry) screenMesh.geometry.dispose();
-      screenMesh.geometry = createScreenGeometry(curvatureMode);
+      screenMesh.geometry = createScreenGeometry(curvatureMode, screenAspect);
+      screenBulgeExtra = 0;
+      if (screenAspect !== 1) {
+        const square = createScreenGeometry(curvatureMode, 1);
+        screenBulgeExtra = Math.max(0, maxLocalZ(screenMesh.geometry) - maxLocalZ(square));
+        square.dispose();
+      }
       // Stereo eye meshes share the screen's geometry.
       if (eyeMeshL) eyeMeshL.geometry = screenMesh.geometry;
       if (eyeMeshR) eyeMeshR.geometry = screenMesh.geometry;
     }
     if (overlayMesh) {
       if (overlayMesh.geometry) overlayMesh.geometry.dispose();
-      overlayMesh.geometry = createScreenGeometry(curvatureMode);
+      overlayMesh.geometry = createOverlayGeometry();
     }
     if (ambilightMesh) {
       if (ambilightMesh.geometry) ambilightMesh.geometry.dispose();
-      ambilightMesh.geometry = createScreenGeometry(curvatureMode, 2.4 * 1.34, 2.4 * 1.34, 24, 24) ||
+      ambilightMesh.geometry = createScreenGeometry(curvatureMode, screenAspect, 2.4 * 1.34, 24, 24) ||
         new THREE.PlaneGeometry(3.2, 3.2);
     }
     commitScreenTransform();
-    emitPreviewState();
   }
 
   function getCurvatureMode() {
@@ -11299,6 +11694,17 @@ window.WebXRVR = window.WebXRVR || (function () {
           cPanelScrollY = clampPanelScroll(cPanelScrollY + thumbY * 6);
           vrLastUiUploadT = -1;
         }
+      } else if (cardOpen && callbacks.onMainScreenScroll && Math.abs(thumbY) > FLICK_THRESHOLD) {
+        // B1b) A card with a list (pack queue) -> stick Y steps the rows,
+        // repeating while held. Other cards return false and stay inert.
+        const now = Date.now();
+        if (!flickedY || now >= cardScrollRepeatAt) {
+          const first = !flickedY;
+          flickedY = true;
+          cardScrollRepeatAt = now + (first ? 380 : 140);
+          if (callbacks.onMainScreenScroll(thumbY > 0 ? 1 : -1)) pulseInput(eligible, 0.12, 20);
+          showControls();
+        }
       } else {
         // B2) NORMAL stick Y up/down -> next / previous reel navigation.
         if (Math.abs(thumbY) > FLICK_THRESHOLD && !flickedY) {
@@ -11381,15 +11787,37 @@ window.WebXRVR = window.WebXRVR || (function () {
     return { item: playlist[idx] || null, itemState };
   }
 
+  // Screen UV -> overlay canvas UV. The square overlay canvas covers the
+  // screen's central short-side square; outside it is u or v beyond [0, 1].
+  function overlayUV(u, v, aspect = screenAspect) {
+    return aspect >= 1 ? [0.5 + (u - 0.5) * aspect, v] : [u, 0.5 + (v - 0.5) / aspect];
+  }
+
+  // The overlay mesh samples the canvas through the same map; ClampToEdge
+  // carries the canvas edge (the failed-load scrim) over the rest of the screen.
+  function createOverlayGeometry() {
+    const geo = createScreenGeometry(curvatureMode, screenAspect);
+    if (geo && screenAspect !== 1) {
+      const uv = geo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) {
+        const [u, v] = overlayUV(uv.getX(i), uv.getY(i));
+        uv.setXY(i, u, v);
+      }
+    }
+    return geo;
+  }
+
   // Screen UV → pop-up overlay comment id (shared XR/preview).
   function overlayCommentFromUV(uv) {
     const ui = getUICanvas();
     if (!uv || !ui || typeof ui.resolveOverlayCommentAt !== 'function') return null;
     if (!overlayRegions || overlayRegions.length === 0) return null;
+    const [u, v] = overlayUV(uv.x, uv.y);
+    if (u < 0 || u > 1 || v < 0 || v > 1) return null;
     try {
       const w = overlayCanvas ? overlayCanvas.width : ui.OVERLAY_W;
       const h = overlayCanvas ? overlayCanvas.height : ui.OVERLAY_H;
-      return ui.resolveOverlayCommentAt(uv.x * w, (1 - uv.y) * h, overlayRegions);
+      return ui.resolveOverlayCommentAt(u * w, (1 - v) * h, overlayRegions);
     } catch (e) { return null; }
   }
 
@@ -11691,6 +12119,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     isInitialPoseSet = false;
     sessionEyeY = null;
     groundEyeY = null;
+    followAngles = null;
     lockToViewer = !isPackExperience();
     controlsVisible = false;
     commentsPanelVisible = false;
@@ -11943,9 +12372,11 @@ window.WebXRVR = window.WebXRVR || (function () {
           // Head lock: the screen follows the gaze every frame
           // (skipped under ?lock=0 for bisection).
           if (lockApplies()) applyLockToViewer();
+          else followAngles = null; // the next lock snaps to the gaze
           // Paused reels reveal the dock (upstream parity).
           if (getVisualSource().paused && !controlsVisible) showControls();
         } else {
+          followAngles = null;
           advanceEarthZoom(time);
           advanceEarthSpin(time);
           updateEarthDressing(time);
@@ -12514,7 +12945,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Row order is the panel's threaded order, not the raw list's.
     const rows = ui && ui.filterPanelComments ? ui.filterPanelComments(comments, cPanelTab) : comments;
     const idx = rows.findIndex((c) => c.id === commentId);
-    const listH = ui ? (ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP) : 520;
+    const listH = ui ? (ui.CP_LIST_BOTTOM - (ui.commentsListTop ? ui.commentsListTop() : ui.CP_LIST_TOP)) : 520;
     const itemH = ui ? (ui.CP_ITEM_H + ui.CP_ITEM_GAP) : 112;
     if (idx >= 0) {
       const itemTop = idx * itemH;
@@ -12716,6 +13147,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Stereo layout of the loaded visual: 'mono' | 'sbs' | 'tb'.
     setSourceStereo,
     getSourceStereo() { return sourceStereo; },
+    // Per-post screen aspect hint (eye width/height); applied at the first
+    // committed frame of the next source.
+    setSourceAspect,
+    getScreenAspect() { return screenAspect; },
     // Depth multiplier of a colour+depth ('sbsd') source; 0 is flat.
     setDepthStrength(value) { depthWarpStrength = Math.max(0, Math.min(4, Number(value) || 0)); },
 
@@ -12777,6 +13212,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           seeking: !!groundSeek,
           spinning: groundSpinning,
           highlight: groundHighlightAlpha,
+          screenFade: groundScreenFade,
           highlightVisible: !!(groundHighlight && groundHighlight.visible),
           placeText: groundPlace ? groundPlace.text : null,
           pinColor: parts && parts.pin ? parts.pin.material.color.getHexString() : null,
@@ -12805,6 +13241,10 @@ window.WebXRVR = window.WebXRVR || (function () {
         return low === null ? null : low * 180 / Math.PI;
       },
       postXRDiag,
+      createScreenGeometry,
+      screenSpan,
+      stereoProxySize,
+      proxySizeFor,
       locationToUnit,
       earthZoneAngularRadius,
       earthZoneUV,
@@ -12825,6 +13265,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       getCommentsPanelLayout,
       getGuidePanelLayout,
       applyLockToViewer,
+      lazyFollowAngles,
+      lockDistance,
+      getFollowAngles: () => (followAngles ? { ...followAngles } : null),
       commitScreenTransform,
       lockApplies,
       pickPointerSource,
@@ -12872,6 +13315,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       refreshPanelScrollBounds,
       commentsRegionFromUV,
       overlayCommentFromUV,
+      overlayUV,
       refreshOverlayTexture,
       getRendererOpts() { return lastRendererOpts; },
       getTextureFilterInfo() {

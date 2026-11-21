@@ -3,24 +3,43 @@ import { ToggleRow } from '../ui/controls.jsx';
 import CustomModelPanel from '../ui/CustomModelPanel.jsx';
 import { onRovingKeyDown, tabStop } from '../ui/roving.js';
 import CloudFundingPanel from '../billing/CloudFundingPanel.jsx';
-import { CloudIcon, CubeIcon, SendIcon, SquareIcon, StackIcon } from '../icons/index.jsx';
+import { CheckIcon, CloudIcon, CubeIcon, NoneIcon, SendIcon, SquareIcon } from '../icons/index.jsx';
 import { MODES, MAX_LORAS } from './useExtendConfig.js';
+import { LTX25_ANCHORS } from '../../utils/modelOptions.js';
+import { TARGET_ASPECTS } from '../../utils/aspect.js';
 
-// How a file is made square: every extender setting of the standalone Image
-// and Video pages, in the order a person decides them. It binds to the same
-// config object (useExtendConfig), so the /process form does not change.
+// How a file is made: every extender setting of the standalone Image and Video
+// pages, in the order a person decides them, plus the shape. It binds to the
+// same config object (useExtendConfig), so the /process form does not change.
 
+// Original first: the file as it came, then Extend (Fill with AI) to a shape.
+const MODE_ORDER = [MODES[1], MODES[0]];
 const MODE_CARDS = {
-  [MODES[0]]: { name: 'Fill with AI', hint: 'New picture is painted on the empty sides', Icon: SquareIcon },
-  [MODES[1]]: { name: 'Stretch to fit', hint: 'No new picture; the file is stretched', Icon: StackIcon },
+  [MODES[0]]: { name: 'Extend', hint: 'New picture is painted out to 1:1, 16:9 or 9:16', Icon: SquareIcon },
+  [MODES[1]]: { name: 'Original', hint: 'Nothing is added; the file keeps its shape', Icon: CheckIcon },
 };
+// A plain frame in the shape, centred in the 24×24 icon box.
+const shapeIcon = (width, height) => function ShapeIcon() {
+  return (
+    <svg className="sx-media-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x={(24 - width) / 2} y={(24 - height) / 2} width={width} height={height} />
+    </svg>
+  );
+};
+const SHAPE_CARDS = {
+  '1:1': { name: '1:1', hint: 'Square', Icon: shapeIcon(15, 15) },
+  '16:9': { name: '16:9', hint: 'Wide', Icon: shapeIcon(20, 11.25) },
+  '9:16': { name: '9:16', hint: 'Tall', Icon: shapeIcon(11.25, 20) },
+};
+// '' is no upscale: the file keeps its own resolution.
 const ENGINE_CARDS = {
+  '': { name: 'No upscale', hint: 'Keeps its own resolution', Icon: NoneIcon },
   FAST: { name: 'Fast', hint: 'On this server, no credits', Icon: SendIcon },
   STUDIO: { name: 'Studio', hint: 'Slower, cleaner detail', Icon: CubeIcon },
   'FAL AI': { name: 'Cloud AI', hint: 'Best detail, uses credits', Icon: CloudIcon },
 };
 
-function Step({ title, children }) {
+export function Step({ title, children }) {
   return (
     <section className="sx-media-step">
       <h3 className="sx-media-step-title">{title}</h3>
@@ -39,8 +58,7 @@ function Label({ children, htmlFor, value }) {
 }
 
 // Large picture choices (a radiogroup). `cards` maps each option to its name, hint and icon.
-// `clearable`: clicking the picked card unpicks it (value '').
-function ChoiceCards({ options, cards, value, onChange, ariaLabel, clearable }) {
+function ChoiceCards({ options, cards, value, onChange, ariaLabel }) {
   const stop = tabStop(options.map((option) => option === value));
   return (
     <div className="sx-media-choices" role="radiogroup" aria-label={ariaLabel} onKeyDown={onRovingKeyDown}>
@@ -55,7 +73,9 @@ function ChoiceCards({ options, cards, value, onChange, ariaLabel, clearable }) 
             tabIndex={index === stop ? 0 : -1}
             className={`sx-media-choice ${option === value ? 'sx-selected' : ''}`}
             title={hint}
-            onClick={() => onChange(clearable && option === value ? '' : option)}
+            onClick={() => {
+              if (option !== value) onChange(option);
+            }}
           >
             <Icon />
             <span className="sx-media-choice-name">{name}</span>
@@ -64,6 +84,16 @@ function ChoiceCards({ options, cards, value, onChange, ariaLabel, clearable }) 
       })}
     </div>
   );
+}
+
+// Original or Extend (cfg.mode).
+export function ModeChoice({ value, onChange, isVideo }) {
+  return <ChoiceCards options={MODE_ORDER} cards={MODE_CARDS} value={value} onChange={onChange} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />;
+}
+
+// No upscale, then the kind's engines (cfg.engine; '' is no upscale).
+export function QualityChoice({ engines, value, onChange }) {
+  return <ChoiceCards options={['', ...engines]} cards={ENGINE_CARDS} value={value} onChange={onChange} ariaLabel="Upscale Engine" />;
 }
 
 const modelShort = (model) => (model || '').split('/').filter(Boolean).slice(-2).join('/');
@@ -152,58 +182,32 @@ function LoraStack({ cfg }) {
   );
 }
 
-function Trim({ cfg, maxSourceDur }) {
-  const start = Number(cfg.trimStart || 0);
-  const end = Math.min(maxSourceDur, start + Number(cfg.trimDur || 0));
-  const span = maxSourceDur > 0 ? maxSourceDur : 1;
-  return (
-    <Step title="Trim">
-      <ToggleRow label="Enable 15s Video Trimming" checked={cfg.trimEnabled} onChange={cfg.setTrimEnabled} />
-      {cfg.trimEnabled ? (
-        <div className="sx-studio-grid-2">
-          <NumberField
-            id="studio-trim-start"
-            label={`START TIME (s) — MAX ${Math.max(0, maxSourceDur - 1).toFixed(1)}`}
-            min={0}
-            max={Math.max(0, maxSourceDur - 1)}
-            step={0.5}
-            value={cfg.trimStart}
-            onChange={cfg.setTrimStart}
-          />
-          <NumberField id="studio-trim-dur" label="CLIP DURATION (s — MAX 15s)" min={1} max={15} step={0.5} value={cfg.trimDur} onChange={cfg.setTrimDur} />
-        </div>
-      ) : null}
-      <div className="sx-media-trim-bar" aria-hidden="true">
-        <i style={cfg.trimEnabled ? { left: `${(start / span) * 100}%`, width: `${(Math.max(0, end - start) / span) * 100}%` } : { left: 0, width: '100%' }} />
-      </div>
-      <div className="sx-studio-readout">
-        {cfg.trimEnabled
-          ? <span>RANGE: <b>{start.toFixed(1)}s ➔ {end.toFixed(1)}s ({Math.max(0, end - start).toFixed(1)}s TOTAL)</b></span>
-          : <span>RANGE: <b>0.0s ➔ {Number(maxSourceDur || 0).toFixed(1)}s</b></span>}
-        <span className="sx-studio-accent">{cfg.trimEnabled ? 'TRIMMED' : 'FULL CLIP'}</span>
-      </div>
-    </Step>
-  );
-}
-
-// `squareOnly`: every file is already square, so there is nothing to fill or stretch.
-export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSourceDur, squareOnly }) {
+// `allMatch`: every file already has the picked shape, so there is nothing to fill.
+// `shape`: the shape shown as picked: the person's pick, else the one all the
+// files would be made in (null when they differ).
+// `onPick(mode, engine)`: set in the file dialog, which shows Original / Extend
+// above the panel; the panel then leaves the mode out and routes picks there.
+export default function OptionsPanel({ cfg, funding, probes, studioOk, allMatch, shape, onPick }) {
   const isVideo = cfg.kind === 'video';
-  const outpaint = !cfg.upscaleOnly && !squareOnly;
+  const outpaint = !cfg.upscaleOnly && !allMatch;
   const ltx = isVideo && outpaint && cfg.ltxPicked;
+  const minimax = isVideo && outpaint && cfg.minimaxPicked;
+  const ltx25 = isVideo && outpaint && cfg.ltx25Picked;
   const bytedance = isVideo && cfg.falPicked && cfg.falUpscale.includes('Bytedance');
   const seedvr = isVideo && cfg.falPicked && cfg.falUpscale.includes('SeedVR');
   return (
     <div className="sx-media-options">
-      {squareOnly ? null : (
-        <Step title="How">
-          <ChoiceCards options={MODES} cards={MODE_CARDS} value={cfg.mode} onChange={cfg.setMode} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />
+      {onPick && cfg.upscaleOnly ? null : (
+        <Step title={onPick ? 'Shape' : 'How'}>
+          {onPick ? null : <ModeChoice value={cfg.mode} onChange={cfg.setMode} isVideo={isVideo} />}
+          {cfg.upscaleOnly ? null : (
+            <ChoiceCards options={TARGET_ASPECTS} cards={SHAPE_CARDS} value={shape} onChange={cfg.setShape} ariaLabel={isVideo ? 'Video Shape' : 'Shape'} />
+          )}
         </Step>
       )}
 
       <Step title="Quality">
-        <ChoiceCards options={cfg.engines} cards={ENGINE_CARDS} value={cfg.engine} onChange={cfg.setEngine} ariaLabel="Upscale Engine" clearable />
-        {cfg.noUpscale ? <p className="sx-studio-note">No upscale: the file keeps its own resolution. Pick a card to upscale to 2K.</p> : null}
+        <QualityChoice engines={cfg.engines} value={cfg.engine} onChange={onPick ? (engine) => onPick(cfg.mode, engine) : cfg.setEngine} />
         {isVideo && cfg.studioPicked && !studioOk ? (
           <AccentBlock
             title="STUDIO ENGINE UNAVAILABLE"
@@ -226,13 +230,14 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
             </div>
           ) : null}
           {outpaint && isVideo && cfg.outpaintEntry?.is_custom ? (
-            <CustomModelPanel model={cfg.outpaintEntry.model} kind="outpaint" entry={cfg.outpaintEntry} onArgs={cfg.setOutArgs} />
+            <CustomModelPanel model={cfg.outpaintEntry.model} kind="outpaint" entry={cfg.outpaintEntry} onArgs={cfg.setOutArgs} aspect={shape} />
           ) : null}
           {outpaint && !isVideo && cfg.outpaintCustom ? (
             <CustomModelPanel
               model={cfg.outpaintModel}
               kind="image_outpaint"
               onArgs={cfg.setOutArgs}
+              aspect={shape}
               entry={{
                 label: `CUSTOM OUTPAINT (${cfg.outpaintShort})`,
                 requirements: 'A saved personal Fal key is required; the source image is uploaded by the pipeline.',
@@ -264,7 +269,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
         </Step>
       ) : null}
 
-      {outpaint ? (
+      {outpaint && !ltx25 ? (
         <Step title="Describe the fill">
           <textarea
             id="studio-prompt"
@@ -273,12 +278,11 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
             aria-label="OUTPAINT EXTENSION PROMPT"
             value={cfg.prompt}
             onChange={(e) => cfg.setPrompt(e.target.value)}
-            placeholder={isVideo ? 'Describe the extended square background environment...' : 'Describe the environment to generate on left/right borders...'}
+            placeholder={isVideo ? 'Describe the background to paint around the video...' : 'Describe the background to paint around the picture...'}
           />
         </Step>
       ) : null}
 
-      {isVideo ? <Trim cfg={cfg} maxSourceDur={maxSourceDur} /> : null}
 
       <details className="sx-media-fine">
         <summary>Fine tuning</summary>
@@ -321,7 +325,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
                   />
                 </div>
               </div>
-              <Select id="studio-ltx-res" label="OUTPUT RESOLUTION TIER" value={cfg.ltxRes} onChange={cfg.setLtxRes} options={['720p', '1080p', '480p']} />
+              <Select id="studio-ltx-res" label="OUTPUT RESOLUTION TIER" value={cfg.ltxRes} onChange={cfg.setLtxRes} options={cfg.videoOptions.ltxRes} />
             </div>
             <div className="sx-studio-grid-2 sx-studio-toggles">
               <ToggleRow label="Preserve Audio Track" checked={cfg.ltxAudio} onChange={cfg.setLtxAudio} />
@@ -330,11 +334,34 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
           </>
         ) : null}
         {isVideo && outpaint && cfg.loraPicked ? <LoraStack cfg={cfg} /> : null}
+        {minimax ? (
+          <div className="sx-studio-grid-2" role="group" aria-label="MiniMax H3 Max settings">
+            <Select id="studio-minimax-res" label="OUTPUT RESOLUTION" value={cfg.minimaxRes} onChange={cfg.setMinimaxRes} options={cfg.minimaxResOptions} />
+            <div className="sx-studio-field">
+              <Label htmlFor="studio-minimax-seed">SEED (EMPTY = RANDOM)</Label>
+              <input
+                id="studio-minimax-seed"
+                className="sx-input"
+                type="text"
+                inputMode="numeric"
+                value={cfg.minimaxSeed}
+                onChange={(e) => cfg.setMinimaxSeed(e.target.value.replace(/\D/g, ''))}
+                placeholder="random"
+              />
+            </div>
+          </div>
+        ) : null}
+        {ltx25 ? (
+          <div className="sx-studio-grid-2" role="group" aria-label="LTX 2.5 Reframe settings">
+            <Select id="studio-ltx25-res" label="OUTPUT RESOLUTION" value={cfg.ltx25Res} onChange={cfg.setLtx25Res} options={cfg.ltx25ResOptions} />
+            <Select id="studio-ltx25-anchor" label="KEEP SOURCE AT" value={cfg.ltx25Anchor} onChange={cfg.setLtx25Anchor} options={LTX25_ANCHORS} />
+          </div>
+        ) : null}
         {bytedance ? (
           <div className="sx-studio-grid-3" role="group" aria-label="Bytedance upscaler settings">
-            <Select id="studio-btd-res" label="TARGET RESOLUTION" value={cfg.btdRes} onChange={cfg.setBtdRes} options={['4k', '2k', '1080p']} />
-            <Select id="studio-btd-fps" label="TARGET FPS" value={cfg.btdFps} onChange={cfg.setBtdFps} options={['30fps', '60fps']} />
-            <Select id="studio-btd-tier" label="QUALITY TIER" value={cfg.btdTier} onChange={cfg.setBtdTier} options={['fast', 'standard', 'pro']} />
+            <Select id="studio-btd-res" label="TARGET RESOLUTION" value={cfg.btdRes} onChange={cfg.setBtdRes} options={cfg.videoOptions.btdRes} />
+            <Select id="studio-btd-fps" label="TARGET FPS" value={cfg.btdFps} onChange={cfg.setBtdFps} options={cfg.videoOptions.btdFps} />
+            <Select id="studio-btd-tier" label="QUALITY TIER" value={cfg.btdTier} onChange={cfg.setBtdTier} options={cfg.videoOptions.btdTier} />
             <Select id="studio-btd-preset" label="SCENARIO PRESET" value={cfg.btdPreset} onChange={cfg.setBtdPreset} options={['general', 'ugc', 'short_series', 'aigc', 'old_film']} />
             <Select id="studio-btd-fidelity" label="FIDELITY INTENSITY" value={cfg.btdFidelity} onChange={cfg.setBtdFidelity} options={['medium', 'high']} />
           </div>
@@ -342,7 +369,7 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
         {seedvr ? (
           <div className="sx-studio-grid-2" role="group" aria-label="SeedVR2 upscale settings">
             <NumberField id="studio-seedvr-factor" label="UPSCALE FACTOR" min={1} max={4} step={0.5} value={cfg.seedvrFactor} onChange={cfg.setSeedvrFactor} />
-            <Select id="studio-seedvr-target" label="TARGET RESOLUTION TIER" value={cfg.seedvrTarget} onChange={cfg.setSeedvrTarget} options={['1080p', '2160p', '1440p', '720p']} />
+            <Select id="studio-seedvr-target" label="TARGET RESOLUTION TIER" value={cfg.seedvrTarget} onChange={cfg.setSeedvrTarget} options={cfg.videoOptions.seedvrTarget} />
           </div>
         ) : null}
         {!cfg.studioPicked ? (

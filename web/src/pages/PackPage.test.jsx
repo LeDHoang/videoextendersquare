@@ -27,8 +27,8 @@ vi.mock('../components/explore/ExploreTile.jsx', async () => {
   const actual = await vi.importActual('../components/explore/ExploreTile.jsx');
   return {
     ...actual,
-    default: ({ video, onOpen, onShare, orderLabel }) => (
-      <article data-testid="tile" data-order={orderLabel}>
+    default: ({ video, onOpen, onShare }) => (
+      <article data-testid="tile">
         <button type="button" onClick={() => onOpen(video)}>OPEN {video.title}</button>
         <button type="button" onClick={() => onShare(video)}>SHARE {video.title}</button>
       </article>
@@ -152,9 +152,10 @@ describe('PackPage', () => {
       expect(screen.getByRole('link', { name: '#neon' })).toHaveAttribute('href', '/explore?search=%23neon');
       expect(document.querySelector('.sx-pack-location')).toHaveTextContent('Hanoi, Vietnam');
       const stats = screen.getByLabelText('Pack statistics');
-      expect(within(stats).getByText('LIKES').previousSibling).toHaveTextContent('1.5K');
-      expect(within(stats).getByText('REELS').previousSibling).toHaveTextContent('3');
-      expect(within(stats).getByText('SAVES').previousSibling).toHaveTextContent('2');
+      expect(within(stats).getByText('REELS').closest('div')).toHaveTextContent('3');
+      expect(within(stats).queryByText('LIKES')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'LIKE' })).toHaveTextContent('1.5K');
+      expect(screen.getByRole('button', { name: 'SAVE PACK' })).toHaveTextContent('2');
       expect(screen.getByText('PUBLIC')).toBeInTheDocument();
       expect(screen.getByText('3 OF 3 REELS AVAILABLE')).toBeInTheDocument();
     });
@@ -245,7 +246,7 @@ describe('PackPage', () => {
       expect(screen.queryByRole('list')).not.toBeInTheDocument();
       expect(screen.getByRole('radio', { name: 'GALLERY' })).toHaveAttribute('aria-checked', 'true');
       expect(document.querySelector('.sx-pk-gallery.sx-explore-grid')).not.toBeNull();
-      expect(screen.getByRole('button', { name: 'Compact square grid' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: 'Compact grid' })).toHaveAttribute('aria-pressed', 'true');
     });
 
     it('lists Gallery before List in the view switch', async () => {
@@ -276,11 +277,11 @@ describe('PackPage', () => {
       await loaded();
       fireEvent.click(screen.getByRole('button', { name: 'Large tiles' }));
       expect(document.querySelector('.sx-explore-grid--stack.sx-pk-gallery')).not.toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Compact square grid' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Compact grid' }));
       expect(document.querySelector('.sx-explore-grid--stack')).toBeNull();
     });
 
-    it('numbers gallery tiles by pack order and keeps removed reels as placeholders', async () => {
+    it('keeps gallery tiles in pack order and removed reels as placeholders', async () => {
       localStorage.setItem('sx.pack.view', 'gallery');
       mocks.api.get.mockResolvedValue({
         pack: makePack({ items: [item(1), item(2, { available: false, post: null }), item(3)], playable_count: 2 }),
@@ -288,7 +289,7 @@ describe('PackPage', () => {
       await loaded();
       expect(screen.getAllByTestId('tile')).toHaveLength(2);
       expect(screen.getByRole('img', { name: 'Reel 2 is unavailable' })).toBeInTheDocument();
-      expect(screen.getAllByTestId('tile').map((tile) => tile.dataset.order)).toEqual(['01', '03']);
+      expect(screen.getAllByTestId('tile').map((tile) => tile.querySelector('button').textContent)).toEqual(['OPEN Reel 1', 'OPEN Reel 3']);
     });
 
     it('shows each reel\'s resolution and runtime, and the pack total', async () => {
@@ -438,7 +439,7 @@ describe('PackPage', () => {
       const liked = await screen.findByRole('button', { name: 'LIKED' });
       expect(mocks.api.put).toHaveBeenCalledWith('/api/packs/pack-1/like');
       expect(liked).toHaveAttribute('aria-pressed', 'true');
-      expect(within(screen.getByLabelText('Pack statistics')).getByText('LIKES').previousSibling).toHaveTextContent('1.5K');
+      expect(liked).toHaveTextContent('1.5K');
 
       fireEvent.click(liked);
       await screen.findByRole('button', { name: 'LIKE' });
@@ -462,7 +463,7 @@ describe('PackPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'SAVE PACK' }));
       const saved = await screen.findByRole('button', { name: 'SAVED PACK' });
       expect(mocks.api.put).toHaveBeenCalledWith('/api/packs/pack-1/save');
-      expect(within(screen.getByLabelText('Pack statistics')).getByText('SAVES').previousSibling).toHaveTextContent('3');
+      expect(saved).toHaveTextContent('3');
       fireEvent.click(saved);
       await screen.findByRole('button', { name: 'SAVE PACK' });
       expect(mocks.api.delete).toHaveBeenCalledWith('/api/packs/pack-1/save');

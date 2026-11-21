@@ -6,17 +6,33 @@ editor had no effect on what was actually submitted, and the two copies of the
 price tables could silently drift. This module is the one place model IDs,
 their human labels, and their pricing rules live. The backend serves it via
 `/api/config`; the frontend renders options and the cost estimator from it.
+
+Prices: the catalog keeps each model's pricing structure (units, resolution
+tiers, multipliers) and a fallback price. The live base price comes from fal's
+pricing API: server/fal_prices.py syncs it hourly and calls
+apply_synced_prices(), which rescales every price field of an entry by
+synced price / fal_base_usd. fal_unit is the unit fal must report ("megapixels"
+or "seconds"); a different unit, or a model fal no longer lists, turns credits
+off for that model instead of charging a wrong price.
 """
 
 from __future__ import annotations
 
+import copy
 import json
+import math
 import re
+from decimal import Decimal
 
 # 2026-10-20: Ray-2 Flash reframe replaced by Ray 3.2 reframe (per-resolution rates).
-PRICING_VERSION = "2026-10-20"
+# 2026-11-20: Bytedance 6k and 8k targets added at fal's listed rates.
+# 2026-11-20: MiniMax H3 Max and LTX 2.5 reframe added at fal's listed rates.
+PRICING_VERSION = "2026-11-20"
 PRICING_VERIFIED_AT = "2026-09-13"
 RAY_3_2_PRICING_VERIFIED_AT = "2026-10-20"
+NEW_REFRAME_PRICING_VERIFIED_AT = "2026-11-20"
+# fal raised the LoRA endpoint from 0.0024075 (found by the live price sync work).
+LTX_LORA_PRICING_VERIFIED_AT = "2026-11-20"
 
 # ---------------------------------------------------------------------------
 # Video outpainting models
@@ -31,6 +47,8 @@ VIDEO_OUTPAINT = [
     {
         "label": "LTX 2.3 Quality",
         "model": "fal-ai/ltx-2.3-quality/outpaint",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.0024075",
         "pricing_kind": "per_mp",
         "price": 0.0024075,
         "unit_price_usd": "0.0024075",
@@ -42,21 +60,35 @@ VIDEO_OUTPAINT = [
         "constraints": {"fps": 24, "min_frames": 9, "max_frames": 481, "resolutions": ["480p", "720p", "1080p"]},
         "resolutions": {"480p": 480, "720p": 720, "1080p": 1080},
         "default_resolution": "720p",
+        "aspect_ratios": ["1:1", "16:9", "9:16"],
+        "fal_fields": {
+            "output_resolution": ["resolutions", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios"],
+        },
+        "fal_frames": "num_frames",
     },
     {
         "label": "LTX 2.3 Quality + LoRA",
         "model": "fal-ai/ltx-2.3-quality/outpaint/lora",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.0027075",
         "pricing_kind": "per_mp",
-        "price": 0.0024075,
-        "unit_price_usd": "0.0024075",
+        "price": 0.0027075,
+        "unit_price_usd": "0.0027075",
         "credit_enabled": True,
         "pricing_version": PRICING_VERSION,
-        "pricing_verified_at": PRICING_VERIFIED_AT,
+        "pricing_verified_at": LTX_LORA_PRICING_VERIFIED_AT,
         "pricing_source": "https://fal.ai/models/fal-ai/ltx-2.3-quality/outpaint/lora",
         "rounding_rule": "ceil total generated megapixel-frames to a whole megapixel-frame",
         "constraints": {"fps": 24, "min_frames": 9, "max_frames": 481, "resolutions": ["480p", "720p", "1080p"], "max_loras": 3},
         "resolutions": {"480p": 480, "720p": 720, "1080p": 1080},
         "default_resolution": "720p",
+        "aspect_ratios": ["1:1", "16:9", "9:16"],
+        "fal_fields": {
+            "output_resolution": ["resolutions", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios"],
+        },
+        "fal_frames": "num_frames",
     },
     {
         # Replaces fal-ai/luma-dream-machine/ray-2-flash/reframe, which fal
@@ -64,6 +96,8 @@ VIDEO_OUTPAINT = [
         # requested output resolution; the source must be 10 s or less.
         "label": "Luma Ray 3.2 Reframe",
         "model": "luma/agent/ray/v3.2/reframe",
+        "fal_unit": "seconds",
+        "fal_base_usd": "0.03",
         "pricing_kind": "per_second",
         "price": 0.36,
         "unit_price_usd": "0.36",
@@ -81,24 +115,94 @@ VIDEO_OUTPAINT = [
         },
         "aspect_ratios": ["3:4", "4:3", "1:1", "9:16", "16:9", "21:9"],
         "max_source_seconds": 10,
+        "fal_fields": {
+            "resolution": ["resolution_rates", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios", "constraints.aspect_ratios"],
+        },
     },
     {
-        "label": "Wan VACE 14B",
-        "model": "fal-ai/wan-vace-14b/outpainting",
+        # Billed per second generated. fal splits longer sources into
+        # overlapping windows and bills the overlap too, so credit quotes stop
+        # at CREDIT_MAX_SECONDS, where one window covers the whole source.
+        "label": "MiniMax H3 Max Reframe",
+        "model": "minimax/h3-max/reframe-video",
+        "fal_unit": "units",
+        "fal_base_usd": "0.05",
         "pricing_kind": "per_second",
         "price": 0.08,
         "unit_price_usd": "0.08",
-        "resolution_rates": {"480p": "0.04", "580p": "0.06", "720p": "0.08"},
-        "default_resolution": "720p",
+        "resolution_rates": {"480p": "0.05", "768p": "0.08", "1080p": "0.16"},
+        "default_resolution": "768p",
+        "credit_enabled": True,
+        "credit_max_seconds": 10,
+        "pricing_version": PRICING_VERSION,
+        "pricing_verified_at": NEW_REFRAME_PRICING_VERIFIED_AT,
+        "pricing_source": "https://fal.ai/models/minimax/h3-max/reframe-video",
+        "rounding_rule": "ceil source duration to whole seconds",
+        "constraints": {
+            "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"],
+            "resolutions": ["480p", "768p", "1080p"],
+            "max_source_seconds": 300,
+        },
+        "aspect_ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"],
+        "max_source_seconds": 300,
+        "fal_fields": {
+            "resolution": ["resolution_rates", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios", "constraints.aspect_ratios"],
+        },
+    },
+    {
+        # Billed per second of input video at the output resolution. Takes no
+        # prompt; placement anchors the source inside the square.
+        "label": "LTX 2.5 Reframe",
+        "model": "lightricks/ltx-2.5/reframe",
+        "fal_unit": "units",
+        "fal_base_usd": "0.1",
+        "pricing_kind": "per_second",
+        "price": 0.2,
+        "unit_price_usd": "0.2",
+        "resolution_rates": {"720p": "0.10", "1080p": "0.20"},
+        "default_resolution": "1080p",
         "credit_enabled": True,
         "pricing_version": PRICING_VERSION,
-        "pricing_verified_at": PRICING_VERIFIED_AT,
-        "pricing_source": "https://fal.ai/models/fal-ai/wan-vace-14b/outpainting",
-        "rounding_rule": "bill explicit output frames as (frames - 1) / 16 seconds",
-        "constraints": {"fps": 16, "min_frames": 17, "max_frames": 241, "resolutions": ["480p", "580p", "720p"], "max_expand_ratio_per_side": 1.0},
-        "aspect_ratios": ["1:1", "16:9", "9:16"],
+        "pricing_verified_at": NEW_REFRAME_PRICING_VERIFIED_AT,
+        "pricing_source": "https://fal.ai/models/lightricks/ltx-2.5/reframe",
+        "rounding_rule": "ceil source duration to whole seconds",
+        "constraints": {
+            "aspect_ratios": ["1:1", "4:5", "5:4", "9:16", "16:9"],
+            "resolutions": ["720p", "1080p"],
+            "anchors": ["center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right"],
+        },
+        "aspect_ratios": ["1:1", "4:5", "5:4", "9:16", "16:9"],
+        "fal_fields": {
+            "resolution": ["resolution_rates", "constraints.resolutions"],
+            "aspect_ratio": ["aspect_ratios", "constraints.aspect_ratios"],
+        },
     },
 ]
+
+
+# ESTIMATED, pending the approved LTX 2.3 probe jobs: the canvas LTX 2.3
+# renders per output_resolution and aspect_ratio. Square is side x side as
+# billed today; the wide and tall sizes assume the short side stays at the
+# resolution and the long side rounds up to a multiple of 32.
+LTX_23_CANVAS = {
+    "480p": {"1:1": (480, 480), "16:9": (864, 480), "9:16": (480, 864)},
+    "720p": {"1:1": (720, 720), "16:9": (1280, 720), "9:16": (720, 1280)},
+    "1080p": {"1:1": (1080, 1080), "16:9": (1920, 1080), "9:16": (1080, 1920)},
+}
+
+
+def ltx_canvas(resolution: str, aspect: str, side: int) -> tuple[int, int]:
+    """(width, height) LTX 2.3 renders at *resolution* and *aspect*; side x side if unknown."""
+    return LTX_23_CANVAS.get(resolution, {}).get(aspect, (side, side))
+
+
+def short_side_dims(side: int, width: int, height: int) -> tuple[int, int]:
+    """(width, height) with the short side at *side* and the shape of width x height."""
+    if width >= height:
+        return math.ceil(side * width / max(1, height)), side
+    return side, math.ceil(side * height / max(1, width))
 
 
 # ---------------------------------------------------------------------------
@@ -113,9 +217,11 @@ VIDEO_UPSCALE = [
     {
         "label": "Bytedance Upscaler",
         "model": "fal-ai/bytedance-upscaler/upscale/video",
+        "fal_unit": "seconds",
+        "fal_base_usd": "0.0072",
         "pricing_kind": "per_second",
-        "base_rates": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288},
-        "base_rates_usd": {"1080p": "0.0072", "2k": "0.0144", "4k": "0.0288"},
+        "base_rates": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288, "6k": 0.0574, "8k": 0.1148},
+        "base_rates_usd": {"1080p": "0.0072", "2k": "0.0144", "4k": "0.0288", "6k": "0.0574", "8k": "0.1148"},
         "fps_multiplier": {"30fps": 1.0, "60fps": 2.0},
         "tier_multiplier": {"fast": 1.0, "standard": 1.0, "pro": 10.0},
         "credit_enabled": True,
@@ -123,11 +229,18 @@ VIDEO_UPSCALE = [
         "pricing_verified_at": PRICING_VERIFIED_AT,
         "pricing_source": "https://fal.ai/models/fal-ai/bytedance-upscaler/upscale/video",
         "rounding_rule": "ceil source duration to whole seconds",
-        "constraints": {"resolutions": ["1080p", "2k", "4k"], "frame_rates": ["30fps", "60fps"], "tiers": ["fast", "standard", "pro"]},
+        "constraints": {"resolutions": ["1080p", "2k", "4k", "6k", "8k"], "frame_rates": ["30fps", "60fps"], "tiers": ["fast", "standard", "pro"]},
+        "fal_fields": {
+            "target_resolution": ["base_rates", "base_rates_usd", "constraints.resolutions"],
+            "target_fps": ["fps_multiplier", "constraints.frame_rates"],
+            "enhancement_tier": ["tier_multiplier", "constraints.tiers"],
+        },
     },
     {
         "label": "SeedVR2 Video",
         "model": "fal-ai/seedvr/upscale/video",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.001",
         "pricing_kind": "per_mp",
         "price": 0.001,
         "unit_price_usd": "0.001",
@@ -136,8 +249,9 @@ VIDEO_UPSCALE = [
         "pricing_verified_at": PRICING_VERIFIED_AT,
         "pricing_source": "https://fal.ai/models/fal-ai/seedvr/upscale/video",
         "rounding_rule": "exact output megapixel-frames; final credit charge rounds up",
-        "constraints": {"target_resolutions": ["720p", "1080p", "2160p"]},
-        "resolutions": {"720p": 720, "1080p": 1080, "2160p": 2160},
+        "constraints": {"target_resolutions": ["720p", "1080p", "1440p", "2160p"]},
+        "resolutions": {"720p": 720, "1080p": 1080, "1440p": 1440, "2160p": 2160},
+        "fal_fields": {"target_resolution": ["resolutions", "constraints.target_resolutions"]},
     },
 ]
 
@@ -153,6 +267,8 @@ IMAGE_OUTPAINT = [
     {
         "label": "Image Apps Outpaint",
         "model": "fal-ai/image-apps-v2/outpaint",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.035",
         "pricing_kind": "per_mp",
         "price": 0.035,
         "unit_price_usd": "0.035",
@@ -174,6 +290,8 @@ IMAGE_UPSCALE = [
     {
         "label": "Clarity Upscaler",
         "model": "fal-ai/clarity-upscaler",
+        "fal_unit": "megapixels",
+        "fal_base_usd": "0.03",
         "pricing_kind": "per_mp",
         "price": 0.03,
         "unit_price_usd": "0.03",
@@ -196,6 +314,155 @@ DEFAULT_VIDEO_MODELS = {
     "outpaint_vid": VIDEO_OUTPAINT[0]["model"],
     "upscale_vid": VIDEO_UPSCALE[0]["model"],
 }
+
+
+_CATALOGS = (VIDEO_OUTPAINT, VIDEO_UPSCALE, IMAGE_OUTPAINT, IMAGE_UPSCALE)
+# The code prices, kept so a sync result is always applied to them, never on
+# top of an earlier sync.
+_CODE_CATALOGS = tuple(tuple(entry for entry in catalog) for catalog in _CATALOGS)
+
+
+def synced_entries() -> list[dict]:
+    """Stock entries whose price comes from the fal sync (credit-priced ones)."""
+    return [entry for catalog in _CODE_CATALOGS for entry in catalog if entry.get("fal_unit")]
+
+
+def _price_text(value: Decimal) -> str:
+    return format(value.quantize(Decimal("1e-10")).normalize(), "f")
+
+
+def _synced_entry(entry: dict, synced: dict | None) -> dict:
+    """The entry priced from one sync record (see server/fal_prices.py)."""
+    if not synced or not entry.get("fal_unit"):
+        return entry
+    if synced.get("status") != "ok":
+        return {**entry, "credit_enabled": False}
+    unit_price = Decimal(str(synced["unit_price"]))
+    base = Decimal(entry["fal_base_usd"])
+
+    def scaled(value) -> Decimal:
+        # The ratio first: tiers are exact multiples of the base (2x, 0.75x),
+        # so a change keeps them exact.
+        return unit_price * (Decimal(str(value)) / base)
+
+    out = {**entry}
+    if "unit_price_usd" in entry:
+        out["unit_price_usd"] = _price_text(scaled(entry["unit_price_usd"]))
+        out["price"] = float(out["unit_price_usd"])
+    if "resolution_rates" in entry:
+        out["resolution_rates"] = {k: _price_text(scaled(v)) for k, v in entry["resolution_rates"].items()}
+    if "base_rates_usd" in entry:
+        out["base_rates_usd"] = {k: _price_text(scaled(v)) for k, v in entry["base_rates_usd"].items()}
+        out["base_rates"] = {k: float(v) for k, v in out["base_rates_usd"].items()}
+    if synced.get("synced_at"):
+        out["pricing_verified_at"] = str(synced["synced_at"])[:10]
+    return out
+
+
+def _accepts(field: dict, value) -> bool:
+    """Whether a fal input field (a server/fal_schemas.py snapshot) takes one catalog option."""
+    if "enum" in field:
+        return str(value) in {str(option) for option in field["enum"]}
+    digits = re.match(r"\d+(\.\d+)?", str(value))
+    if digits is None:
+        return True
+    number = float(digits.group())
+    return field.get("minimum", number) <= number <= field.get("maximum", number)
+
+
+def _option_tables(entry: dict, paths: list[str]):
+    """The (parent, key) of each option table a "fal_fields" path names."""
+    for path in paths:
+        parent = entry
+        *heads, last = path.split(".")
+        for head in heads:
+            parent = parent.get(head) or {}
+        if last in parent:
+            yield parent, last
+
+
+def unsupported_options(entry: dict, schema: dict | None) -> dict[str, list[str]]:
+    """Catalog options fal's input schema no longer accepts, by fal field."""
+    fields = (schema or {}).get("fields") or {}
+    out = {}
+    for name, paths in (entry.get("fal_fields") or {}).items():
+        if name not in fields:
+            continue
+        offered = []
+        for parent, key in _option_tables(entry, paths):
+            offered += [value for value in parent[key] if value not in offered]
+        rejected = [str(value) for value in offered if not _accepts(fields[name], value)]
+        if rejected:
+            out[name] = rejected
+    return out
+
+
+def _schema_entry(entry: dict, schema: dict | None) -> dict:
+    """The entry limited to what fal's input schema accepts (see server/fal_schemas.py).
+
+    Options fal dropped are removed, frame limits follow fal's, and an entry left
+    without an option in some table loses credits. New fal options are not added:
+    they have no price here yet.
+    """
+    if not schema or not (entry.get("fal_fields") or entry.get("fal_frames")):
+        return entry
+    out = copy.deepcopy(entry)
+    for name, rejected in unsupported_options(entry, schema).items():
+        for parent, key in _option_tables(out, entry["fal_fields"][name]):
+            table = parent[key]
+            if isinstance(table, dict):
+                parent[key] = {k: v for k, v in table.items() if str(k) not in rejected}
+            else:
+                parent[key] = [v for v in table if str(v) not in rejected]
+            if not parent[key]:
+                out["credit_enabled"] = False
+    if out.get("default_resolution"):
+        options = out.get("resolutions") or out.get("resolution_rates") or {}
+        if options and out["default_resolution"] not in options:
+            out["default_resolution"] = next(iter(options))
+    frames = ((schema.get("fields") or {}).get(entry.get("fal_frames") or "")) or {}
+    constraints = out.get("constraints") or {}
+    if "minimum" in frames and "min_frames" in constraints:
+        constraints["min_frames"] = int(frames["minimum"])
+    if "maximum" in frames and "max_frames" in constraints:
+        constraints["max_frames"] = int(frames["maximum"])
+    return out
+
+
+_synced_prices: dict[str, dict] = {}
+_fal_schemas: dict[str, dict] = {}
+
+
+def _rebuild() -> None:
+    # Each entry is replaced whole, so a reader sees an old or a new entry, never a mix.
+    for catalog, code in zip(_CATALOGS, _CODE_CATALOGS):
+        for index, entry in enumerate(code):
+            entry = _schema_entry(entry, _fal_schemas.get(entry["model"]))
+            catalog[index] = _synced_entry(entry, _synced_prices.get(entry["model"]))
+
+
+def apply_synced_prices(prices: dict[str, dict]) -> None:
+    """Price the catalogs from fal sync records keyed by model id; {} restores the code prices."""
+    global _synced_prices
+    _synced_prices = dict(prices)
+    _rebuild()
+
+
+def apply_fal_schemas(schemas: dict[str, dict]) -> None:
+    """Limit the catalogs' options to fal's input schemas keyed by model id; {} restores the code options."""
+    global _fal_schemas
+    _fal_schemas = dict(schemas)
+    _rebuild()
+
+
+def frame_limits(model_id: str, default: tuple[int, int]) -> tuple[int, int]:
+    """(min, max) frames fal accepts for a stock video outpaint model."""
+    mid = (model_id or "").lower()
+    for entry in VIDEO_OUTPAINT:
+        if entry["model"].lower() == mid:
+            constraints = entry.get("constraints") or {}
+            return int(constraints.get("min_frames", default[0])), int(constraints.get("max_frames", default[1]))
+    return default
 
 
 def video_outpaint_catalog() -> list[dict]:
@@ -294,7 +561,7 @@ def custom_entry(model_id: str, kind: str) -> dict:
             "credit_enabled": False,
             "cost_note": "Estimate only — pull live pricing via MODEL INFO before rendering.",
             "requirements": "A saved personal Fal key; source clip is uploaded by the pipeline.",
-            "expects": "Sends {video_url, prompt, aspect_ratio: '1:1'}; expects a video URL back. "
+            "expects": "Sends {video_url, prompt, aspect_ratio: <the chosen shape>}; expects a video URL back. "
                        "Models with a different input schema may reject the job — check MODEL INFO.",
         }
     if kind == "image_upscale":
@@ -397,26 +664,37 @@ def parse_custom_args(raw, *, limit_keys: int = 20, limit_str: int = 2000) -> di
     return out
 
 
-def estimate_outpaint_cost(model_id: str, *, duration: float, resolution: str | None = None) -> tuple[str, float]:
+def _estimate_entries(catalog: list[dict], mid: str) -> list[dict]:
+    """The exact catalog entry when there is one, else the loose matches.
+
+    Exact first, so the LTX LoRA id is not priced as the base LTX id it contains.
+    """
+    exact = [entry for entry in catalog if entry["model"].lower() == mid]
+    return exact or [entry for entry in catalog if entry["model"].lower() in mid or mid in entry["model"].lower()]
+
+
+def estimate_outpaint_cost(
+    model_id: str, *, duration: float, resolution: str | None = None, aspect: str = "1:1",
+) -> tuple[str, float]:
     """Return (label, estimated USD) for a video outpaint job.
 
     Mirrors pipeline/video_worker.py's inline math but from this single
     catalog, so the frontend estimator and the worker agree.
     """
     mid = (model_id or "").lower()
-    for entry in VIDEO_OUTPAINT:
-        if entry["model"].lower() in mid or mid in entry["model"].lower():
-            if entry["pricing_kind"] == "per_second":
-                rate = entry["price"]
-                rates = entry.get("resolution_rates")
-                if rates:
-                    rate = float(rates.get(resolution or entry.get("default_resolution"), rate))
-                return entry["label"], (duration if duration > 0 else 5.0) * rate
-            # per_mp
-            w = entry["resolutions"].get(resolution or entry.get("default_resolution"), 720)
-            frames = int(duration * 24) if duration > 0 else 121
-            mp = (w * w * frames) / 1000000.0
-            return entry["label"], mp * entry["price"]
+    for entry in _estimate_entries(VIDEO_OUTPAINT, mid):
+        if entry["pricing_kind"] == "per_second":
+            rate = entry["price"]
+            rates = entry.get("resolution_rates")
+            if rates:
+                rate = float(rates.get(resolution or entry.get("default_resolution"), rate))
+            return entry["label"], (duration if duration > 0 else 5.0) * rate
+        # per_mp
+        res = resolution or entry.get("default_resolution")
+        w, h = ltx_canvas(res, aspect, entry["resolutions"].get(res, 720))
+        frames = int(duration * 24) if duration > 0 else 121
+        mp = (w * h * frames) / 1000000.0
+        return entry["label"], mp * entry["price"]
     # Generic fallback matching the worker's default branch. Unknown ids are
     # user-supplied customs — label them as such so metrics stay truthful.
     dur_calc = duration if duration > 0 else 5.0
@@ -434,23 +712,26 @@ def estimate_upscale_cost(
     bytedance_res: str = "4k",
     bytedance_fps: str = "30fps",
     bytedance_tier: str = "fast",
+    shape: tuple[int, int] = (1, 1),
 ) -> tuple[str, float]:
-    """Return (label, estimated USD) for a video fal.ai upscale job."""
+    """Return (label, estimated USD) for a video fal.ai upscale job.
+
+    *shape* is (width, height) of the clip sent to the upscaler.
+    """
     mid = (model_id or "").lower()
-    for entry in VIDEO_UPSCALE:
-        if entry["model"].lower() in mid or mid in entry["model"].lower():
-            if entry["pricing_kind"] == "per_second":
-                if "bytedance" in mid:
-                    base = entry["base_rates"].get(bytedance_res, 0.0288)
-                    rate = base * entry["fps_multiplier"].get(bytedance_fps, 1.0) * entry["tier_multiplier"].get(bytedance_tier, 1.0)
-                    return f"Bytedance ({bytedance_res}, {bytedance_fps}, {bytedance_tier})", (duration if duration > 0 else 5.0) * rate
-                dur_calc = duration if duration > 0 else 5.0
-                return entry["label"], dur_calc * entry["price"]
-            # per_mp (SeedVR)
-            w = entry["resolutions"].get(seedvr_target, 1080)
-            frames = int(duration * 24) if duration > 0 else 121
-            mp = (w * w * frames) / 1000000.0
-            return entry["label"], mp * entry["price"]
+    for entry in _estimate_entries(VIDEO_UPSCALE, mid):
+        if entry["pricing_kind"] == "per_second":
+            if "bytedance" in mid:
+                base = entry["base_rates"].get(bytedance_res, 0.0288)
+                rate = base * entry["fps_multiplier"].get(bytedance_fps, 1.0) * entry["tier_multiplier"].get(bytedance_tier, 1.0)
+                return f"Bytedance ({bytedance_res}, {bytedance_fps}, {bytedance_tier})", (duration if duration > 0 else 5.0) * rate
+            dur_calc = duration if duration > 0 else 5.0
+            return entry["label"], dur_calc * entry["price"]
+        # per_mp (SeedVR)
+        w, h = short_side_dims(entry["resolutions"].get(seedvr_target, 1080), *shape)
+        frames = int(duration * 24) if duration > 0 else 121
+        mp = (w * h * frames) / 1000000.0
+        return entry["label"], mp * entry["price"]
     dur_calc = duration if duration > 0 else 5.0
     if model_id and model_id.strip():
         return f"CUSTOM({short_name(model_id)})", max(0.08, dur_calc * 0.02)

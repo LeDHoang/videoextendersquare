@@ -9,6 +9,7 @@ import {
   stereoCandidate,
   stereoCropClass,
   stereoEyeSize,
+  stereoFrame,
   stereoLayout,
 } from './mediaFormat.js';
 
@@ -106,12 +107,26 @@ describe('stereo helpers', () => {
     expect(stereoLayout(null)).toBe('mono');
   });
 
-  it('finds exact 2:1 and 1:2 candidates only', () => {
+  it('finds 2:1, 32:9, 1:2 and 9:32 candidates within 1%', () => {
     expect(stereoCandidate(3840, 1920)).toBe('sbs');
     expect(stereoCandidate(1920, 3840)).toBe('tb');
+    expect(stereoCandidate(7680, 2160)).toBe('sbs');
+    expect(stereoCandidate(2160, 7680)).toBe('tb');
+    expect(stereoCandidate(3842, 1920)).toBe('sbs');
     expect(stereoCandidate(1920, 1080)).toBeNull();
-    expect(stereoCandidate(3842, 1920)).toBeNull();
+    expect(stereoCandidate(3900, 1920)).toBeNull();
     expect(stereoCandidate(0, 0)).toBeNull();
+  });
+
+  it('never picks the near-square 9:8 and 8:9 frames by itself', () => {
+    expect(stereoCandidate(2304, 2048)).toBeNull();
+    expect(stereoCandidate(2048, 2304)).toBeNull();
+    expect(stereoFrame(2304, 2048)).toEqual({ layout: 'sbs', manual: true, shape: '9:8' });
+    expect(stereoFrame(2048, 2304)).toEqual({ layout: 'tb', manual: true, shape: '8:9' });
+    expect(stereoFrame(3840, 1920)).toEqual({ layout: 'sbs', manual: false, shape: '2:1' });
+    expect(stereoFrame(2160, 7680)).toEqual({ layout: 'tb', manual: false, shape: '9:32' });
+    expect(stereoFrame(1000, 1000)).toBeNull();
+    expect(stereoFrame(0, 10)).toBeNull();
   });
 
   it('sizes one eye and labels stereo resolutions per eye', () => {

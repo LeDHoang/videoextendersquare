@@ -1,0 +1,5 @@
+<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel">
+  <!-- Faceted crescent, accent star -->
+  <path d="M10.35 4.16L5.99 6.49L3.5 12.5L5.99 18.51L12 21L18.01 18.51L20.47 13.27L16.5 14.5L11.55 12.45L9.5 7.5Z"/>
+  <path d="M18.5 2.5V6.5M16.5 4.5H20.5" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8"/>
+</svg>
