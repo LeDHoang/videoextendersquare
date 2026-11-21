@@ -223,7 +223,7 @@
 
   // URL key of a reel's place, as the 2D explore tile builds it.
   function locationKey(loc) {
-    const slug = (v) => String(v || '').toLowerCase().replace(/[^\w]+|_+/g, '-').replace(/^-+|-+$/g, '');
+    const slug = (v) => String(v || '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
     const city = slug(loc && loc.city);
     if (!city) return '';
     const country = slug(loc.country);

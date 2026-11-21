@@ -41,7 +41,7 @@ const CODEC_OPTIONS = [
 ];
 
 function readableKey(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '').normalize('NFC').trim().toLowerCase();
 }
 
 function shuffled(items) {

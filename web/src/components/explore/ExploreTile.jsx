@@ -11,8 +11,10 @@ export function formatCompactCount(value) {
   return String(count);
 }
 
+// Mirrors location_key() in server/social/geo.py. JS \w is ASCII-only, so spell out
+// Unicode letters and digits or "São Paulo" keys as "s-o-paulo"; NFC folds a decomposed "ã".
 export function locationKey(city, country) {
-  const slug = (value) => String(value || '').toLowerCase().replace(/[^\w]+|_+/g, '-').replace(/^-+|-+$/g, '');
+  const slug = (value) => String(value || '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
   const citySlug = slug(city);
   const countrySlug = slug(country);
   if (!citySlug) return '';
