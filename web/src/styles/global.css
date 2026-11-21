@@ -4871,6 +4871,13 @@ body.sx-vr-active .sx-reels-mount,
   display: flex;
   align-items: center;
   gap: 6px;
+  width: fit-content;
+  text-decoration: none;
+}
+
+.sx-account-popover-credits:hover {
+  color: var(--sx-accent-hi);
+  text-decoration: underline;
 }
 
 /* Account menu row icons; the credits line in the menu head uses a smaller one. */
@@ -5959,7 +5966,7 @@ button.sx-explore-loc-link:hover {
   font-size: var(--sx-t-eyebrow);
 }
 
-.sx-account-popover :is(a, button) {
+.sx-account-popover > :is(a, button) {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -5984,7 +5991,7 @@ button.sx-explore-loc-link:hover {
   color: var(--sx-accent-hi);
 }
 
-.sx-account-popover :is(a, button):hover {
+.sx-account-popover > :is(a, button):hover {
   background: var(--sx-surface-hover);
   color: var(--sx-ink);
 }

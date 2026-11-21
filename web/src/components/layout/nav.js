@@ -42,14 +42,14 @@ export function savedNav(user) {
   return { to: '/profile/' + encodeURIComponent(user.username) + '?tab=saved', label: 'Saved', Icon: IndustrialSavedIcon };
 }
 
-// The account menu: the user's own profile and saved reels, then settings, credits and, for staff, moderation.
+// The account menu: the user's own profile and saved reels, then settings and, for staff, moderation.
+// Credits is not a row: the balance in the menu head links there.
 export function accountNav(user) {
   const profile = '/profile/' + encodeURIComponent(user.username);
   return [
     { to: profile, label: 'Profile', Icon: IndustrialProfileIcon },
     savedNav(user),
     NAV.settings,
-    NAV.credits,
     ...(user.can_moderate ? [NAV.staff] : []),
   ];
 }

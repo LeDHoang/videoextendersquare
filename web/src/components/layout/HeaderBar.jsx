@@ -547,10 +547,10 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                       <div className="sx-account-popover-head">
                         <strong>@{user.username}</strong>
                         <small>{user.display_name}</small>
-                        <span className="sx-account-popover-credits">
+                        <Link className="sx-account-popover-credits" to={NAV.credits.to}>
                           <IndustrialCreditsIcon className="sx-account-menu-icon" />
                           {wallet?.available_credits ?? 0} CREDITS
-                        </span>
+                        </Link>
                       </div>
                       {accountNav(user).map(({ to, label, Icon }) => (
                         <Link key={to} to={to}>{Icon ? <Icon className="sx-account-menu-icon" /> : null}{label}</Link>
