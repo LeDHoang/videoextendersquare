@@ -2126,31 +2126,50 @@
     font-weight: 700;
     letter-spacing: 0.08em;
   }
+  /* Same icon + count line as the pack details bar (.sx-pk-stats in global.css).
+     The row is only as tall as its icons; the margins leave 11px above (with the
+     head's 10px gap) and 13px below (with its 14px padding). */
   .side-stats {
-    margin: 0;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    border: 1px solid var(--sx-rule);
-    border-radius: 0;
-    background: var(--sx-surface);
+    margin: 1px 0 -1px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    height: 20px;
   }
   .side-stats > div {
-    padding: 7px 4px;
-    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
   }
-  .side-stats > div + div {
-    border-left: 1px solid var(--sx-rule);
-  }
   .side-stats dt {
-    font: 600 12px/1 'JetBrains Mono', monospace;
-    color: var(--sx-ink-3);
-    letter-spacing: 0.1em;
+    display: inline-flex;
+  }
+  .side-stats dt svg {
+    width: 20px;
+    height: 20px;
+    flex: none;
+  }
+  .side-stats .side-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .side-stats dd {
-    margin: 4px 0 0;
-    font: 800 13px/1 Archivo, sans-serif;
-    color: var(--sx-ink);
+    margin: 0;
+    font: 700 15px/1 'JetBrains Mono', monospace;
+    color: var(--sx-ink-2);
+  }
+  /* Liked reel: same red-filled heart as the LIKE button. */
+  .side-stats .is-liked svg #edge {
+    fill: var(--sx-accent);
+    stroke: var(--sx-accent);
+  }
+  .side-stats .is-liked dd {
+    color: var(--sx-accent);
   }
   .side-comments {
     flex: 1 0 auto;
@@ -2616,9 +2635,9 @@
         <div class="side-specs" id="sideSpecs"></div>
       </div>
       <dl class="side-stats">
-        <div><dt>LIKES</dt><dd id="sideLikes">0</dd></div>
-        <div><dt>COMMENTS</dt><dd id="sideComms">0</dd></div>
-        <div><dt>VIEWS</dt><dd id="sideViews">0</dd></div>
+        <div title="Likes"><dt>__ICON_LIKE__<span class="side-sr">LIKES</span></dt><dd id="sideLikes">0</dd></div>
+        <div title="Comments"><dt>__ICON_COMMENT__<span class="side-sr">COMMENTS</span></dt><dd id="sideComms">0</dd></div>
+        <div title="Views"><dt>__ICON_VIEW__<span class="side-sr">VIEWS</span></dt><dd id="sideViews">0</dd></div>
       </dl>
     </header>
     <div class="side-comments" id="sideCommentsSlot"></div>
@@ -7513,6 +7532,10 @@
     function specChip(label, value) {
       const chip = document.createElement('span');
       chip.className = 'side-chip spec';
+      if (!label) {
+        chip.textContent = value;
+        return chip;
+      }
       const key = document.createElement('b');
       key.textContent = label;
       chip.append(key, document.createTextNode(' ' + value));
@@ -7529,7 +7552,11 @@
       if (width > 0 && height > 0 && stereoLayout !== 'mono') {
         sideSpecs.appendChild(specChip('3D', stereoLayout === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM'));
       }
-      if (durationMs > 0 && !isImageItem(item)) sideSpecs.appendChild(specChip('DUR', formatTime(durationMs / 1000)));
+      if (durationMs > 0 && !isImageItem(item)) {
+        const duration = specChip('', formatTime(durationMs / 1000));
+        duration.title = 'Duration';
+        sideSpecs.appendChild(duration);
+      }
     }
     // Everything in the column that depends on WHICH reel is playing.
     function renderSidePanel() {
@@ -7616,6 +7643,7 @@
       const item = videoData[idx];
       const unavailable = !item || item.available === false;
       sideLikes.textContent = unavailable ? '0' : fmtCount(item.likes);
+      sideLikes.parentElement.classList.toggle('is-liked', !unavailable && !!item._liked);
       sideViews.textContent = unavailable ? '0' : fmtCount(item.views);
       sideComms.textContent = unavailable ? '0' : fmtCount(currentCommentCount());
       if (sideFollow && followPill) {
