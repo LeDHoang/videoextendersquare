@@ -1,5 +1,5 @@
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Eight-tooth chamfered cog, accent hub -->
+  <!-- Eight-tooth chamfered cog, accent octagon hub (same flat-top octagon as the credits coin) -->
   <path d="M18.7 10.2L21.1 10.7L21.1 13.3L18.7 13.8L18.0 15.4L19.3 17.5L17.5 19.3L15.5 18.0L13.8 18.7L13.3 21.1L10.7 21.1L10.2 18.7L8.6 18.0L6.5 19.3L4.7 17.5L6.0 15.4L5.3 13.8L2.9 13.3L2.9 10.7L5.3 10.2L6.0 8.5L4.7 6.5L6.5 4.7L8.5 6.0L10.2 5.3L10.7 2.9L13.3 2.9L13.8 5.3L15.5 6.0L17.5 4.7L19.3 6.5L18.0 8.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="bevel"/>
-  <path d="M12 9.2L14.8 12L12 14.8L9.2 12Z" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8" stroke-linejoin="bevel"/>
+  <path d="M10.67 8.8H13.33L15.2 10.67V13.33L13.33 15.2H10.67L8.8 13.33V10.67Z" stroke="var(--sx-icon-accent, var(--sx-accent, #ff3b1f))" stroke-width="1.8" stroke-linejoin="bevel"/>
 </svg>

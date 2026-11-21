@@ -4868,7 +4868,21 @@ body.sx-vr-active .sx-reels-mount,
   font-weight: 700;
   color: var(--sx-accent);
   margin-top: 4px;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Account menu row icons; the credits line in the menu head uses a smaller one. */
+.sx-account-menu-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.sx-account-popover-credits .sx-account-menu-icon {
+  width: 14px;
+  height: 14px;
 }
 
 /* Enter VR: purple, icon and label; the label drops below 1024px so the bar keeps its room. */
@@ -5948,6 +5962,7 @@ button.sx-explore-loc-link:hover {
 .sx-account-popover :is(a, button) {
   display: flex;
   align-items: center;
+  gap: 10px;
   box-sizing: border-box;
   text-decoration: none;
   width: 100%;

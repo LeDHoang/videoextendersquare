@@ -5,6 +5,7 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
+import { IndustrialCreditsIcon, IndustrialLogoutIcon } from '../icons/index.jsx';
 import IconButton from '../ui/IconButton.jsx';
 import { HEADER_NAV, NAV, accountNav } from './nav.js';
 
@@ -547,11 +548,16 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
                         <strong>@{user.username}</strong>
                         <small>{user.display_name}</small>
                         <span className="sx-account-popover-credits">
-                          ⚡ {wallet?.available_credits ?? 0} CREDITS
+                          <IndustrialCreditsIcon className="sx-account-menu-icon" />
+                          {wallet?.available_credits ?? 0} CREDITS
                         </span>
                       </div>
-                      {accountNav(user).map(({ to, label }) => <Link key={to} to={to}>{label}</Link>)}
-                      <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>Log out</button>
+                      {accountNav(user).map(({ to, label, Icon }) => (
+                        <Link key={to} to={to}>{Icon ? <Icon className="sx-account-menu-icon" /> : null}{label}</Link>
+                      ))}
+                      <button type="button" onClick={async () => { await logout(); navigate('/reels'); }}>
+                        <IndustrialLogoutIcon className="sx-account-menu-icon" />Log out
+                      </button>
                     </div>
                   ) : null}
                 </>

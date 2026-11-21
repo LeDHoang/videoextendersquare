@@ -4,9 +4,11 @@ import {
   IndustrialExploreIcon,
   IndustrialImageIcon,
   IndustrialMessageIcon,
+  IndustrialProfileIcon,
   IndustrialReelsIcon,
   IndustrialSavedIcon,
   IndustrialSettingsIcon,
+  IndustrialStaffIcon,
   IndustrialUploadIcon,
   IndustrialVideoIcon,
 } from '../icons/index.jsx';
@@ -26,7 +28,7 @@ export const NAV = {
   video: { to: '/video', label: 'Video', Icon: IndustrialVideoIcon, adminOnly: true },
   compare: { to: '/compare', label: 'Compare', Icon: IndustrialCompareIcon, adminOnly: true },
   settings: { to: '/settings/profile', label: 'Settings', Icon: IndustrialSettingsIcon },
-  staff: { to: '/moderation', label: 'Staff' },
+  staff: { to: '/moderation', label: 'Staff', Icon: IndustrialStaffIcon },
 };
 
 export const HEADER_NAV = [NAV.reels, NAV.explore];
@@ -44,7 +46,7 @@ export function savedNav(user) {
 export function accountNav(user) {
   const profile = '/profile/' + encodeURIComponent(user.username);
   return [
-    { to: profile, label: 'Profile' },
+    { to: profile, label: 'Profile', Icon: IndustrialProfileIcon },
     savedNav(user),
     NAV.settings,
     NAV.credits,
