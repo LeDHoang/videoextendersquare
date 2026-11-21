@@ -226,6 +226,7 @@ function shellRequest(path, query) {
   if (path.startsWith('/api/reels/tags/')) {
     return { videos: SHELL_REELS.slice(3), related_tags: [{ slug: 'rain', name: '#rain' }, { slug: 'tokyo', name: '#tokyo' }] };
   }
+  if (path === '/api/reels/locations') return { locations: [{ slug: 'tokyo--japan', name: 'Tokyo, Japan' }] };
   if (path.startsWith('/api/reels/locations/')) {
     return { videos: SHELL_REELS.slice(5), location: { name: 'Tokyo' }, related_locations: [{ slug: 'osaka', name: 'Osaka' }] };
   }
