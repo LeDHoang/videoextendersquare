@@ -5425,23 +5425,6 @@ button.sx-explore-loc-link:hover {
   }
 }
 
-/* Pack order + runtime (counts down while the preview plays), top-right. */
-.sx-explore-order {
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  z-index: 4;
-  padding: 5px 8px;
-  background: var(--sx-spot);
-  border: 1px solid var(--sx-ink);
-  color: var(--sx-on-spot);
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
-  letter-spacing: 0.08em;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
 /* Legacy 3D posts without a 2D rendition serve the raw stereo file: crop
    every cover-fit view of it to the left eye. */
 .sx-stereo-crop-sbs {

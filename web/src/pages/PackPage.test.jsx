@@ -27,8 +27,8 @@ vi.mock('../components/explore/ExploreTile.jsx', async () => {
   const actual = await vi.importActual('../components/explore/ExploreTile.jsx');
   return {
     ...actual,
-    default: ({ video, onOpen, onShare, orderLabel }) => (
-      <article data-testid="tile" data-order={orderLabel}>
+    default: ({ video, onOpen, onShare }) => (
+      <article data-testid="tile">
         <button type="button" onClick={() => onOpen(video)}>OPEN {video.title}</button>
         <button type="button" onClick={() => onShare(video)}>SHARE {video.title}</button>
       </article>
@@ -280,7 +280,7 @@ describe('PackPage', () => {
       expect(document.querySelector('.sx-explore-grid--stack')).toBeNull();
     });
 
-    it('numbers gallery tiles by pack order and keeps removed reels as placeholders', async () => {
+    it('keeps gallery tiles in pack order and removed reels as placeholders', async () => {
       localStorage.setItem('sx.pack.view', 'gallery');
       mocks.api.get.mockResolvedValue({
         pack: makePack({ items: [item(1), item(2, { available: false, post: null }), item(3)], playable_count: 2 }),
@@ -288,7 +288,7 @@ describe('PackPage', () => {
       await loaded();
       expect(screen.getAllByTestId('tile')).toHaveLength(2);
       expect(screen.getByRole('img', { name: 'Reel 2 is unavailable' })).toBeInTheDocument();
-      expect(screen.getAllByTestId('tile').map((tile) => tile.dataset.order)).toEqual(['01', '03']);
+      expect(screen.getAllByTestId('tile').map((tile) => tile.querySelector('button').textContent)).toEqual(['OPEN Reel 1', 'OPEN Reel 3']);
     });
 
     it('shows each reel\'s resolution and runtime, and the pack total', async () => {

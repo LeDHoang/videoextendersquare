@@ -1781,11 +1781,11 @@
   .reels-pack-pill:hover { border-color:var(--sx-accent); color:var(--sx-accent); background:color-mix(in srgb, var(--sx-accent) 14%, transparent); }
   .reels-pack-pill:focus-visible { outline:2px solid var(--sx-ink); outline-offset:2px; }
   .reels-pack-pill.primary { border-color:var(--sx-accent); background:var(--sx-accent); color:var(--sx-on-accent); box-shadow:0 0 18px color-mix(in srgb, var(--sx-accent) 35%, transparent); }
+  .reels-pack-pill.primary svg { --sx-accent:currentColor; }
   .reels-pack-pill.primary:hover { background:var(--sx-accent-hi); color:var(--sx-on-accent); }
   .reels-pack-pill.is-saved { border-color:var(--sx-accent); color:var(--sx-accent); }
   .reels-pack-pill.is-saved svg path { fill:currentColor; }
   .reels-pack-title-pill { min-width:0; max-width:48%; }
-  .reels-pack-pill-k { opacity:.72; margin-right:6px; }
   .reels-pack-card { position:absolute; inset:0; z-index:12; display:flex; padding:clamp(14px,4%,34px) 76px; overflow:auto; color:var(--sx-ink); background:radial-gradient(ellipse at 10% 105%,color-mix(in srgb, var(--sx-accent) 22%, transparent),transparent 55%),linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px) 0 0/32px 32px,linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px) 0 0/32px 32px,rgba(8,9,10,.93); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
   .reels-pack-card-inner { position:relative; margin:var(--pk-m,auto); width:min(600px,100%); padding:clamp(18px,4vmin,32px); border:1px solid var(--sx-rule); border-top:3px solid var(--sx-accent); background:rgba(13,14,16,.96); box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 70px color-mix(in srgb, var(--sx-accent) 10%, transparent); text-align:left; animation:sx-pack-rise .32s cubic-bezier(.2,.8,.2,1) both; }
   .reels-pack-card-inner::before, .reels-pack-card-inner::after { content:""; position:absolute; bottom:-1px; width:18px; height:18px; pointer-events:none; border:0 solid var(--sx-accent); }
@@ -1875,7 +1875,6 @@
   @media (max-width:720px) {
     .reels-pack-bar { right:68px; gap:5px; }
     .reels-pack-pill { min-height:44px; padding:8px 10px; font-size:12px; }
-    .reels-pack-pill-label { display:none; }
     .reels-pack-title-pill { max-width:42%; }
     .reels-pack-queue { inset:50px 64px auto 16px; max-height:calc(100% - 72px); }
     .reels-pack-card { padding:62px 64px 14px 14px; }
@@ -2287,9 +2286,9 @@
   </div>
 
   <div class="reels-pack-bar" id="packModeBar" hidden>
-    <button type="button" class="reels-pack-pill reels-pack-title-pill primary" id="packQueueBtn" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5"/><rect x="13.5" y="4" width="6.5" height="6.5"/><rect x="4" y="13.5" width="6.5" height="6.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5"/></svg><span><span class="reels-pack-pill-k">PACK</span><span id="packPosition">1/1</span></span></button>
-    <button type="button" class="reels-pack-pill" id="packSaveBtn" aria-pressed="false" aria-label="Save pack"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="miter" aria-hidden="true"><path d="M6 3.5h12v17l-6-4.5-6 4.5z"/></svg><span class="reels-pack-pill-label" id="packSaveLabel">SAVE PACK</span></button>
-    <button type="button" class="reels-pack-pill" id="packShareBtn" aria-label="Share pack"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="5.5" r="2.4"/><circle cx="18" cy="18.5" r="2.4"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4"/></svg><span class="reels-pack-pill-label">SHARE PACK</span></button>
+    <button type="button" class="reels-pack-pill reels-pack-title-pill primary" id="packQueueBtn" aria-haspopup="dialog">__ICON_REEL_PACK__<span id="packPosition">1/1</span></button>
+    <button type="button" class="reels-pack-pill" id="packSaveBtn" aria-pressed="false" aria-label="Save pack" title="Save pack">__ICON_SAVE__</button>
+    <button type="button" class="reels-pack-pill" id="packShareBtn" aria-label="Share pack" title="Share pack">__ICON_SHARE__</button>
   </div>
 
   <div class="reels-video-wrap" id="videoWrap">
@@ -2708,7 +2707,6 @@
     const packStagePrimaryLabel = document.getElementById('packStagePrimaryLabel');
     const packStagePrimaryIco = document.getElementById('packStagePrimaryIco');
     const packStageCount = document.getElementById('packStageCount');
-    const packSaveLabel = document.getElementById('packSaveLabel');
     const packStageSecondary = document.getElementById('packStageSecondary');
     const packStageExplore = document.getElementById('packStageExplore');
     const packQueuePanel = document.getElementById('packQueuePanel');
@@ -4023,10 +4021,13 @@
       const pack = packState.pack || {};
       if (packModeBar) packModeBar.hidden = false;
       if (packPosition) packPosition.textContent = (videoData.length ? idx + 1 : 0) + '/' + videoData.length;
-      if (packQueueBtn) packQueueBtn.title = 'Open ' + (pack.title || 'Reel Pack') + ' queue';
+      if (packQueueBtn) {
+        packQueueBtn.title = 'Open ' + (pack.title || 'Reel Pack') + ' queue';
+        packQueueBtn.setAttribute('aria-label', 'Reel Pack ' + (packPosition ? packPosition.textContent : '') + ', open queue');
+      }
       const saveLabel = pack.saved_by_me ? 'SAVED PACK' : 'SAVE PACK';
-      if (packSaveLabel) packSaveLabel.textContent = saveLabel;
       if (packSaveBtn) {
+        packSaveBtn.title = pack.saved_by_me ? 'Saved pack' : 'Save pack';
         packSaveBtn.classList.toggle('is-saved', !!pack.saved_by_me);
         packSaveBtn.setAttribute('aria-pressed', pack.saved_by_me ? 'true' : 'false');
       }

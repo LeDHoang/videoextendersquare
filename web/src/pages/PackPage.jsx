@@ -513,7 +513,6 @@ export default function PackPage() {
                   <ExploreTile
                     key={item.id}
                     video={item.post}
-                    orderLabel={String(index + 1).padStart(2, '0')}
                     onOpen={() => playItem(index)}
                     onShare={(post) => messaging.openShare({ ...post, kind: 'reel' })}
                   />

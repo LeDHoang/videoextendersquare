@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { clientId } from '../../hooks/MessagingContext.jsx';
 import { formatCompactCount, locationKey } from '../explore/ExploreTile.jsx';
-import { LocationIcon, LikeIcon, ViewIcon, CommentIcon, ShareIcon, EditIcon } from '../icons/index.jsx';
+import { LocationIcon, LikeIcon, ViewIcon, CommentIcon, ShareIcon, EditIcon, ReelPackIcon } from '../icons/index.jsx';
 import { stereoCropClass } from '../../utils/mediaFormat.js';
 
 export function packCoverMembers(pack) {
@@ -233,7 +233,12 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
         </span>
       ) : null}
       {!canEdit ? (
-        <span className="sx-explore-kind">▦ REEL PACK{pack?.reel_count ? ' · ' + pack.reel_count : ''}</span>
+        <span className="sx-explore-kind">
+          <span className="sx-explore-kind-image" role="img" aria-label={pack?.reel_count ? `Reel Pack, ${pack.reel_count} reels` : 'Reel Pack'}>
+            <ReelPackIcon className="sx-explore-kind-icon" />
+            {pack?.reel_count || null}
+          </span>
+        </span>
       ) : null}
       {place ? (
         placeKey ? (

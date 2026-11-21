@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LocationIcon, LikeIcon, ViewIcon, CommentIcon, IndustrialImageIcon, ShareIcon, EditIcon, TrashIcon } from '../icons/index.jsx';
-import { formatClock, formatDuration, stereoCropClass, stereoLayout } from '../../utils/mediaFormat.js';
+import { stereoCropClass, stereoLayout } from '../../utils/mediaFormat.js';
 import { tileAspect } from '../../utils/aspect.js';
 
 export function formatCompactCount(value) {
@@ -75,8 +75,7 @@ function queueVideoLoad(start, urgent) {
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/* orderLabel (e.g. "01") adds a top-right badge with the reel's runtime, which counts down while it autoplays. */
-export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete, onShare, orderLabel = '' }) {
+export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, onDelete, onShare }) {
   const navigate = useNavigate();
   const isImage = video.media_type === 'image';
   const wrapRef = useRef(null);
@@ -85,7 +84,6 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const [preload, setPreload] = useState('metadata');
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
-  const [remaining, setRemaining] = useState(null);
   const visibleRef = useRef(false);
   const loadJobRef = useRef(null);
 
@@ -165,14 +163,6 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
     tryPlay();
   }, [src]);
 
-  // Whole seconds left in the playing preview; the state only changes when the shown second does.
-  const syncRemaining = (event) => {
-    const el = event.currentTarget;
-    if (Number.isFinite(el.duration) && el.duration > 0) {
-      setRemaining(Math.max(0, Math.round(el.duration - el.currentTime)));
-    }
-  };
-
   const commentCount = video.comments_count ?? video.comments?.length ?? 0;
   const place = [video.location?.city, video.location?.country].filter(Boolean).join(', ');
   const placeKey = locationKey(video.location?.city, video.location?.country);
@@ -190,7 +180,6 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const badge = [video.visibility === 'private' ? 'PRIVATE' : '', contextTag ? '#' + contextTag : imageMark, stereoLayout(video) !== 'mono' ? '3D' : ''].filter(Boolean);
   const crop = stereoCropClass(video);
   const withCrop = (name) => (crop ? `${name} ${crop}` : name);
-  const runtime = isImage ? '' : remaining !== null ? formatClock(remaining) : formatDuration(video.duration_ms);
 
   return (
     <article
@@ -255,11 +244,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
                 loadJobRef.current?.release();
               }}
               onCanPlay={tryPlay}
-              onLoadedMetadata={(event) => {
-                syncRemaining(event);
-                loadJobRef.current?.release();
-              }}
-              onTimeUpdate={syncRemaining}
+              onLoadedMetadata={() => loadJobRef.current?.release()}
               onError={() => {
                 loadJobRef.current?.release();
                 if (src !== video.url) setSrc(video.url);
@@ -334,13 +319,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
           {video.title}
         </span>
       ) : null}
-      {/* Both chips sit top-right, so a pack tile folds the kind into its order chip. */}
-      {badge.length && !orderLabel ? <span className="sx-explore-kind">{joinChip(badge)}</span> : null}
-      {orderLabel ? (
-        <span className="sx-explore-order" aria-hidden="true">
-          {joinChip([orderLabel, ...badge, runtime].filter(Boolean))}
-        </span>
-      ) : null}
+      {badge.length ? <span className="sx-explore-kind">{joinChip(badge)}</span> : null}
       {place ? (
         placeKey ? (
           <button

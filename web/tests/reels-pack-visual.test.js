@@ -18,7 +18,7 @@ test('PackCover uses a persistent REEL PACK label and never raw video urls', () 
 test('PackTile is an autoplaying labeled tile with creator, share, and owner affordances', () => {
   const src = read('web/src/components/packs/PackTile.jsx');
   assert.match(src, /role="button"/);
-  assert.match(src, /REEL PACK/);
+  assert.match(src, /ReelPackIcon/);
   assert.match(src, /sx-explore-stats/);
   assert.match(src, /sx-explore-creator/);
   assert.match(src, /sx-explore-share/);
