@@ -1812,6 +1812,7 @@ def search_suggestions(
         ]
 
     tag_rows = reels_router.tag_suggestions(q=query, limit=bounded, db=db).get("tags", [])
+    location_rows = reels_router.location_suggestions(q=query, limit=bounded, db=db).get("locations", []) if key else []
 
     posts = []
     if key:
@@ -1834,5 +1835,6 @@ def search_suggestions(
         "strategy": "social-search-v1",
         "users": user_rows,
         "tags": tag_rows,
+        "locations": location_rows,
         "posts": posts,
     }

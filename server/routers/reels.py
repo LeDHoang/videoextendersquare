@@ -10,6 +10,7 @@ import os
 import random
 import re
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -360,8 +361,13 @@ def _tag_slug(value: str) -> str:
 
 
 def _search_key(value: str) -> str:
-    """Collapse punctuation so queries like sci fi match sci-fi."""
-    return "".join(character for character in str(value or "").casefold() if character.isalnum())
+    """Collapse punctuation so queries like sci fi match sci-fi.
+
+    NFKD splits accents off as combining marks, which are not alnum, so
+    "sao paulo" matches "São Paulo" and "zurich" matches "Zürich".
+    """
+    folded = unicodedata.normalize("NFKD", str(value or "").casefold())
+    return "".join(character for character in folded if character.isalnum())
 
 
 def _safe_int(value) -> int:
@@ -629,10 +635,10 @@ def _related_location_rows(slug: str, catalog: dict[str, dict], limit: int = 5) 
 
 
 def _rank_location_catalog(catalog: dict[str, dict], q: str = "", limit: int = 8) -> list[dict]:
-    query = str(q or "").casefold().strip()
+    query = _search_key(q)
     rows = list(catalog.values())
     if query:
-        rows = [row for row in rows if query in (row["name"] or "").casefold()]
+        rows = [row for row in rows if query in _search_key(row["name"])]
     rows.sort(key=lambda row: (-row["reel_count"], row["name"]))
     return [
         {key: row[key] for key in ("name", "slug", "city", "country", "reel_count", "views", "likes")}
@@ -2472,17 +2478,22 @@ def get_reel_tag(
     }
 
 
-@router.get("/locations", dependencies=[HEAVY_READ])
-def list_reel_locations(q: str = "", limit: int = 8):
-    """Return ranked location suggestions for discovery UI."""
+def location_suggestions(q: str = "", limit: int = 8, db: Session | None = None) -> dict:
+    """Ranked place suggestions; callers holding a request ``db`` pass it (see tag_suggestions)."""
     bounded_limit = max(1, min(int(limit), 20))
-    hidden_paths = unavailable_media_paths_for_viewer(None)
-    catalog = _location_catalog([item for item in _scan_cached() if item["rel_path"] not in hidden_paths])
+    hidden_paths = unavailable_media_paths_for_viewer(None, db=db)
+    catalog = _location_catalog([item for item in _scan_cached(db) if item["rel_path"] not in hidden_paths], db)
     return {
         "query": q,
         "strategy": "reel-count-v1",
         "locations": _rank_location_catalog(catalog, q, bounded_limit),
     }
+
+
+@router.get("/locations", dependencies=[HEAVY_READ])
+def list_reel_locations(q: str = "", limit: int = 8):
+    """Return ranked location suggestions for discovery UI."""
+    return location_suggestions(q, limit)
 
 
 _EARTH_ASSET_DIR = Path(__file__).resolve().parent.parent.parent / "web" / "public" / "assets"

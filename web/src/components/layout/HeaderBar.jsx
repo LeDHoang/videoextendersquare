@@ -5,7 +5,7 @@ import { useAuth } from '../../hooks/AuthContext.jsx';
 import { useMessaging } from '../../hooks/MessagingContext.jsx';
 import { useWallet } from '../../hooks/WalletContext.jsx';
 import { AnimatedEchoLogo } from '../icons/AnimatedEchoLogo.jsx';
-import { IndustrialCreditsIcon, IndustrialLogoutIcon } from '../icons/index.jsx';
+import { IndustrialCreditsIcon, IndustrialLogoutIcon, LocationIcon } from '../icons/index.jsx';
 import IconButton from '../ui/IconButton.jsx';
 import { HEADER_NAV, NAV, accountNav } from './nav.js';
 
@@ -82,6 +82,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
   const [tagSuggestions, setTagSuggestions] = useState([]);
   const [userSuggestions, setUserSuggestions] = useState([]);
   const [postSuggestions, setPostSuggestions] = useState([]);
+  const [placeSuggestions, setPlaceSuggestions] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchBusy, setSearchBusy] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -97,6 +98,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
 
   const selectable = [
     ...userSuggestions.map((item) => ({ type: 'user', item })),
+    ...placeSuggestions.map((item) => ({ type: 'place', item })),
     ...tagSuggestions.map((item) => ({ type: 'tag', item })),
     ...postSuggestions.map((item) => ({ type: 'post', item })),
   ];
@@ -159,12 +161,14 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
           setTagSuggestions(response.tags || []);
           setUserSuggestions(response.users || []);
           setPostSuggestions(response.posts || []);
+          setPlaceSuggestions(response.locations || []);
         })
         .catch(() => {
           if (sequence === requestSequence.current) {
             setTagSuggestions([]);
             setUserSuggestions([]);
             setPostSuggestions([]);
+            setPlaceSuggestions([]);
           }
         })
         .finally(() => {
@@ -189,6 +193,8 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
       closeSearchAndNavigate('/profile/' + encodeURIComponent(result.item.username));
     } else if (result.type === 'tag') {
       closeSearchAndNavigate('/explore/tag/' + encodeURIComponent(result.item.slug));
+    } else if (result.type === 'place') {
+      closeSearchAndNavigate('/explore/location/' + encodeURIComponent(result.item.slug));
     } else {
       const params = new URLSearchParams({
         folder: 'ALL FOLDERS',
@@ -248,7 +254,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
   const renderSearchResults = () => (
     <div className="sx-command-results">
       <div className="sx-command-results-head">
-        <span>{searchVal.trim() ? 'PEOPLE + TAGS + POSTS' : 'POPULAR DISCOVERY'}</span>
+        <span>{searchVal.trim() ? 'PEOPLE + PLACES + TAGS + POSTS' : 'POPULAR DISCOVERY'}</span>
         <span>{searchBusy ? 'SCANNING…' : resultCount + ' FOUND'}</span>
       </div>
       <div id="sx-global-search-results" role="listbox">
@@ -273,9 +279,33 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
             <span className="sx-command-result-arrow" aria-hidden="true">↗</span>
           </button>
         ))}
+        {placeSuggestions.length ? <div className="sx-command-group-label">PLACES</div> : null}
+        {placeSuggestions.map((place, placeIndex) => {
+          const index = userSuggestions.length + placeIndex;
+          return (
+            <button
+              type="button"
+              id={'sx-search-result-' + index}
+              key={'place-' + place.slug}
+              role="option"
+              aria-selected={index === activeIndex}
+              className={'sx-command-result ' + (index === activeIndex ? 'sx-active' : '')}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => openResult({ type: 'place', item: place })}
+            >
+              <span className="sx-command-result-mark"><LocationIcon /></span>
+              <span className="sx-command-result-copy">
+                <strong>{place.name}</strong>
+                <small>{place.reel_count + ' POSTS · ' + compactCount(place.views) + ' VIEWS'}</small>
+              </span>
+              <span className="sx-command-result-arrow" aria-hidden="true">↗</span>
+            </button>
+          );
+        })}
         {tagSuggestions.length ? <div className="sx-command-group-label">TAGS</div> : null}
         {tagSuggestions.map((tag, tagIndex) => {
-          const index = userSuggestions.length + tagIndex;
+          const index = userSuggestions.length + placeSuggestions.length + tagIndex;
           return (
             <button
               type="button"
@@ -299,7 +329,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
         })}
         {postSuggestions.length ? <div className="sx-command-group-label">POSTS</div> : null}
         {postSuggestions.map((post, postIndex) => {
-          const index = userSuggestions.length + tagSuggestions.length + postIndex;
+          const index = userSuggestions.length + placeSuggestions.length + tagSuggestions.length + postIndex;
           return (
             <button
               type="button"
@@ -322,7 +352,7 @@ export default function HeaderBar({ onToggleSidebar, sidebarOpen = false, hidden
           );
         })}
       </div>
-      {!searchBusy && searchVal.trim() && !resultCount ? <div className="sx-command-empty">NO PEOPLE, TAGS, OR POSTS FOUND</div> : null}
+      {!searchBusy && searchVal.trim() && !resultCount ? <div className="sx-command-empty">NO PEOPLE, PLACES, TAGS, OR POSTS FOUND</div> : null}
       {searchVal.trim() ? (
         <button type="button" className="sx-command-search-all" onMouseDown={(event) => event.preventDefault()} onClick={runContentSearch}>
           <span>⌕ SEARCH ALL POSTS</span>

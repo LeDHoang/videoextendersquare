@@ -71,3 +71,36 @@ def test_location_feed_lists_post_for_every_key_form(place_client, case):
         assert [video["path"] for video in body["videos"]] == [post.media_path], key
         assert body["location"]["slug"] == case["slug"]
         assert body["location"]["reel_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("place", "query"),
+    [
+        ({"city": "São Paulo", "country": "Brazil"}, "sao paulo"),
+        ({"city": "São Paulo", "country": "Brazil"}, "são paulo"),
+        ({"city": unicodedata.normalize("NFD", "São Paulo"), "country": "Brazil"}, "Sao Paulo"),
+        ({"city": "Zürich", "country": "Switzerland"}, "zurich"),
+    ],
+)
+def test_search_without_accents_finds_the_place(place_client, place, query):
+    client, add_post = place_client
+    post = add_post(place)
+    slug = location_key(place["city"], place["country"])
+
+    feed = client.get("/api/reels", params={"search": query, "codec": "all"}).json()
+    assert [video["path"] for video in feed["videos"]] == [post.media_path]
+
+    ranked = client.get("/api/reels/locations", params={"q": query}).json()["locations"]
+    assert [row["slug"] for row in ranked] == [slug]
+
+    suggested = client.get("/api/search/suggestions", params={"q": query}).json()["locations"]
+    assert [row["slug"] for row in suggested] == [slug]
+
+
+def test_place_search_still_misses_other_places(place_client):
+    client, add_post = place_client
+    add_post({"city": "São Paulo", "country": "Brazil"})
+
+    assert client.get("/api/reels", params={"search": "zurich", "codec": "all"}).json()["videos"] == []
+    assert client.get("/api/reels/locations", params={"q": "zurich"}).json()["locations"] == []
+    assert client.get("/api/search/suggestions", params={"q": "zurich"}).json()["locations"] == []
