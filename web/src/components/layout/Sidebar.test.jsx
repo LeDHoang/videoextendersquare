@@ -121,6 +121,28 @@ describe('Sidebar beta navigation', () => {
   });
 });
 
+describe('Sidebar engine probes', () => {
+  const renderAs = (role) => {
+    mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'alex', role } });
+    mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
+    render(
+      <MemoryRouter>
+        <Sidebar isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>
+    );
+  };
+
+  it('hides the live status card from a regular user', () => {
+    renderAs('user');
+    expect(screen.queryByText(/ENG PROBES/)).toBeNull();
+  });
+
+  it.each(['moderator', 'admin'])('shows the live status card to a %s', (role) => {
+    renderAs(role);
+    expect(screen.getByText(/ENG PROBES/)).toBeTruthy();
+  });
+});
+
 // Node's own `localStorage` shadows jsdom's and is unusable without a flag, so give tests a real one.
 function memoryStorage() {
   const data = new Map();

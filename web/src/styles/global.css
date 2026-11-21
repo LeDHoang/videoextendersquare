@@ -6175,13 +6175,21 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-explore-owner-actions button {
-  min-height: 30px;
-  padding: 0 9px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
   border: none;
   background: color-mix(in srgb, var(--sx-bg) 86%, transparent);
   color: var(--sx-ink);
   cursor: pointer;
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
+}
+
+.sx-explore-action-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .sx-explore-owner-actions button:last-child {
@@ -6202,7 +6210,7 @@ button.sx-explore-loc-link:hover {
   display: inline-grid;
   place-items: center;
   border: none;
-  background: color-mix(in srgb, var(--sx-bg) 86%, transparent);
+  background: var(--sx-media-scrim);
   color: var(--sx-accent-hi);
   cursor: pointer;
 }
@@ -8628,6 +8636,38 @@ body:has(.sx-message-launcher) .sx-shell { padding-bottom: 64px; }
 
 .sx-pf-actions .sx-xh-btn {
   padding: 10px 16px;
+}
+
+.sx-pf-actions .sx-pf-icon-btn {
+  width: 44px;
+  padding: 0;
+  justify-content: center;
+}
+
+.sx-pf-icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+/* The share glyph is drawn in fixed white; on header buttons it follows the text colour so it
+   reads on paper and on the inverted hover. */
+.sx-pf-icon [stroke='#f2f3f5'] {
+  stroke: currentColor;
+}
+
+.sx-pf-icon [fill='#f2f3f5'] {
+  fill: currentColor;
+}
+
+.sx-pf-icon [fill='#121315'] {
+  fill: none;
+}
+
+/* On the accent button the accent strokes take the text colour so they stay visible. */
+.sx-xh-btn--primary .sx-pf-icon {
+  --sx-icon-accent: currentColor;
+  --sx-accent: currentColor;
 }
 
 .sx-pf-quiet {

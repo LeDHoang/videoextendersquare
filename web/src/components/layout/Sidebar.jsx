@@ -19,8 +19,9 @@ const MODEL_FIELDS = [
 const FOCUSABLE = 'a[href], button:not(:disabled), select:not(:disabled), textarea:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 export default function Sidebar({ health, config, setModels, isOpen, onClose }) {
-  const showDevTools = !hideDevTools();
   const { user } = useAuth();
+  // Engine probes and telemetry are operator detail: staff only, and only where the build shows dev tools.
+  const showDevTools = !hideDevTools() && (user?.role === 'admin' || user?.role === 'moderator');
   const { wallet, falKey } = useWallet();
   const [theme, setTheme] = useTheme();
   const [modelDraft, setModelDraft] = useState({});

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LocationIcon, LikeIcon, ViewIcon, CommentIcon, IndustrialImageIcon, ShareIcon } from '../icons/index.jsx';
+import { LocationIcon, LikeIcon, ViewIcon, CommentIcon, IndustrialImageIcon, ShareIcon, EditIcon, TrashIcon } from '../icons/index.jsx';
 import { formatClock, formatDuration, stereoCropClass, stereoLayout } from '../../utils/mediaFormat.js';
 import { tileAspect } from '../../utils/aspect.js';
 
@@ -298,7 +298,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
               }}
               aria-label={'Edit ' + label}
             >
-              EDIT
+              <EditIcon className="sx-explore-action-icon" />
             </button>
           ) : null}
           {onDelete ? (
@@ -310,7 +310,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
               }}
               aria-label={'Delete ' + label}
             >
-              DELETE
+              <TrashIcon className="sx-explore-action-icon" />
             </button>
           ) : null}
         </span>
