@@ -111,13 +111,36 @@ describe('Sidebar beta navigation', () => {
   it('hides Image, Video and Compare from a regular user', () => {
     mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'alex', role: 'user' } });
     mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
+    expect(navLabels()).toEqual(['Reels', 'Explore', 'Messages', 'Upload', 'Saved', 'Settings']);
+  });
+
+  it('shows no Saved or Settings to a guest', () => {
+    mockUseAuth.mockReturnValue({ user: null });
+    mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
     expect(navLabels()).toEqual(['Reels', 'Explore', 'Messages', 'Upload']);
+  });
+
+  it.each([
+    ['/profile/alex?tab=saved', true],
+    ['/profile/alex', false],
+  ])('links Saved to the own SAVED tab, active at %s: %s', (path, active) => {
+    mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'alex', role: 'user' } });
+    mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <Sidebar isOpen={true} onClose={vi.fn()} />
+      </MemoryRouter>
+    );
+    const saved = screen.getByRole('link', { name: 'Saved' });
+    expect(saved.getAttribute('href')).toBe('/profile/alex?tab=saved');
+    expect(saved.classList.contains('sx-active')).toBe(active);
+    expect(screen.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('/settings/profile');
   });
 
   it('shows Image, Video and Compare to an admin', () => {
     mockUseAuth.mockReturnValue({ user: { id: 'u1', username: 'boss', role: 'admin' } });
     mockUseWallet.mockReturnValue({ wallet: null, falKey: { configured: false, hint: '' } });
-    expect(navLabels()).toEqual(['Reels', 'Explore', 'Messages', 'Upload', 'Image', 'Video', 'Compare']);
+    expect(navLabels()).toEqual(['Reels', 'Explore', 'Messages', 'Upload', 'Image', 'Video', 'Compare', 'Saved', 'Settings']);
   });
 });
 
