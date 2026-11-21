@@ -32,6 +32,8 @@ export { ViewIcon } from './ViewIcon.jsx';
 export { CommentIcon } from './CommentIcon.jsx';
 export { ShareIcon } from './ShareIcon.jsx';
 export { ReelPackIcon } from './ReelPackIcon.jsx';
+export { SaveIcon } from './SaveIcon.jsx';
+export { ReportIcon } from './ReportIcon.jsx';
 export { EditIcon } from './EditIcon.jsx';
 export { VrIcon } from './VrIcon.jsx';
 export * from './MediaIcons.jsx';

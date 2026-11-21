@@ -545,7 +545,6 @@ button.sx-explore-loc-link:hover {
 .sx-pk-play,
 .sx-pk-kind,
 .sx-pk-status,
-.sx-pk-act,
 .sx-pk-foot,
 .sx-pk-dialog,
 .sx-pk-dialog textarea,
@@ -555,7 +554,7 @@ button.sx-explore-loc-link:hover {
   border-radius: var(--sx-radius);
 }
 /* These paint their own corners with children, so they clip to the radius. */
-.sx-pk-stats,
+.sx-pk-actions,
 .sx-au {
   overflow: hidden;
   border-radius: var(--sx-radius);

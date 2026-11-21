@@ -152,9 +152,10 @@ describe('PackPage', () => {
       expect(screen.getByRole('link', { name: '#neon' })).toHaveAttribute('href', '/explore?search=%23neon');
       expect(document.querySelector('.sx-pack-location')).toHaveTextContent('Hanoi, Vietnam');
       const stats = screen.getByLabelText('Pack statistics');
-      expect(within(stats).getByText('LIKES').previousSibling).toHaveTextContent('1.5K');
-      expect(within(stats).getByText('REELS').previousSibling).toHaveTextContent('3');
-      expect(within(stats).getByText('SAVES').previousSibling).toHaveTextContent('2');
+      expect(within(stats).getByText('REELS').closest('div')).toHaveTextContent('3');
+      expect(within(stats).queryByText('LIKES')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'LIKE' })).toHaveTextContent('1.5K');
+      expect(screen.getByRole('button', { name: 'SAVE PACK' })).toHaveTextContent('2');
       expect(screen.getByText('PUBLIC')).toBeInTheDocument();
       expect(screen.getByText('3 OF 3 REELS AVAILABLE')).toBeInTheDocument();
     });
@@ -438,7 +439,7 @@ describe('PackPage', () => {
       const liked = await screen.findByRole('button', { name: 'LIKED' });
       expect(mocks.api.put).toHaveBeenCalledWith('/api/packs/pack-1/like');
       expect(liked).toHaveAttribute('aria-pressed', 'true');
-      expect(within(screen.getByLabelText('Pack statistics')).getByText('LIKES').previousSibling).toHaveTextContent('1.5K');
+      expect(liked).toHaveTextContent('1.5K');
 
       fireEvent.click(liked);
       await screen.findByRole('button', { name: 'LIKE' });
@@ -462,7 +463,7 @@ describe('PackPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'SAVE PACK' }));
       const saved = await screen.findByRole('button', { name: 'SAVED PACK' });
       expect(mocks.api.put).toHaveBeenCalledWith('/api/packs/pack-1/save');
-      expect(within(screen.getByLabelText('Pack statistics')).getByText('SAVES').previousSibling).toHaveTextContent('3');
+      expect(saved).toHaveTextContent('3');
       fireEvent.click(saved);
       await screen.findByRole('button', { name: 'SAVE PACK' });
       expect(mocks.api.delete).toHaveBeenCalledWith('/api/packs/pack-1/save');
