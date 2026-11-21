@@ -10088,15 +10088,15 @@ a.sx-ps-btn { text-decoration: none; }
 .sx-pk-stats {
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 36px;
+  gap: 20px;
+  height: 45px;
   margin: 0;
 }
 
 .sx-pk-stats > div {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .sx-pk-stats dt {
@@ -10106,12 +10106,12 @@ a.sx-ps-btn { text-decoration: none; }
 .sx-pk-stats dd {
   margin: 0;
   color: var(--sx-ink-2);
-  font: 700 0.8125rem/1 var(--sx-font-mono);
+  font: 700 1rem/1 var(--sx-font-mono);
 }
 
 .sx-pk-icon {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   flex: none;
 }
 
@@ -10127,14 +10127,14 @@ a.sx-ps-btn { text-decoration: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-width: 40px;
-  height: 34px;
-  padding: 0 12px;
+  gap: 8px;
+  min-width: 50px;
+  height: 43px;
+  padding: 0 15px;
   border: 0;
   background: transparent;
   color: var(--sx-ink);
-  font: 700 0.8125rem/1 var(--sx-font-mono);
+  font: 700 1rem/1 var(--sx-font-mono);
   cursor: pointer;
   transition: background var(--sx-duration-fast) var(--sx-ease-out), color var(--sx-duration-fast) var(--sx-ease-out);
 }

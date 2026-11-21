@@ -1,6 +1,9 @@
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <line x1="2" y1="12" x2="22" y2="12" stroke="#ff3b1f" stroke-width="1.8" stroke-linecap="square"/>
-  <polygon points="4.5,12 8,7.5 16,7.5 19.5,12 16,16.5 8,16.5" stroke="#ff3b1f" stroke-width="1.8" stroke-linejoin="bevel" fill="#121315"/>
-  <polygon points="12,9.2 14.8,12 12,14.8 9.2,12" fill="#ff3b1f"/>
-  <circle cx="12" cy="12" r="0.9" fill="#f2f3f5"/>
+  <!-- The eye from the Echo Glass logo (svg/echo-glass.svg), static, scaled 0.875
+       about the centre. The pupil uses the #121315 cut-out colour so light theme
+       recolours it to paper. -->
+  <polygon points="1.5,12 6.75,6.3 17.25,6.3 22.5,12 17.25,17.7 6.75,17.7" fill="#f2f3f5"/>
+  <polygon points="12,6.3 17.7,12 12,17.7 6.3,12" fill="#ff3b1f"/>
+  <polygon points="12,9.4 14.6,12 12,14.6 9.4,12" fill="#121315"/>
+  <rect x="13.2" y="8.85" width="1.4" height="1.4" fill="#f2f3f5"/>
 </svg>
