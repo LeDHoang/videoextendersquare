@@ -5204,8 +5204,11 @@ body.sx-vr-active .sx-reels-mount,
 /* A reel tile takes its post's shape (--tile-aspect, set by ExploreTile from
    tileAspect); pack tiles and skeletons fall back to a square. useMasonry
    places tiles in columns. The tile is a size container for the short-tile
-   query below. */
+   query below. Chips scale with the window, not the tile, so every tile on
+   screen has the same chip size: 24px on a phone, 30px at 1000px, 34px wide. */
 .sx-explore-tile {
+  --sx-chip: clamp(24px, 20.4px + 0.96vw, 34px);
+  --sx-chip-font: clamp(11px, calc(var(--sx-chip) * 0.4), 14px);
   position: relative;
   aspect-ratio: var(--tile-aspect, 1);
   container: sx-tile / size;
@@ -5299,8 +5302,8 @@ body.sx-vr-active .sx-reels-mount,
   gap: 10px;
   background: var(--sx-media-scrim);
   color: var(--sx-on-media);
-  font-size: 0.85rem;
-  height: 30px;
+  font-size: calc(var(--sx-chip-font) * 1.0625);
+  height: var(--sx-chip);
   padding: 3px 9px;
   pointer-events: none;
   white-space: nowrap;
@@ -5311,17 +5314,7 @@ body.sx-vr-active .sx-reels-mount,
 
 @media (max-width: 480px) {
   .sx-explore-stats {
-    font-size: var(--sx-t-eyebrow);
     gap: 7px;
-  }
-  .sx-explore-loc {
-    font-size: var(--sx-t-eyebrow);
-  }
-  .sx-explore-title {
-    font-size: var(--sx-t-eyebrow);
-  }
-  .sx-explore-kind {
-    font-size: var(--sx-t-eyebrow);
   }
 }
 
@@ -5342,8 +5335,8 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 .sx-explore-stat-icon {
-  width: 16px;
-  height: 16px;
+  width: calc(var(--sx-chip, 30px) * 8 / 15);
+  height: calc(var(--sx-chip, 30px) * 8 / 15);
   display: block;
   flex-shrink: 0;
 }
@@ -5365,8 +5358,8 @@ body.sx-vr-active .sx-reels-mount,
   gap: 4px;
   background: var(--sx-media-scrim);
   color: var(--sx-on-media);
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
-  height: 30px;
+  font: 800 var(--sx-chip-font)/1 var(--sx-font-mono);
+  height: var(--sx-chip);
   padding: 3px 9px 3px 7px;
   pointer-events: none;
   white-space: nowrap;
@@ -5375,7 +5368,7 @@ body.sx-vr-active .sx-reels-mount,
 }
 
 .sx-explore-tile:has(.sx-explore-creator) .sx-explore-loc {
-  top: 42px;
+  top: calc(var(--sx-chip) + 12px);
 }
 
 button.sx-explore-loc-link {
@@ -5404,18 +5397,18 @@ button.sx-explore-loc-link:hover {
 }
 
 /* Cover-title badge, bottom-left above the stats row. One line is the same
-   30px as the other chips; a second line grows it upward. */
+   height as the other chips; a second line grows it upward. */
 .sx-explore-title {
   position: absolute;
   left: 8px;
-  bottom: 42px;
+  bottom: calc(var(--sx-chip) + 12px);
   max-width: calc(100% - 16px);
   background: var(--sx-media-scrim);
   color: var(--sx-on-media);
-  font-size: var(--sx-t-eyebrow);
+  font-size: var(--sx-chip-font);
   font-weight: 700;
-  line-height: 16px;
-  padding: 7px 9px;
+  line-height: calc(var(--sx-chip-font) * 4 / 3);
+  padding: calc((var(--sx-chip) - var(--sx-chip-font) * 4 / 3) / 2) 9px;
   pointer-events: none;
   overflow: hidden;
   display: -webkit-box;
@@ -5466,11 +5459,11 @@ button.sx-explore-loc-link:hover {
   top: 8px;
   background: color-mix(in srgb, var(--sx-accent) 90%, transparent);
   color: var(--sx-on-accent);
-  font-size: var(--sx-t-eyebrow);
+  font-size: var(--sx-chip-font);
   font-weight: 800;
   letter-spacing: 0.08em;
-  height: 30px;
-  line-height: 24px;
+  height: var(--sx-chip);
+  line-height: calc(var(--sx-chip) - 6px);
   padding: 3px 8px;
   pointer-events: none;
 }
@@ -6094,7 +6087,7 @@ button.sx-explore-loc-link:hover {
   background: var(--sx-media-scrim);
   color: var(--sx-on-media);
   cursor: pointer;
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
+  font: 800 var(--sx-chip-font)/1 var(--sx-font-mono);
 }
 
 .sx-explore-creator:hover {
@@ -6104,14 +6097,14 @@ button.sx-explore-loc-link:hover {
 
 .sx-explore-creator img,
 .sx-explore-creator > span {
-  width: 22px;
-  height: 22px;
+  width: calc(var(--sx-chip) - 8px);
+  height: calc(var(--sx-chip) - 8px);
   display: grid;
   place-items: center;
   object-fit: cover;
   border-radius: 50%;
   color: var(--sx-bg);
-  font-size: var(--sx-t-eyebrow);
+  font-size: var(--sx-chip-font);
 }
 
 .sx-explore-creator strong {
@@ -6136,8 +6129,8 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-explore-owner-actions button {
-  width: 30px;
-  height: 30px;
+  width: var(--sx-chip);
+  height: var(--sx-chip);
   padding: 0;
   display: inline-grid;
   place-items: center;
@@ -6148,8 +6141,8 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-explore-action-icon {
-  width: 18px;
-  height: 18px;
+  width: calc(var(--sx-chip) * 0.6);
+  height: calc(var(--sx-chip) * 0.6);
   display: block;
 }
 
@@ -6166,8 +6159,8 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-explore-share button {
-  width: 30px;
-  height: 30px;
+  width: var(--sx-chip);
+  height: var(--sx-chip);
   padding: 0;
   display: inline-grid;
   place-items: center;
@@ -6178,8 +6171,8 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-explore-share-icon {
-  width: 18px;
-  height: 18px;
+  width: calc(var(--sx-chip) * 0.6);
+  height: calc(var(--sx-chip) * 0.6);
   display: block;
 }
 
@@ -6680,10 +6673,6 @@ button.sx-ov-tile:hover { background: var(--sx-surface-3); }
   }
 
 
-
-  .sx-explore-creator {
-    font-size: var(--sx-t-eyebrow);
-  }
 }
 /* ─── Direct messaging (page + compact dock) ─────────────────────────
    "Tactical console" look shared by /messages and the collapsible dock:
@@ -12357,6 +12346,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   .sx-explore-share button::before {
     content: '';
     position: absolute;
-    inset: -7px -3px;
+    inset: calc((var(--sx-chip) - 44px) / 2) -3px;
   }
 }
