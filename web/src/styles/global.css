@@ -993,22 +993,22 @@ button:hover .sx-sidebar-hero-logo,
   margin-top: 8px;
 }
 
-/* 2x2 Navigation Cards */
+/* Navigation: one column of rows, icon then label */
 .sx-sidebar-nav-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .sx-sidebar-nav-card {
-  background: var(--sx-surface-2);
-  border: 1px solid var(--sx-rule-strong);
-  padding: 12px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 10px 12px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 14px;
   text-decoration: none;
   border-radius: 0;
   transition: all 180ms ease;
@@ -1017,14 +1017,18 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-nav-card:hover {
   background: var(--sx-surface-hover);
-  border-color: var(--sx-ink-3);
-  transform: translateY(-1px);
 }
 
 .sx-sidebar-nav-card.sx-active {
   background: var(--sx-surface-3);
-  border-color: var(--sx-accent);
-  box-shadow: inset 0 -2px 0 var(--sx-accent);
+  border-color: var(--sx-rule-strong);
+  box-shadow: inset 2px 0 0 var(--sx-accent);
+}
+
+.sx-sidebar-nav-card .sx-sidebar-icon-svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
 }
 
 .sx-sidebar-nav-icon,
@@ -1049,7 +1053,7 @@ button:hover .sx-sidebar-hero-logo,
 
 .sx-sidebar-nav-label {
   font-family: var(--sx-font-display);
-  font-size: var(--sx-t-eyebrow);
+  font-size: var(--sx-t-body);
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1092,133 +1096,64 @@ button:hover .sx-sidebar-hero-logo,
   color: var(--sx-ink);
 }
 
+/* Colour theme: a nav-style row, a sun or moon, the label, and a switch on the right. */
 .sx-sidebar-theme {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sx-3);
   flex-shrink: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--sx-rule);
 }
 
-/* Horizon theme switch: a sun over a paper-white sky by day, a moon and stars by night. */
-.sx-horizon {
-  position: relative;
-  flex-shrink: 0;
-  width: 132px;
-  height: 44px;
-  padding: 0;
-  overflow: hidden;
-  border: 1.5px solid var(--sx-ink);
-  border-radius: var(--sx-radius);
-  background: var(--sx-surface);
-  cursor: pointer;
-  transition: background-color 500ms var(--sx-ease-in-out);
+.sx-theme-row {
+  width: 100%;
+  font: inherit;
+  text-align: left;
 }
 
-.sx-horizon:focus-visible {
+.sx-theme-row:focus-visible {
   outline: var(--sx-focus-ring);
   outline-offset: var(--sx-focus-offset);
 }
 
-/* The ground: covers whatever has set below the horizon line. */
-.sx-horizon::after {
+.sx-theme-switch {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 34px;
+  height: 18px;
+  border: 1.5px solid var(--sx-ink-2);
+  border-radius: var(--sx-radius);
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+/* The knob: a square that slides right and turns accent when dark is on. */
+.sx-theme-switch::after {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 2px;
+  left: 2px;
+  width: 11px;
   height: 11px;
-  border-top: 1.5px solid var(--sx-ink);
-  background: inherit;
-  z-index: 2;
+  border-radius: 2px;
+  background: var(--sx-ink-2);
+  transition: transform 180ms var(--sx-ease-in-out), background-color 180ms ease;
 }
 
-.sx-horizon-sun,
-.sx-horizon-moon {
-  position: absolute;
-  top: 5px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  z-index: 1;
-  transition: transform 500ms var(--sx-ease-in-out), opacity 500ms var(--sx-ease-in-out);
+.sx-theme-row:hover .sx-theme-switch {
+  border-color: var(--sx-ink);
 }
 
-.sx-horizon-sun {
-  left: 14px;
+.sx-theme-row[aria-checked='true'] .sx-theme-switch {
+  border-color: var(--sx-accent);
+}
+
+.sx-theme-row[aria-checked='true'] .sx-theme-switch::after {
+  transform: translateX(16px);
   background: var(--sx-accent);
 }
 
-.sx-horizon[aria-checked='true'] .sx-horizon-sun {
-  transform: translateY(30px);
-  opacity: 0;
-}
-
-/* An upright crescent: the inset shadow is the lit part. */
-.sx-horizon-moon {
-  right: 14px;
-  box-shadow: inset -6px 0 0 0 var(--sx-ink);
-  transform: translateY(30px);
-  opacity: 0;
-}
-
-.sx-horizon[aria-checked='true'] .sx-horizon-moon {
-  transform: translateY(0);
-  opacity: 1;
-}
-
-.sx-horizon-stars {
-  position: absolute;
-  top: 8px;
-  left: 64px;
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: var(--sx-ink);
-  box-shadow: 10px 10px 0 0 var(--sx-ink), 20px -1px 0 0 var(--sx-ink);
-  opacity: 0;
-  transition: opacity 400ms var(--sx-ease-in-out);
-}
-
-.sx-horizon[aria-checked='true'] .sx-horizon-stars {
-  opacity: 1;
-  transition-delay: 200ms;
-}
-
-.sx-horizon-label {
-  position: absolute;
-  top: 0;
-  height: 30px;
-  line-height: 30px;
-  font-family: var(--sx-font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.15em;
-  color: var(--sx-ink);
-  transition: opacity 300ms var(--sx-ease-in-out);
-}
-
-.sx-horizon-day {
-  right: 14px;
-}
-
-.sx-horizon-night {
-  left: 12px;
-  opacity: 0;
-}
-
-.sx-horizon[aria-checked='true'] .sx-horizon-day {
-  opacity: 0;
-}
-
-.sx-horizon[aria-checked='true'] .sx-horizon-night {
-  opacity: 1;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .sx-horizon,
-  .sx-horizon *,
-  .sx-horizon::after {
+  .sx-theme-switch,
+  .sx-theme-switch::after {
     transition: none;
   }
 }

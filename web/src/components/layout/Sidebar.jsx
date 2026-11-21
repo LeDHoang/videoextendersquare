@@ -4,7 +4,7 @@ import { useWallet } from '../../hooks/WalletContext.jsx';
 import { NavLink, Link, useLocation } from 'react-router-dom';
 import { Button, Field } from '../ui/controls.jsx';
 import { hideDevTools } from '../../utils/devTools.js';
-import { IndustrialCreditsIcon } from '../icons/index.jsx';
+import { IndustrialCreditsIcon, IndustrialMoonIcon, IndustrialSunIcon } from '../icons/index.jsx';
 import { SonarMaze } from '../auth/SonarMaze.jsx';
 import { NAV, SIDEBAR_NAV, savedNav } from './nav.js';
 import { useTheme } from '../../theme.js';
@@ -183,7 +183,7 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
         ) : null}
       </div>
 
-      {/* ─── 2x2 Navigation Grid ────────────────────────────── */}
+      {/* ─── Navigation (one column) ───────────────────────── */}
       <nav className="sx-sidebar-nav-grid" aria-label="Main App Navigation">
         {[
           ...SIDEBAR_NAV.filter((item) => !item.adminOnly || user?.role === 'admin'),
@@ -207,20 +207,17 @@ export default function Sidebar({ health, config, setModels, isOpen, onClose }) 
 
       {/* ─── Colour Theme ─────────────────────────────────── */}
       <div className="sx-sidebar-theme">
-        <span className="sx-sidebar-card-title">APPEARANCE</span>
         <button
           type="button"
           role="switch"
           aria-checked={theme === 'dark'}
           aria-label="Dark theme"
-          className="sx-horizon"
+          className="sx-sidebar-nav-card sx-theme-row"
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
         >
-          <span className="sx-horizon-stars" aria-hidden="true" />
-          <span className="sx-horizon-sun" aria-hidden="true" />
-          <span className="sx-horizon-moon" aria-hidden="true" />
-          <span className="sx-horizon-label sx-horizon-day" aria-hidden="true">DAY</span>
-          <span className="sx-horizon-label sx-horizon-night" aria-hidden="true">NIGHT</span>
+          {theme === 'dark' ? <IndustrialMoonIcon /> : <IndustrialSunIcon />}
+          <span className="sx-sidebar-nav-label">Dark mode</span>
+          <span className="sx-theme-switch" aria-hidden="true" />
         </button>
       </div>
 

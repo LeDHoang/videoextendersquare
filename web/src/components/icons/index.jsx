@@ -22,6 +22,8 @@ export { IndustrialSettingsIcon } from './IndustrialSettingsIcon.jsx';
 export { IndustrialProfileIcon } from './IndustrialProfileIcon.jsx';
 export { IndustrialStaffIcon } from './IndustrialStaffIcon.jsx';
 export { IndustrialLogoutIcon } from './IndustrialLogoutIcon.jsx';
+export { IndustrialSunIcon } from './IndustrialSunIcon.jsx';
+export { IndustrialMoonIcon } from './IndustrialMoonIcon.jsx';
 export { EchoLogo } from './EchoLogo.jsx';
 export { EchoGlassLogo } from './EchoGlassLogo.jsx';
 export { LocationIcon } from './LocationIcon.jsx';
