@@ -278,6 +278,21 @@
     return { action: 'play', arg: i };
   }
 
+  // Search tool row: place chips (route.related) take the right end; the field gets the rest.
+  // Wider than tag chips so "São Paulo, Brazil" fits beside the pin.
+  const PLACE_W = 460;
+  function placeChips(route) {
+    return route && route.section === 'search' ? (route.related || []).slice(0, 2) : [];
+  }
+  function searchBarRect(route) {
+    const n = placeChips(route).length;
+    return n ? Object.assign({}, SEARCH_BAR, { w: SEARCH_BAR.w - n * (PLACE_W + 16) }) : SEARCH_BAR;
+  }
+  function placeChipRect(route, i) {
+    const bar = searchBarRect(route);
+    return { x: bar.x + bar.w + 16 + i * (PLACE_W + 16), y: SEARCH_BAR.y, w: PLACE_W, h: SEARCH_BAR.h };
+  }
+
   function chipRect(i) {
     return { x: 48 + i * (CHIP_W + 16), y: SEARCH_BAR.y, w: CHIP_W, h: SEARCH_BAR.h };
   }
@@ -748,7 +763,7 @@
   function renderSearchBar(ctx, route, field, hover) {
     const T = tokens().hex;
     const f = field || {};
-    const r = SEARCH_BAR;
+    const r = searchBarRect(route);
     const text = f.focused ? f.text : (route.section === 'search' ? route.arg : '');
     drawField(ctx, r, text, 'Search reels, tags, places', !!f.focused, hover === 'search-focus', 100);
     const cx = r.x + 50;
@@ -762,6 +777,12 @@
     ctx.moveTo(cx + 7, cy + 7);
     ctx.lineTo(cx + 19, cy + 19);
     ctx.stroke();
+    placeChips(route).forEach((c, i) => {
+      const cr = placeChipRect(route, i);
+      ctx.font = '600 30px ' + tokens().font.mono;
+      drawButton(ctx, cr, truncate(ctx, c.label, PLACE_W - 120), { hover: hover === 'chip:' + c.path, size: 30, weight: 600 });
+      icon(ctx, 'location', cr.x + 36, cr.y + cr.h / 2, 32, T.ink2);
+    });
   }
 
   function renderChips(ctx, related, hover) {
@@ -1488,7 +1509,10 @@
     }
     if (!route || !GRID_SECTIONS[route.section]) return null;
     if (route.section === 'explore' || route.section === 'search') {
-      if (inRect(SEARCH_BAR, x, y)) return { action: 'search-focus' };
+      const places = placeChips(route);
+      const p = places.findIndex((c, k) => inRect(placeChipRect(route, k), x, y));
+      if (p >= 0) return { action: 'chip', arg: places[p].path };
+      if (inRect(searchBarRect(route), x, y)) return { action: 'search-focus' };
     } else if (route.section === 'profile' || route.section === 'pack') {
       const b = detailButtons(route).find((r) => inRect(r, x, y));
       if (b) return b.disabled ? null : (b.arg === undefined ? { action: b.action } : { action: b.action, arg: b.arg });

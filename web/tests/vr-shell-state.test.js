@@ -166,6 +166,37 @@ test('grid sections load from the API and drop stale replies', async () => {
   assert.equal(s.version, v, 'reply for a popped route does not redraw');
 });
 
+test('search asks for matching places; they become chips to the place feed', async () => {
+  const calls = [];
+  const s = loadShell().create({
+    request: (path, query) => {
+      calls.push([path, { ...query }]);
+      if (path === '/api/reels/locations') return Promise.resolve({ locations: [{ name: 'São Paulo, Brazil', slug: 'são-paulo--brazil' }] });
+      return Promise.resolve({ videos: [reel(1)] });
+    },
+  });
+  s.open('/explore?q=sao+paulo');
+  await tick();
+  assert.deepEqual(calls.find((c) => c[0] === '/api/reels/locations'), ['/api/reels/locations', { q: 'sao paulo', limit: 2 }]);
+  const route = s.getRenderState().route;
+  assert.equal(route.status, 'ready');
+  assert.deepEqual([...route.related.map((c) => c.label + ' ' + c.path)], ['São Paulo, Brazil /explore/location/s%C3%A3o-paulo--brazil']);
+  s.handleHit({ action: 'chip', arg: route.related[0].path });
+  assert.deepEqual({ section: s.getRenderState().route.section, arg: s.getRenderState().route.arg }, { section: 'location', arg: 'são-paulo--brazil' });
+});
+
+test('search still shows reels when the place lookup fails', async () => {
+  const s = loadShell().create({
+    request: (path) => (path === '/api/reels/locations' ? Promise.reject(new Error('x')) : Promise.resolve({ videos: [reel(1)] })),
+  });
+  s.open('/explore?q=cats');
+  await tick();
+  const route = s.getRenderState().route;
+  assert.equal(route.status, 'ready');
+  assert.equal(route.items.length, 1);
+  assert.deepEqual([...route.related], []);
+});
+
 test('scroll is clamped to the grid rows', async () => {
   const s = loadShell().create({ request: () => Promise.resolve({ videos: Array.from({ length: 23 }, (_, i) => reel(i)) }) });
   s.open('/explore');

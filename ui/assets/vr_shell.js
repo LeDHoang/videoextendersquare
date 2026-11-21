@@ -148,7 +148,12 @@
   function sourceFor(route) {
     switch (route.section) {
       case 'explore': return { path: '/api/reels', query: { sort: 'for_you', limit: REEL_PAGE }, paged: true };
-      case 'search': return { path: '/api/reels', query: { search: route.arg, sort: 'for_you', limit: REEL_PAGE }, paged: true };
+      // Search: matching reels, plus up to two matching places as chips beside the field.
+      case 'search': return {
+        path: '/api/reels', query: { search: route.arg, sort: 'for_you', limit: REEL_PAGE }, paged: true,
+        places: { path: '/api/reels/locations', query: { q: route.arg, limit: 2 } },
+        related: (r, pl) => chips(pl && pl.locations, '/explore/location/'),
+      };
       case 'tag': return {
         path: '/api/reels/tags/' + enc(route.arg), query: {},
         related: (r) => chips(r.related_tags, '/explore/tag/'),
@@ -360,7 +365,9 @@
         src.detail ? d.request(src.detail, {}) : null,
         // Highlights are extra: a failed fetch leaves the strip empty, not the page.
         src.highlights ? Promise.resolve().then(() => d.request(src.highlights, {})).catch(() => null) : null,
-      ])).then(([res, det, hl]) => {
+        // So are place matches: a failed fetch leaves the search without chips.
+        src.places ? Promise.resolve().then(() => d.request(src.places.path, src.places.query)).catch(() => null) : null,
+      ])).then(([res, det, hl, pl]) => {
         if (stack.indexOf(route) < 0) return;
         const r = res || {};
         route.items = src.items ? src.items(r) : (Array.isArray(r.videos) ? r.videos : []);
@@ -368,7 +375,7 @@
         route.detail = src.detailOf ? src.detailOf(r, det) : null;
         if (route.section === 'wallet') setCredits(route.detail);
         route.highlights = ((hl && hl.items) || []).filter((p) => p.status === 'published');
-        route.related = src.related ? src.related(r) : [];
+        route.related = src.related ? src.related(r, pl) : [];
         if (src.label) route.label = src.label(r);
         route.status = 'ready';
         if (route.section === 'thread') {

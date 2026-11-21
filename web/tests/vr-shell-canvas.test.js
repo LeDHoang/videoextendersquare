@@ -91,6 +91,21 @@ test('grid: search bar, scroll buttons and tiles resolve with the scroll offset'
   assert.equal(sc.resolveMainHit({ route: { section: 'wallet' } }, c.x + 10, c.y + 10), null);
 });
 
+test('search: place chips sit right of a narrower field and open the place feed', () => {
+  const sc = loadCanvas();
+  const related = [{ label: 'São Paulo, Brazil', path: '/explore/location/s%C3%A3o-paulo--brazil' }];
+  const route = { section: 'search', arg: 'sao paulo', items: [], related, status: 'ready' };
+  const y = 200;
+  assert.equal(sc.resolveMainHit({ route }, 200, y).action, 'search-focus');
+  // The far right of the tool row is the chip, not the field.
+  const chipX = sc.MAIN_W - 216 + 48 - 100;
+  assert.deepEqual({ ...sc.resolveMainHit({ route }, chipX, y) }, { action: 'chip', arg: related[0].path });
+  assert.equal(sc.resolveMainHit({ route: { ...route, related: [] } }, chipX, y).action, 'search-focus', 'no places: field spans the row');
+  const rec = recordingCtx();
+  sc.renderMainPanel(rec.ctx, { route }, '');
+  assert.ok(rec.texts.includes('São Paulo, Brazil'));
+});
+
 test('grid renders titles, statuses and uses the image getter', () => {
   const sc = loadCanvas();
   const asked = [];
