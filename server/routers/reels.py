@@ -3412,9 +3412,11 @@ def _inline_player_template() -> tuple[list[str], str, str]:
     for href in re.findall(r'<link[^>]+href="([^"]+)"[^>]*>', html):
         if ("fonts.googleapis" in href or "material" in href.lower() or "gstatic" in href) and href not in css:
             css = f'@import url("{href}");\n' + css
+    # The frame fills the mount: .sx-reels-mount (global.css) already caps the square by the
+    # viewport, so a second cap here left black bands inside the mount's border.
     css += (
         "\n#sxReelsRoot .reels-phone-frame {"
-        " width: min(92vw, 84dvh, 860px, 100%);"
+        " width: 100%;"
         " height: auto;"
         " aspect-ratio: 1 / 1;"
         "}"

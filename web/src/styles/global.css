@@ -5110,10 +5110,9 @@ body.sx-vr-active .sx-reels-mount,
 /* Reels player skeleton — same square sizing as the live mount. */
 .sx-skel-player {
   position: relative;
-  width: min(92vw, 84vh, 860px);
-  width: min(92vw, 84dvh, 860px);
-  height: min(92vw, 84vh, 860px);
-  height: min(92vw, 84dvh, 860px);
+  width: min(calc(100vh - 160px), 900px, 100%);
+  width: min(calc(100dvh - 160px), 900px, 100%);
+  aspect-ratio: 1 / 1;
   margin: 0 auto;
 }
 
@@ -5142,6 +5141,7 @@ body.sx-vr-active .sx-reels-mount,
     justify-content: center;
     width: 100%;
     height: auto;
+    aspect-ratio: auto;
   }
 
   .sx-skel-player-stage {
