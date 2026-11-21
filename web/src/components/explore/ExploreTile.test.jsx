@@ -98,17 +98,20 @@ describe('ExploreTile order and runtime badge', () => {
 
   it('folds the image kind into the order chip instead of a second, overlapping badge', () => {
     const { container } = renderTile({ orderLabel: '04', video: video({ media_type: 'image', poster_url: '/p.jpg', duration_ms: 40 }) });
-    expect(badge(container)).toHaveTextContent(/^04 · IMAGE$/);
+    expect(badge(container)).toHaveTextContent(/^04 ·$/);
+    expect(badge(container).querySelector('[aria-label="Image"] .sx-explore-kind-icon')).not.toBeNull();
     expect(container.querySelector('.sx-explore-kind')).toBeNull();
   });
 
   it('labels a multi-image post with its image count', () => {
     const images = [{ url: 'a' }, { url: 'b' }, { url: 'c' }];
     const inPack = renderTile({ orderLabel: '01', video: video({ media_type: 'image', poster_url: '/p.jpg', images }) });
-    expect(badge(inPack.container)).toHaveTextContent(/^01 · IMAGES · 3$/);
+    expect(badge(inPack.container)).toHaveTextContent(/^01 · 3$/);
+    expect(badge(inPack.container).querySelector('[aria-label="3 images"] .sx-explore-kind-icon')).not.toBeNull();
     cleanup();
     const inExplore = renderTile({ video: video({ media_type: 'image', poster_url: '/p.jpg', images }) });
-    expect(inExplore.container.querySelector('.sx-explore-kind')).toHaveTextContent('IMAGES · 3');
+    expect(inExplore.container.querySelector('.sx-explore-kind')).toHaveTextContent(/^3$/);
+    expect(inExplore.container.querySelector('.sx-explore-kind [aria-label="3 images"]')).not.toBeNull();
   });
 });
 
@@ -208,7 +211,7 @@ describe('ExploreTile 3D posts', () => {
     const { container } = renderTile({
       video: video({ stereo_layout: 'tb', stereo_crop: true, poster_url: '/media/a-poster.jpg', media_type: 'image', images: [{}, {}] }),
     });
-    expect(container.querySelector('.sx-explore-kind').textContent).toBe('IMAGES · 2 · 3D');
+    expect(container.querySelector('.sx-explore-kind')).toHaveTextContent(/^2 · 3D$/);
     expect(container.querySelector('img').className).toContain('sx-stereo-crop-tb');
   });
 

@@ -6196,13 +6196,38 @@ button.sx-explore-loc-link:hover {
 }
 
 .sx-explore-share button {
-  min-height: 30px;
-  padding: 0 9px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
   border: none;
   background: color-mix(in srgb, var(--sx-bg) 86%, transparent);
   color: var(--sx-accent-hi);
   cursor: pointer;
-  font: 800 var(--sx-t-eyebrow)/1 var(--sx-font-mono);
+}
+
+.sx-explore-share-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* Image glyph in the kind/order chips. The chip is accent-filled, so the
+   glyph's accent stroke takes the chip's text colour. */
+.sx-explore-kind-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.sx-explore-kind-icon {
+  --sx-accent: currentColor;
+  width: 1.4em;
+  height: 1.4em;
+  display: block;
+  flex-shrink: 0;
 }
 
 .sx-post-editor-fields {

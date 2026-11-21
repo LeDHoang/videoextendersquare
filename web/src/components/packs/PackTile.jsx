@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client.js';
 import { clientId } from '../../hooks/MessagingContext.jsx';
 import { formatCompactCount, locationKey } from '../explore/ExploreTile.jsx';
-import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
+import { LocationIcon, LikeIcon, ViewIcon, CommentIcon, ShareIcon } from '../icons/index.jsx';
 import { stereoCropClass } from '../../utils/mediaFormat.js';
 
 export function packCoverMembers(pack) {
@@ -222,7 +222,7 @@ export default function PackTile({ pack, onOpen, onShare, onChanged, ownerAction
             }}
             aria-label={'Share ' + (pack.title || 'collection')}
           >
-            SHARE
+            <ShareIcon className="sx-explore-share-icon" />
           </button>
         </span>
       ) : null}

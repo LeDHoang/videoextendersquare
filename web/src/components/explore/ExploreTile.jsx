@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LocationIcon, LikeIcon, ViewIcon, CommentIcon } from '../icons/index.jsx';
-import { formatClock, formatDuration, imagePostLabel, stereoCropClass, stereoLayout } from '../../utils/mediaFormat.js';
+import { LocationIcon, LikeIcon, ViewIcon, CommentIcon, IndustrialImageIcon, ShareIcon } from '../icons/index.jsx';
+import { formatClock, formatDuration, stereoCropClass, stereoLayout } from '../../utils/mediaFormat.js';
 import { tileAspect } from '../../utils/aspect.js';
 
 export function formatCompactCount(value) {
@@ -17,6 +17,16 @@ export function locationKey(city, country) {
   const countrySlug = slug(country);
   if (!citySlug) return '';
   return citySlug + (countrySlug ? '--' + countrySlug : '');
+}
+
+// Chip parts (text or icon nodes) joined by " · ".
+function joinChip(parts) {
+  return parts.map((part, index) => (
+    <Fragment key={index}>
+      {index ? ' · ' : null}
+      {part}
+    </Fragment>
+  ));
 }
 
 // Browsers throttle parallel media loads, so a screenful of tiles asking at once delays the ones in view.
@@ -169,9 +179,15 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
   const tagHint = (video.tags || []).map((tag) => '#' + tag).join(' ');
   const label = video.title || video.filename || video.path?.split('/').pop() || 'Untitled reel';
   // 3D posts carry a "3D" tag next to the kind/context badge; private posts lead with "PRIVATE".
-  const badge = [video.visibility === 'private' ? 'PRIVATE' : '', contextTag ? '#' + contextTag : imagePostLabel(video), stereoLayout(video) !== 'mono' ? '3D' : '']
-    .filter(Boolean)
-    .join(' · ');
+  // An image post shows the image glyph, plus its count for a slideshow.
+  const imageCount = isImage ? video.images?.length || 1 : 0;
+  const imageMark = imageCount ? (
+    <span className="sx-explore-kind-image" role="img" aria-label={imageCount > 1 ? `${imageCount} images` : 'Image'}>
+      <IndustrialImageIcon className="sx-explore-kind-icon" />
+      {imageCount > 1 ? imageCount : null}
+    </span>
+  ) : null;
+  const badge = [video.visibility === 'private' ? 'PRIVATE' : '', contextTag ? '#' + contextTag : imageMark, stereoLayout(video) !== 'mono' ? '3D' : ''].filter(Boolean);
   const crop = stereoCropClass(video);
   const withCrop = (name) => (crop ? `${name} ${crop}` : name);
   const runtime = isImage ? '' : remaining !== null ? formatClock(remaining) : formatDuration(video.duration_ms);
@@ -309,7 +325,7 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
             }}
             aria-label={'Share ' + label}
           >
-            SHARE
+            <ShareIcon className="sx-explore-share-icon" />
           </button>
         </span>
       ) : null}
@@ -319,10 +335,10 @@ export default function ExploreTile({ video, onOpen, contextTag = '', onEdit, on
         </span>
       ) : null}
       {/* Both chips sit top-right, so a pack tile folds the kind into its order chip. */}
-      {badge && !orderLabel ? <span className="sx-explore-kind">{badge}</span> : null}
+      {badge.length && !orderLabel ? <span className="sx-explore-kind">{joinChip(badge)}</span> : null}
       {orderLabel ? (
         <span className="sx-explore-order" aria-hidden="true">
-          {[orderLabel, badge, runtime].filter(Boolean).join(' · ')}
+          {joinChip([orderLabel, ...badge, runtime].filter(Boolean))}
         </span>
       ) : null}
       {place ? (
