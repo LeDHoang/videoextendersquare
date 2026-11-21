@@ -11751,6 +11751,13 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   pointer-events: auto;
 }
 
+/* On paper the warn colour is a dark ochre that browns the fill, so the range
+   uses the proof-yellow highlighter and fades the fill toward the paper. */
+:root:not([data-theme='dark']) .sx-studio-trim-window {
+  background: color-mix(in srgb, var(--sx-spot) 35%, transparent);
+  backdrop-filter: saturate(0.6) brightness(1.35);
+}
+
 .sx-studio-trim-window:active {
   cursor: grabbing;
 }
