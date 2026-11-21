@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { imageBillingParameters, matchesTarget, videoBillingParameters } from '../../utils/cloudBilling.js';
+import { imageBillingParameters, matchesTarget, stagedItemNeedsCloud, videoBillingParameters } from '../../utils/cloudBilling.js';
 import { nearestAspect } from '../../utils/aspect.js';
 import { H3_REFRAME, LTX25_REFRAME, offeredValue, rateTiers, topTier, videoOptions } from '../../utils/modelOptions.js';
 
@@ -40,6 +40,8 @@ const CREDIT_VIDEO_UPSCALE_MODELS = new Set([
   'fal-ai/seedvr/upscale/video',
 ]);
 const VALID_ARGS = { args: {}, ok: true, error: '' };
+// The longest part of a clip a cloud job takes (the server's trim_duration cap).
+export const TRIM_MAX_SECONDS = 15;
 
 const nearestOf = (meta) => (Number(meta?.width) > 0 && Number(meta?.height) > 0 ? nearestAspect(Number(meta.width), Number(meta.height)) : '1:1');
 
@@ -180,9 +182,8 @@ export function useVideoExtendConfig(models) {
   const [btdTierPicked, setBtdTier] = useState('fast');
   const [btdPreset, setBtdPreset] = useState('general');
   const [btdFidelity, setBtdFidelity] = useState('medium');
-  const [trimEnabled, setTrimEnabled] = useState(false);
-  const [trimStart, setTrimStart] = useState(0);
-  const [trimDur, setTrimDur] = useState(15);
+  // The part of each clip a cloud job takes, by stage_id: { start, dur }.
+  const [trims, setTrims] = useState({});
   const [outArgs, setOutArgs] = useState(VALID_ARGS);
   const [upArgs, setUpArgs] = useState(VALID_ARGS);
 
@@ -260,15 +261,35 @@ export function useVideoExtendConfig(models) {
     bytedanceTier: btdTier,
     bytedancePreset: btdPreset,
     bytedanceFidelity: btdFidelity,
-    trimEnabled,
-    trimStart,
-    trimDuration: trimDur,
     customOutpaintArgs: outpaintEntry?.is_custom ? outArgs.args : {},
     customUpscaleArgs: upscaleEntry?.is_custom ? upArgs.args : {},
-  }), [prompt, upscaleOnly, targetAspect, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, minimaxRes, minimaxSeed, ltx25Res, ltx25Anchor, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, trimEnabled, trimStart, trimDur, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
+  }), [prompt, upscaleOnly, targetAspect, falPicked, studioPicked, noUpscale, sharpening, outpaintModel, upscaleModel, ltxRes, ltxAudio, ltxGuidance, ltxPromptExpansion, ltxNegativePrompt, loraList, minimaxRes, minimaxSeed, ltx25Res, ltx25Anchor, seedvrFactor, seedvrTarget, btdRes, btdFps, btdTier, btdPreset, btdFidelity, outpaintEntry?.is_custom, outArgs.args, upscaleEntry?.is_custom, upArgs.args]);
 
   const outpaintCreditSupported = outpaintEntry?.credit_enabled ?? CREDIT_VIDEO_OUTPAINT_MODELS.has(outpaintModel);
   const upscaleCreditSupported = upscaleEntry?.credit_enabled ?? CREDIT_VIDEO_UPSCALE_MODELS.has(upscaleModel);
+
+  const shapeParametersFor = (meta) => ({ ...parameters, target_aspect: upscaleOnly ? nearestOf(meta) : target.shapeFor(meta) });
+  // The longest part of a clip a job may take, or null when it takes all of it.
+  // Cloud jobs bill per second, so a long clip is cut to the outpaint model's
+  // limit (Ray 3.2: 10 s, MiniMax credits: 10 s), else to 15 s.
+  const trimMaxFor = (meta) => {
+    const base = shapeParametersFor(meta);
+    if (!stagedItemNeedsCloud(meta, base)) return null;
+    const outpaints = !base.upscale_only && !matchesTarget(meta, base.target_aspect);
+    const limits = outpaints ? [outpaintEntry?.max_source_seconds, outpaintEntry?.credit_max_seconds] : [];
+    return Math.min(TRIM_MAX_SECONDS, ...limits.map(Number).filter((limit) => limit > 0));
+  };
+  // The part of a clip that will be made, { start, dur, max, duration }, or null when the
+  // whole clip is made. It defaults to the first `max` seconds.
+  const trimFor = (meta) => {
+    const max = meta ? trimMaxFor(meta) : null;
+    const duration = Number(meta?.duration) || 0;
+    if (!max || duration <= max) return null;
+    const picked = trims[meta.stage_id] || {};
+    const dur = Math.min(max, duration, Math.max(1, Number(picked.dur) || max));
+    const start = Math.min(Math.max(0, Number(picked.start) || 0), duration - dur);
+    return { start, dur, max, duration };
+  };
 
   const updateLora = (index, patch) => {
     setLtxLoras((current) => current.map((lora, position) => (position === index ? { ...lora, ...patch } : lora)));
@@ -305,9 +326,8 @@ export function useVideoExtendConfig(models) {
     btdTier, setBtdTier,
     btdPreset, setBtdPreset,
     btdFidelity, setBtdFidelity,
-    trimEnabled, setTrimEnabled,
-    trimStart, setTrimStart,
-    trimDur, setTrimDur,
+    trimFor,
+    setTrim: (stageId, trim) => setTrims((current) => ({ ...current, [stageId]: trim })),
     setOutArgs, setUpArgs,
     upscaleOnly,
     falPicked,
@@ -331,7 +351,11 @@ export function useVideoExtendConfig(models) {
     // One file's /process parameters: an unpicked shape is that file's own nearest.
     // Keep shape sends the file's nearest too: upscale_only with a named shape is
     // the server's native-shape upscale (without one it squares, the legacy API).
-    parametersFor: (meta) => ({ ...parameters, target_aspect: upscaleOnly ? nearestOf(meta) : target.shapeFor(meta) }),
+    // A long clip on a cloud job sends the part picked on the stage timeline.
+    parametersFor: (meta) => {
+      const trim = trimFor(meta);
+      return { ...shapeParametersFor(meta), trim_enabled: !!trim, trim_start: trim?.start ?? 0, trim_duration: trim?.dur ?? TRIM_MAX_SECONDS };
+    },
     byokOnlyFor(items) {
       const needsOutpaintCloud = items.some((item) => !matchesTarget(item, target.shapeFor(item)));
       return (needsOutpaintCloud && !outpaintCreditSupported) || (falPicked && !upscaleCreditSupported);

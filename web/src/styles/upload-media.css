@@ -688,19 +688,6 @@
   align-items: end;
 }
 
-.sx-media-trim-bar {
-  position: relative;
-  height: 6px;
-  background: var(--sx-rule);
-}
-
-.sx-media-trim-bar i {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: var(--sx-accent);
-}
-
 .sx-media-fine {
   border-top: 1px solid var(--sx-rule);
   border-bottom: 1px solid var(--sx-rule);

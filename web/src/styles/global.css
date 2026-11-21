@@ -11705,15 +11705,6 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
   pointer-events: none;
 }
 
-.sx-studio-track-trim {
-  position: absolute;
-  top: -4px;
-  bottom: -4px;
-  border: 1px solid var(--sx-warn);
-  background: var(--sx-warn-dim);
-  pointer-events: none;
-}
-
 .sx-studio-track-input {
   position: absolute;
   inset: -6px 0;
@@ -11725,6 +11716,65 @@ button.sx-au-linkbtn:disabled { opacity: 0.5; cursor: default; }
 }
 
 .sx-studio-track:focus-within {
+  outline: 2px solid var(--sx-accent);
+  outline-offset: 2px;
+}
+
+/* The part of a long clip a cloud job makes, over the seek track: drag the
+   window, or its edges. Clicks outside it reach the seek input below. */
+.sx-studio-track.sx-trimmed {
+  height: 20px;
+  isolation: isolate;
+}
+
+/* Over a range the fill keeps the track's full height, with no glow
+   spilling past it; the range tint above it fades the fill it covers. */
+.sx-studio-track.sx-trimmed .sx-studio-track-fill {
+  box-shadow: none;
+}
+
+.sx-studio-trim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.sx-studio-trim-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 16px;
+  background: color-mix(in srgb, var(--sx-warn) 30%, transparent);
+  backdrop-filter: saturate(0.4);
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.sx-studio-trim-window:active {
+  cursor: grabbing;
+}
+
+.sx-studio-trim-edge {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: var(--sx-warn);
+  cursor: ew-resize;
+}
+
+.sx-studio-trim-edge.sx-start {
+  left: -4px;
+}
+
+.sx-studio-trim-edge.sx-end {
+  right: -4px;
+}
+
+.sx-studio-trim-window:focus-visible,
+.sx-studio-trim-edge:focus-visible {
   outline: 2px solid var(--sx-accent);
   outline-offset: 2px;
 }

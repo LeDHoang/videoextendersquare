@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import UploadZone from '../ui/UploadZone.jsx';
-import { AccentBlock } from '../ui/primitives.jsx';
 import { onRovingKeyDown } from '../ui/roving.js';
 import { formatClock, stageLayout } from './stageGeometry.js';
 import { TARGET_ASPECTS, aspectMatches, masterSize } from '../../utils/aspect.js';
@@ -42,17 +41,116 @@ function StageVideo({ src, label, onElement, className, style }) {
   );
 }
 
+const TRIM_STEP = 0.5;
+const roundTenth = (value) => Math.round(value * 10) / 10;
+
+// The part of a long clip a cloud job makes, as a window on a lane under the
+// seek track. Drag its body to move it, its edges to make it shorter or longer
+// (1 s up to `max`). `onMove(start, dur, edge)` reports each change while it
+// moves; `onDone(start)` fires when a drag or key press ends.
+// It lies over the seek track: a click on the range that does not drag seeks
+// there through `onSeek(time)`.
+function TrimLane({ duration, start, dur, max, onMove, onDone, onSeek }) {
+  const laneRef = useRef(null);
+  const end = start + dur;
+  // New { start, dur } for `part` moved by `delta` seconds from `from`.
+  const shift = (part, from, delta) => {
+    const fromEnd = from.start + from.dur;
+    if (part === 'start') {
+      const next = Math.min(Math.max(from.start + delta, 0, fromEnd - max), fromEnd - 1);
+      return { start: next, dur: fromEnd - next };
+    }
+    if (part === 'end') {
+      const next = Math.max(Math.min(fromEnd + delta, duration, from.start + max), from.start + 1);
+      return { start: from.start, dur: next - from.start };
+    }
+    return { start: Math.min(Math.max(from.start + delta, 0), duration - from.dur), dur: from.dur };
+  };
+  const report = (part, next) => {
+    onMove(roundTenth(next.start), roundTenth(next.dur), part === 'end' ? 'end' : 'start');
+    return roundTenth(next.start);
+  };
+  const onPointerDown = (part) => (event) => {
+    const rect = laneRef.current?.getBoundingClientRect();
+    const width = rect?.width;
+    if (!width || event.button > 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const from = { start, dur };
+    const x = event.clientX;
+    const target = event.currentTarget;
+    target.focus();
+    target.setPointerCapture?.(event.pointerId);
+    let last = from.start;
+    let moved = false;
+    const move = (moveEvent) => {
+      if (!moved && Math.abs(moveEvent.clientX - x) < 3) return;
+      moved = true;
+      last = report(part, shift(part, from, ((moveEvent.clientX - x) / width) * duration));
+    };
+    const up = () => {
+      target.removeEventListener('pointermove', move);
+      target.removeEventListener('pointerup', up);
+      target.removeEventListener('pointercancel', up);
+      if (!moved && part === 'body') onSeek(((x - rect.left) / width) * duration);
+      else onDone(last);
+    };
+    target.addEventListener('pointermove', move);
+    target.addEventListener('pointerup', up);
+    target.addEventListener('pointercancel', up);
+  };
+  const onKeyDown = (part) => (event) => {
+    const step = { ArrowLeft: -TRIM_STEP, ArrowDown: -TRIM_STEP, ArrowRight: TRIM_STEP, ArrowUp: TRIM_STEP }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onDone(report(part, shift(part, { start, dur }, step)));
+  };
+  const handle = (part, label, value, min, maxValue, text) => ({
+    role: 'slider',
+    tabIndex: 0,
+    'aria-label': label,
+    'aria-valuemin': roundTenth(min),
+    'aria-valuemax': roundTenth(maxValue),
+    'aria-valuenow': roundTenth(value),
+    'aria-valuetext': text,
+    onPointerDown: onPointerDown(part),
+    onKeyDown: onKeyDown(part),
+  });
+  return (
+    <div className="sx-studio-trim" ref={laneRef}>
+      <div
+        className="sx-studio-trim-window"
+        style={{ left: `${(start / duration) * 100}%`, width: `${(dur / duration) * 100}%` }}
+        {...handle('body', 'Trim range', start, 0, duration - dur, `${formatClock(start)} to ${formatClock(end)}`)}
+      >
+        <span
+          className="sx-studio-trim-edge sx-start"
+          {...handle('start', 'Trim start', start, Math.max(0, end - max), end - 1, formatClock(start))}
+        />
+        <span
+          className="sx-studio-trim-edge sx-end"
+          {...handle('end', 'Trim end', end, start + 1, Math.min(duration, start + max), formatClock(end))}
+        />
+      </div>
+    </div>
+  );
+}
+
 // Transport for the stage <video>: play/pause, restart, ±1s, seek, loop.
-// With trimming on, playback of the original stays inside the trim window
-// so the cut that will be rendered can be previewed.
+// `trim` ({ start, dur, max, duration, onChange }) is the part of a long clip a
+// cloud job makes: playback stays inside it, and moving it plays it from its
+// start. It is laid out on the clip's staged duration, known before the
+// <video> loads its metadata.
 export function StageTransport({ video, trim, status }) {
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(true);
-  const [muted, setMuted] = useState(true);
-  const trimWindow = trim?.enabled && duration
-    ? { start: Math.min(Math.max(0, Number(trim.start) || 0), duration), end: Math.min(duration, (Number(trim.start) || 0) + (Number(trim.dur) || 0)) }
+  const [muted, setMuted] = useState(false);
+  const trimSpan = Number(trim?.duration) || duration;
+  const trimWindow = trim && trimSpan
+    ? { start: Math.min(Math.max(0, Number(trim.start) || 0), trimSpan), end: Math.min(trimSpan, (Number(trim.start) || 0) + (Number(trim.dur) || 0)) }
     : null;
 
   useEffect(() => {
@@ -111,18 +209,26 @@ export function StageTransport({ video, trim, status }) {
     }
   };
 
+  // While the range moves the frame at its moving edge shows; once it settles
+  // the range plays from its start (and loops when LOOP is on).
+  const moveTrim = (start, dur, edge) => {
+    trim.onChange(start, dur);
+    if (!video) return;
+    video.pause();
+    video.currentTime = edge === 'end' ? start + dur : start;
+    setTime(video.currentTime);
+  };
+  const playTrim = (start) => {
+    if (!video) return;
+    video.currentTime = start;
+    video.play().catch(() => {});
+  };
+
   const progress = duration ? (time / duration) * 100 : 0;
   return (
     <div className="sx-studio-transport" role="group" aria-label="Stage playback">
-      <div className="sx-studio-track">
+      <div className={`sx-studio-track ${trimWindow ? 'sx-trimmed' : ''}`}>
         <div className="sx-studio-track-fill" style={{ width: `${progress}%` }} />
-        {trimWindow ? (
-          <div
-            className="sx-studio-track-trim"
-            style={{ left: `${(trimWindow.start / duration) * 100}%`, width: `${((trimWindow.end - trimWindow.start) / duration) * 100}%` }}
-            aria-hidden="true"
-          />
-        ) : null}
         <input
           type="range"
           className="sx-studio-track-input"
@@ -135,7 +241,24 @@ export function StageTransport({ video, trim, status }) {
           aria-valuetext={`${formatClock(time)} of ${formatClock(duration)}`}
           disabled={!duration}
         />
+        {trimWindow ? (
+          <TrimLane
+            duration={trimSpan}
+            start={trimWindow.start}
+            dur={trimWindow.end - trimWindow.start}
+            max={Math.min(trim.max, trimSpan)}
+            onMove={moveTrim}
+            onDone={playTrim}
+            onSeek={playTrim}
+          />
+        ) : null}
       </div>
+      {trimWindow ? (
+        <div className="sx-studio-readout">
+          <span>MAKES <b>{formatClock(trimWindow.start)} → {formatClock(trimWindow.end)}</b> ({(trimWindow.end - trimWindow.start).toFixed(1)}s)</span>
+          <span className="sx-studio-accent">MAX {trim.max}s</span>
+        </div>
+      ) : null}
       <div className="sx-studio-transport-row">
         <div className="sx-studio-transport-buttons">
           <button type="button" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'} className="sx-studio-tbtn sx-primary"><TransportGlyph name={playing ? 'pause' : 'play'} /></button>
@@ -147,7 +270,7 @@ export function StageTransport({ video, trim, status }) {
         <div className="sx-studio-transport-buttons">
           <label className="sx-studio-check">
             <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
-            <span>LOOP{trimWindow ? ' TRIM' : ''}</span>
+            <span>LOOP{trimWindow ? ' RANGE' : ''}</span>
           </label>
           <label className="sx-studio-check">
             <input type="checkbox" checked={!muted} onChange={(e) => setMuted(!e.target.checked)} />
@@ -384,14 +507,6 @@ export default function StudioStage({
             <div className="sx-error-title">FILES NOT ADDED</div>
             <div>{pickError}</div>
           </div>
-        ) : null}
-
-        {layout !== 'batch' && kind === 'video' && outpaintActive && Number(meta.duration) > 10 ? (
-          <AccentBlock
-            tone="warn"
-            title={`${meta.duration}s EXCEEDS THE 10s THRESHOLD`}
-            lines={['Cloud video outpainting is billed per second. Consider enabling the 15s Trimmer to optimize costs.']}
-          />
         ) : null}
 
         {isSlideshow ? (

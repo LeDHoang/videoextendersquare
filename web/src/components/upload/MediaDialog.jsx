@@ -156,6 +156,9 @@ export default function MediaDialog({
   // The shape the stage shows: the one being made, else the file's own.
   const making = makeMode || working || !!render;
   const target = making ? cfg.shapeFor(meta) : null;
+  // A long clip on a cloud job is cut: the part to make is picked on the stage timeline.
+  const trimmed = makeMode && !group && cover.kind === 'video' && cover.meta ? cfg.trimFor(cover.meta) : null;
+  const trim = trimmed ? { ...trimmed, onChange: (start, dur) => cfg.setTrim(cover.meta.stage_id, { start, dur }) } : null;
   // The size the file will come out at with the current options.
   const [masterWidth, masterHeight] = masterSize(meta.width, meta.height, target);
   const targetLabel = !(makeMode || working)
@@ -191,7 +194,7 @@ export default function MediaDialog({
             targetLabel={targetLabel}
             target={target}
             outpaintActive={!cfg.upscaleOnly}
-            trim={cover.kind === 'video' ? { enabled: cfg.trimEnabled, start: cfg.trimStart, dur: cfg.trimDur } : null}
+            trim={trim}
             onMoveGalleryItem={onMove}
             onRemoveGalleryItem={onRemove}
             locked

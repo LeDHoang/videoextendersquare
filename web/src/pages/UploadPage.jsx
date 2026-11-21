@@ -110,9 +110,9 @@ export default function UploadPage() {
   const studioBlocked = targetKinds.includes('video') && cfgs.video.studioPicked && !studioOk;
   const fundingBlocked = targetKinds.some((kind) => fundings[kind].fundingBlocked);
   const quoteStale = targetKinds.some((kind) => fundings[kind].quoteStale);
-  // Files that already have their shape have nothing to fill; with no upscale (and no trim) nothing would change.
+  // Files that already have their shape have nothing to fill; with no upscale nothing would change.
   const allMatch = targets.length > 0 && targets.every((item) => matchesTarget(item.meta, cfgs[item.kind].shapeFor(item.meta)));
-  const nothingToDo = allMatch && targets.every((item) => cfgs[item.kind].noUpscale && !(item.kind === 'video' && cfgs.video.trimEnabled));
+  const nothingToDo = allMatch && targets.every((item) => cfgs[item.kind].noUpscale);
   // The shape the options show for a kind: the pick, else the one all its files share.
   const shownShape = (kind) => {
     const shapes = new Set(targets.filter((item) => item.kind === kind).map((item) => cfgs[kind].shapeFor(item.meta)));
@@ -378,7 +378,6 @@ export default function UploadPage() {
         studioOk={studioOk}
         allMatch={allMatch}
         shape={shownShape(kind)}
-        maxSourceDur={Math.max(0, ...targets.filter((item) => item.kind === 'video').map((item) => item.meta?.duration || 0)) || 60}
       />
       {makeButton}
       {makeErrorBox}

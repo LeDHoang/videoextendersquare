@@ -182,46 +182,12 @@ function LoraStack({ cfg }) {
   );
 }
 
-function Trim({ cfg, maxSourceDur }) {
-  const start = Number(cfg.trimStart || 0);
-  const end = Math.min(maxSourceDur, start + Number(cfg.trimDur || 0));
-  const span = maxSourceDur > 0 ? maxSourceDur : 1;
-  return (
-    <Step title="Trim">
-      <ToggleRow label="Enable 15s Video Trimming" checked={cfg.trimEnabled} onChange={cfg.setTrimEnabled} />
-      {cfg.trimEnabled ? (
-        <div className="sx-studio-grid-2">
-          <NumberField
-            id="studio-trim-start"
-            label={`START TIME (s) — MAX ${Math.max(0, maxSourceDur - 1).toFixed(1)}`}
-            min={0}
-            max={Math.max(0, maxSourceDur - 1)}
-            step={0.5}
-            value={cfg.trimStart}
-            onChange={cfg.setTrimStart}
-          />
-          <NumberField id="studio-trim-dur" label="CLIP DURATION (s — MAX 15s)" min={1} max={15} step={0.5} value={cfg.trimDur} onChange={cfg.setTrimDur} />
-        </div>
-      ) : null}
-      <div className="sx-media-trim-bar" aria-hidden="true">
-        <i style={cfg.trimEnabled ? { left: `${(start / span) * 100}%`, width: `${(Math.max(0, end - start) / span) * 100}%` } : { left: 0, width: '100%' }} />
-      </div>
-      <div className="sx-studio-readout">
-        {cfg.trimEnabled
-          ? <span>RANGE: <b>{start.toFixed(1)}s ➔ {end.toFixed(1)}s ({Math.max(0, end - start).toFixed(1)}s TOTAL)</b></span>
-          : <span>RANGE: <b>0.0s ➔ {Number(maxSourceDur || 0).toFixed(1)}s</b></span>}
-        <span className="sx-studio-accent">{cfg.trimEnabled ? 'TRIMMED' : 'FULL CLIP'}</span>
-      </div>
-    </Step>
-  );
-}
-
 // `allMatch`: every file already has the picked shape, so there is nothing to fill.
 // `shape`: the shape shown as picked: the person's pick, else the one all the
 // files would be made in (null when they differ).
 // `onPick(mode, engine)`: set in the file dialog, which shows Original / Extend
 // above the panel; the panel then leaves the mode out and routes picks there.
-export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSourceDur, allMatch, shape, onPick }) {
+export default function OptionsPanel({ cfg, funding, probes, studioOk, allMatch, shape, onPick }) {
   const isVideo = cfg.kind === 'video';
   const outpaint = !cfg.upscaleOnly && !allMatch;
   const ltx = isVideo && outpaint && cfg.ltxPicked;
@@ -317,7 +283,6 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
         </Step>
       ) : null}
 
-      {isVideo ? <Trim cfg={cfg} maxSourceDur={maxSourceDur} /> : null}
 
       <details className="sx-media-fine">
         <summary>Fine tuning</summary>

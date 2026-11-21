@@ -53,6 +53,15 @@ already have their shape.
 With extend on and no upscale, the master keeps the native short side and
 the target sets the long side.
 
+Cloud jobs bill per second, so a long clip on one is cut. A cloud job is an
+outpaint (the clip lacks the picked shape) or a Cloud AI upscale. The max is
+the outpaint model's limit (Ray 3.2: `max_source_seconds` 10, MiniMax credits:
+`credit_max_seconds` 10), else 15 s. A clip longer than the max shows a range
+on the stage seek track. Drag it to move it, or its edges to change its
+length (1 s up to the max). Moving it plays the range, looping. Each file
+keeps its own range, sent as `trim_start` / `trim_duration`. Local upscales
+and posting as is take the whole clip.
+
 API callers that still send `upscale_only` keep the old square behaviour.
 
 In a slideshow, slide 0 sets the post shape. Other slides contain-fit with a

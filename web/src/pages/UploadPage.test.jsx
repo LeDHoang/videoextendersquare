@@ -78,8 +78,8 @@ const MODELS = {
   video_outpaint_catalog: [
     { label: 'LTX 2.3 Quality', model: 'fal-ai/ltx-2.3-quality/outpaint', is_custom: false, credit_enabled: true },
     { label: 'LTX 2.3 Quality + LoRA', model: 'fal-ai/ltx-2.3-quality/outpaint/lora', is_custom: false, credit_enabled: true },
-    { label: 'Luma Ray 3.2 Reframe', model: 'luma/agent/ray/v3.2/reframe', is_custom: false, credit_enabled: true },
-    { label: 'MiniMax H3 Max Reframe', model: 'minimax/h3-max/reframe-video', is_custom: false, credit_enabled: true, resolution_rates: { '480p': '0.05', '768p': '0.08', '1080p': '0.16' } },
+    { label: 'Luma Ray 3.2 Reframe', model: 'luma/agent/ray/v3.2/reframe', is_custom: false, credit_enabled: true, max_source_seconds: 10 },
+    { label: 'MiniMax H3 Max Reframe', model: 'minimax/h3-max/reframe-video', is_custom: false, credit_enabled: true, credit_max_seconds: 10, resolution_rates: { '480p': '0.05', '768p': '0.08', '1080p': '0.16' } },
     { label: 'LTX 2.5 Reframe', model: 'lightricks/ltx-2.5/reframe', is_custom: false, credit_enabled: true, resolution_rates: { '720p': '0.10', '1080p': '0.20' } },
   ],
   video_upscale_catalog: [
@@ -114,6 +114,7 @@ const meta = (name, width, height, extra = {}) => {
 
 const META = {
   'portrait.mp4': meta('portrait.mp4', 1080, 1350, { duration: 12.5 }),
+  'long.mp4': meta('long.mp4', 1080, 1350, { duration: 40 }),
   'square.mp4': meta('square.mp4', 480, 480, { duration: 2 }),
   'wide.png': meta('wide.png', 1500, 1200),
   'square.png': meta('square.png', 512, 512),
@@ -207,17 +208,57 @@ describe('UploadPage — video extender parity', () => {
     expect(screen.queryByText(/GENERATIVE ZONE/)).toBeNull();
     expect(screen.queryByText(/BOUNDARIES/)).toBeNull();
     expect(screen.queryByRole('region', { name: 'Media Specifications' })).toBeNull();
-    expect(screen.getByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeInTheDocument();
+    // 12.5s fits LTX's 15s, so the whole clip is made.
+    expect(screen.queryByRole('slider', { name: 'Trim range' })).toBeNull();
     expect(screen.getByRole('group', { name: 'Stage playback' })).toBeInTheDocument();
     expect(document.querySelectorAll('.sx-studio-zone')).toHaveLength(2);
   });
 
-  it('drops the cloud outpainting warning when the clip keeps its shape', async () => {
+  it('shows a trim range on the timeline only when a cloud job takes a long clip', async () => {
     renderPage();
-    await pick(['portrait.mp4']);
-    expect(await screen.findByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeInTheDocument();
+    await pick(['long.mp4']);
+    const range = () => screen.queryByRole('slider', { name: 'Trim range' });
+    expect(await screen.findByText('MAX 15s')).toBeInTheDocument();
+    expect(range()).toHaveAttribute('aria-valuetext', '00:00.00 to 00:15.00');
+    expect(screen.getByRole('checkbox', { name: 'SOUND' })).toBeChecked();
+    // Ray 3.2 takes 10s at most.
+    fireEvent.click(radio('Outpaint Model', /Luma Ray 3\.2/));
+    expect(screen.getByText('MAX 10s')).toBeInTheDocument();
+    expect(range()).toHaveAttribute('aria-valuetext', '00:00.00 to 00:10.00');
+    // Original with no upscale or a local upscale makes the whole clip.
     fireEvent.click(radio('Video Pipeline Mode', 'Original'));
-    expect(screen.queryByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeNull();
+    expect(range()).toBeNull();
+    fireEvent.click(radio('Upscale Engine', 'Fast'));
+    expect(range()).toBeNull();
+    fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
+    expect(screen.getByText('MAX 15s')).toBeInTheDocument();
+  });
+
+  it('sends the part of a long clip picked on the timeline', async () => {
+    const play = vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const pause = vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    mocks.form.mockResolvedValue({ job_id: 'job-long' });
+    renderPage();
+    await pick(['long.mp4']);
+    const range = await screen.findByRole('slider', { name: 'Trim range' });
+    for (let i = 0; i < 4; i += 1) fireEvent.keyDown(range, { key: 'ArrowRight' });
+    const end = screen.getByRole('slider', { name: 'Trim end' });
+    fireEvent.keyDown(end, { key: 'ArrowLeft' });
+    fireEvent.keyDown(end, { key: 'ArrowLeft' });
+    // Never longer than the max: the end stops 15s after the start.
+    fireEvent.keyDown(end, { key: 'ArrowRight' });
+    fireEvent.keyDown(end, { key: 'ArrowRight' });
+    fireEvent.keyDown(end, { key: 'ArrowRight' });
+    expect(range).toHaveAttribute('aria-valuetext', '00:02.00 to 00:17.00');
+    fireEvent.keyDown(end, { key: 'ArrowLeft' });
+    // Moving the range plays it from its start.
+    expect(play).toHaveBeenCalled();
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    const sent = formObject(mocks.form.mock.calls[0][1]);
+    expect([sent.trim_enabled, sent.trim_start, sent.trim_duration]).toEqual(['true', '2', '14.5']);
+    play.mockRestore();
+    pause.mockRestore();
   });
 
   it('sends every video setting exactly as the Video page would', async () => {
@@ -250,11 +291,6 @@ describe('UploadPage — video extender parity', () => {
     fireEvent.change(screen.getByLabelText('TARGET RESOLUTION TIER'), { target: { value: '2160p' } });
     fireEvent.change(screen.getByLabelText('CAS Sharpening level'), { target: { value: '0.8' } });
 
-    fireEvent.click(screen.getByLabelText('Enable 15s Video Trimming'));
-    fireEvent.change(screen.getByLabelText(/START TIME \(s\) — MAX 11\.5/), { target: { value: '2' } });
-    fireEvent.change(screen.getByLabelText('CLIP DURATION (s — MAX 15s)'), { target: { value: '6' } });
-    expect(screen.getByText('2.0s ➔ 8.0s (6.0s TOTAL)')).toBeInTheDocument();
-
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
     const [path, fd] = mocks.form.mock.calls[0];
@@ -284,9 +320,9 @@ describe('UploadPage — video extender parity', () => {
       bytedanceTier: 'fast',
       bytedancePreset: 'general',
       bytedanceFidelity: 'medium',
-      trimEnabled: true,
-      trimStart: 2,
-      trimDuration: 6,
+      trimEnabled: false,
+      trimStart: 0,
+      trimDuration: 15,
       customOutpaintArgs: {},
       customUpscaleArgs: {},
     }), { payment_source: 'credits', quote_id: 'q-st-portrait.mp4' }));
@@ -472,6 +508,9 @@ describe('UploadPage — H3 Max and LTX 2.5 reframe settings', () => {
       outpaintModel: 'minimax/h3-max/reframe-video',
       minimaxResolution: '1080p',
       minimaxSeed: '42',
+      // Credits cover 10s of MiniMax, so the 12.5s clip is cut to its first 10s.
+      trimEnabled: true,
+      trimDuration: 10,
     }), { payment_source: 'credits', quote_id: 'q-st-portrait.mp4' }));
   });
 
