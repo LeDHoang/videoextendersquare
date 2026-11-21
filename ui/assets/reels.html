@@ -7532,10 +7532,6 @@
     function specChip(label, value) {
       const chip = document.createElement('span');
       chip.className = 'side-chip spec';
-      if (!label) {
-        chip.textContent = value;
-        return chip;
-      }
       const key = document.createElement('b');
       key.textContent = label;
       chip.append(key, document.createTextNode(' ' + value));
@@ -7547,15 +7543,9 @@
       if (!item || item.available === false) return;
       const width = Number(item.width);
       const height = Number(item.height);
-      const durationMs = Number(item.duration_ms);
       const stereoLayout = entryStereoLayout(item);
       if (width > 0 && height > 0 && stereoLayout !== 'mono') {
         sideSpecs.appendChild(specChip('3D', stereoLayout === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM'));
-      }
-      if (durationMs > 0 && !isImageItem(item)) {
-        const duration = specChip('', formatTime(durationMs / 1000));
-        duration.title = 'Duration';
-        sideSpecs.appendChild(duration);
       }
     }
     // Everything in the column that depends on WHICH reel is playing.
