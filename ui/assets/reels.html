@@ -7466,7 +7466,7 @@
     }
     // Mirrors locationKey() in web/src/components/explore/ExploreTile.jsx.
     function placeSlug(value) {
-      return String(value || '').toLowerCase().replace(/[^\w]+|_+/g, '-').replace(/^-+|-+$/g, '');
+      return String(value || '').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
     }
     function placeKeyFor(location) {
       const city = placeSlug(location && location.city);
