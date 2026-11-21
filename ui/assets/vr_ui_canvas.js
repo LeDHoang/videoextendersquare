@@ -45,9 +45,16 @@
   const CP_ITEM_GAP = 8;
   // Close sits top-right, to the right of FOLLOW.
   const CP_CLOSE_BTN = { x: 504, y: 26, w: 36, h: 36 };
-  const CP_STATS_Y = 198;
+  // The stats row sits this far below the last line of title / caption / chips;
+  // the creator block ends CP_STATS_PAD below the row, so it is CP_INFO_H tall
+  // only with the fullest content and shrinks with less.
+  const CP_STATS_GAP = 8;
+  const CP_STATS_PAD = 58;
+  // Last drawn creator block height; the header, list and hit tests follow it.
+  let cpInfoH = CP_INFO_H;
+  function cpListTop() { return cpInfoH + CP_HEADER_H; }
   // One time-sync toggle replaces the ALL / SYNC / GENERAL tabs.
-  const CP_SYNC_BTN = { x: 504, y: CP_INFO_H + 12, w: 36, h: 32 };
+  function cpSyncBtn() { return { x: 504, y: cpInfoH + 12, w: 36, h: 32 }; }
   // Comment name advance (600 11px IBM Plex Mono, 0.6em per glyph).
   const CP_NAME_CHAR_W = 6.6;
   // Replies sit indented under the comment they answer.
@@ -389,6 +396,12 @@
       ['M8.1 2.5H15.9L21.5 8.1V15.9L15.9 21.5H8.1L2.5 15.9V8.1Z', 's', 'i', 1.5],
       ['M17 7L7 17L12 7V17', 's', 'i', 1.8],
       ['M12 12L17 17', 's', 'a', 1.8],
+    ],
+    // industrial-image.svg: the image-reel mark on explore tile badges.
+    image: [
+      ['M3 3H21V21H3V3Z', 's', 'i', 1.5],
+      ['M3 16L8 11L13 16M11 14L16 9L21 14', 's', 'a', 1.5],
+      [ring(16, 7, 1.5), 'f', 'i'],
     ],
   };
   const DOCK_ICON_PATHS = {};
@@ -1094,7 +1107,7 @@
     const shownIds = new Set(filtered.map((c) => c.id));
     const inBox = (b) => canvasX >= b.x && canvasX < b.x + b.w && canvasY >= b.y && canvasY < b.y + b.h;
 
-    if (canvasY < CP_INFO_H) {
+    if (canvasY < cpInfoH) {
       if (inBox(CP_CLOSE_BTN)) return 'close';
       if (cpFollowVisible(item, itemState) && inBox(cpFollowBtn(!!itemState.following))) return 'follow';
       const creator = cpCreator(item);
@@ -1102,9 +1115,9 @@
       return 'panel';
     }
 
-    if (canvasY < CP_LIST_TOP) {
+    if (canvasY < cpListTop()) {
       // Time-sync toggle: on lists every comment, off lists general only.
-      if (inBox(CP_SYNC_BTN)) return cPanelTab === 'general' ? 'tab:all' : 'tab:general';
+      if (inBox(cpSyncBtn())) return cPanelTab === 'general' ? 'tab:all' : 'tab:general';
       return 'panel';
     }
 
@@ -1115,16 +1128,16 @@
     }
 
     if (canvasX >= CP_SCROLL_X) {
-      if (canvasY >= CP_LIST_TOP && canvasY < CP_LIST_TOP + 26) return 'scrollup';
+      if (canvasY >= cpListTop() && canvasY < cpListTop() + 26) return 'scrollup';
       if (canvasY >= CP_LIST_BOTTOM - 26 && canvasY < CP_LIST_BOTTOM) return 'scrolldown';
       return 'scrollbar';
     }
 
-    const relY = canvasY - CP_LIST_TOP + cPanelScrollY;
+    const relY = canvasY - cpListTop() + cPanelScrollY;
     const idx = Math.floor(relY / (CP_ITEM_H + CP_ITEM_GAP));
     if (idx >= 0 && idx < filtered.length) {
       const c = filtered[idx];
-      const y = CP_LIST_TOP + idx * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
+      const y = cpListTop() + idx * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
       const { itemX, itemW } = cpRowBox(c, shownIds);
       if (canvasY >= y + 4 && canvasY < y + 36) {
         const head = cpCommentHead(c, itemX, y);
@@ -1233,8 +1246,10 @@
         chips.push({ kind: 'spec', key: '3D', text: stereo === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM' });
       }
     }
+    let chipsEnd = y;
     if (chips.length) {
       const chipY = y + 8;
+      chipsEnd = chipY + 22;
       let x = 20;
       ctx.font = `600 10px ${TOKENS.font.mono}`;
       ctx.textBaseline = 'middle';
@@ -1268,7 +1283,9 @@
       ['comment', unavailable ? '0' : fmtCount(comments.length), false],
       ['view', unavailable ? '0' : fmtCount(item.views), false],
     ];
-    const statsCy = CP_STATS_Y + 23;
+    const statsTop = (chips.length ? chipsEnd : y) + CP_STATS_GAP;
+    cpInfoH = statsTop + CP_STATS_PAD;
+    const statsCy = statsTop + 23;
     let statX = 20;
     ctx.font = `600 15px ${TOKENS.font.mono}`;
     ctx.textAlign = 'left';
@@ -1280,8 +1297,13 @@
       statX += 28 + ctx.measureText(value).width + 20;
     });
 
+    // A shorter block hands its unused band back to the list's paper.
+    if (cpInfoH < CP_INFO_H) {
+      ctx.fillStyle = TOKENS.hex.surface;
+      ctx.fillRect(0, cpInfoH, CPANEL_W, CP_INFO_H - cpInfoH);
+    }
     ctx.fillStyle = TOKENS.hex.rule;
-    ctx.fillRect(0, CP_INFO_H - 1, CPANEL_W, 1);
+    ctx.fillRect(0, cpInfoH - 1, CPANEL_W, 1);
   }
 
   function renderCommentsPanelCanvas(ctx, options = {}) {
@@ -1301,7 +1323,7 @@
     const filtered = filterPanelComments(comments, cPanelTab);
     const shownIds = new Set(filtered.map((c) => c.id));
 
-    const listH = CP_LIST_BOTTOM - CP_LIST_TOP;
+    const listH = CP_LIST_BOTTOM - cpListTop();
     const contentH = filtered.length * (CP_ITEM_H + CP_ITEM_GAP);
     const accent = TOKENS.hex.accent;
 
@@ -1320,9 +1342,9 @@
     renderCommentsPanelInfo(ctx, item, itemState || {}, comments, hover);
 
     // Header
-    const headY = CP_INFO_H + CP_HEADER_H / 2;
+    const headY = cpInfoH + CP_HEADER_H / 2;
     ctx.fillStyle = TOKENS.hex.bg;
-    ctx.fillRect(0, CP_INFO_H, CPANEL_W, CP_HEADER_H);
+    ctx.fillRect(0, cpInfoH, CPANEL_W, CP_HEADER_H);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = accent;
@@ -1336,7 +1358,7 @@
     // Time-sync toggle: lit while synced comments are included (default).
     const syncOn = cPanelTab !== 'general';
     const syncHover = hover.indexOf('tab:') === 0;
-    const sb = CP_SYNC_BTN;
+    const sb = cpSyncBtn();
     ctx.fillStyle = syncHover ? TOKENS.hex.surfaceHover : TOKENS.hex.surface2;
     roundRectPath(ctx, sb.x, sb.y, sb.w, sb.h, TOKENS.radiusPx);
     ctx.fill();
@@ -1362,7 +1384,7 @@
     // List items
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, CP_LIST_TOP, CP_LIST_X + CP_LIST_W, listH);
+    ctx.rect(0, cpListTop(), CP_LIST_X + CP_LIST_W, listH);
     ctx.clip();
 
     if (filtered.length === 0) {
@@ -1370,11 +1392,11 @@
       ctx.font = `600 10px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('NO COMMENTS YET', CPANEL_W / 2, CP_LIST_TOP + 40);
+      ctx.fillText('NO COMMENTS YET', CPANEL_W / 2, cpListTop() + 40);
     } else {
       filtered.forEach((c, i) => {
-        const y = CP_LIST_TOP + i * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
-        if (y + CP_ITEM_H < CP_LIST_TOP || y > CP_LIST_BOTTOM) return;
+        const y = cpListTop() + i * (CP_ITEM_H + CP_ITEM_GAP) - cPanelScrollY;
+        if (y + CP_ITEM_H < cpListTop() || y > CP_LIST_BOTTOM) return;
 
         const { itemX, itemW } = cpRowBox(c, shownIds);
         const border = c.avatar_color || accent;
@@ -2627,6 +2649,7 @@
     CPANEL_W,
     CPANEL_H,
     CP_LIST_TOP,
+    commentsListTop: cpListTop,
     CP_LIST_BOTTOM,
     CP_ITEM_H,
     CP_ITEM_GAP,

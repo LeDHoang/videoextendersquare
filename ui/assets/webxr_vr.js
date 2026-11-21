@@ -8263,7 +8263,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const ui = getUICanvas();
     if (!ui || ui.CP_LIST_TOP === undefined) return;
     const filtered = ui.filterPanelComments(comments, cPanelTab);
-    const listH = ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP;
+    const listH = ui.CP_LIST_BOTTOM - (ui.commentsListTop ? ui.commentsListTop() : ui.CP_LIST_TOP);
     const contentH = filtered.length * (ui.CP_ITEM_H + ui.CP_ITEM_GAP);
     cPanelMaxScroll = Math.max(0, contentH - listH);
     if (cPanelScrollY > cPanelMaxScroll) cPanelScrollY = cPanelMaxScroll;
@@ -8582,6 +8582,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       send: (method, path, body) => (callbacks.shellSend
         ? callbacks.shellSend(method, path, body) : Promise.reject(new Error('shell requests unavailable'))),
       getScene: () => sceneMode,
+      gridMaxScroll: (route) => getShellCanvas().gridMaxScroll(route),
       earthAvailable: () => !isPackExperience(),
       setTheme: setVRTheme,
       // REELS from the open shell just returns to the feed; from the dock it
@@ -8713,7 +8714,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     return !!(shellDrag && shellDrag.active() && shellDrag.end(Date.now()));
   }
 
-  // Preview wheel over the main panel: one row per notch, throttled.
+  // Preview wheel over the main panel: one scroll step per notch, throttled.
   function shellWheel(deltaY) {
     const now = Date.now();
     if (!deltaY || now - shellWheelT < 120) return;
@@ -12944,7 +12945,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     // Row order is the panel's threaded order, not the raw list's.
     const rows = ui && ui.filterPanelComments ? ui.filterPanelComments(comments, cPanelTab) : comments;
     const idx = rows.findIndex((c) => c.id === commentId);
-    const listH = ui ? (ui.CP_LIST_BOTTOM - ui.CP_LIST_TOP) : 520;
+    const listH = ui ? (ui.CP_LIST_BOTTOM - (ui.commentsListTop ? ui.commentsListTop() : ui.CP_LIST_TOP)) : 520;
     const itemH = ui ? (ui.CP_ITEM_H + ui.CP_ITEM_GAP) : 112;
     if (idx >= 0) {
       const itemTop = idx * itemH;

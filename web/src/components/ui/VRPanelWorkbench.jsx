@@ -179,6 +179,10 @@ const SHELL_REELS = Array.from({ length: 23 }, (_, i) => ({
   comments_count: (i * 5) % 7,
   liked_by_me: i % 4 === 0,
   stereo_layout: i % 5 === 1 ? 'sbs' : undefined,
+  // Mixed shapes for the masonry grid, an image reel or slideshow, a private reel.
+  aspect: [9 / 16, 1, 16 / 9, 4 / 5, 9 / 16, 3 / 4, 1][i % 7],
+  ...(i % 6 === 2 ? { media_type: 'image', images: i % 12 === 2 ? [{}, {}, {}] : [{}] } : {}),
+  visibility: i === 4 ? 'private' : 'public',
 }));
 const SHELL_PACKS = [
   ['TOKYO AFTER DARK', 7], ['RAINY SEASON', 5], ['NORTHERN LIGHTS', 4], ['HA LONG MORNINGS', 6], ['ROOFTOPS', 3],
@@ -229,6 +233,25 @@ function shellRequest(path, query) {
   if (path === '/api/reels/locations') return { locations: [{ slug: 'tokyo--japan', name: 'Tokyo, Japan' }] };
   if (path.startsWith('/api/reels/locations/')) {
     return { videos: SHELL_REELS.slice(5), location: { name: 'Tokyo' }, related_locations: [{ slug: 'osaka', name: 'Osaka' }] };
+  }
+  if (path === '/api/search/suggestions') {
+    const q = String(query.q || '').toLowerCase();
+    const hit = (s) => !q || String(s).toLowerCase().includes(q);
+    return {
+      users: SHELL_PEOPLE.filter((p) => hit(p.username) || hit(p.display_name)).slice(0, query.limit)
+        .map((p, i) => ({ ...p, account_type: 'real', avatar_color: ['#ff3b1f', '#2f7bff', '#1fa86b'][i % 3], follower_count: 12400 >> i })),
+      // Places, tags and posts come from the mock reels, so any word on a tile finds it.
+      locations: PLAYLIST.map((r) => r.location).filter(Boolean)
+        .map((l) => [l.city, l.country].filter(Boolean).join(', ') || l.display_name)
+        .map((name, i) => ({ slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, reel_count: 42 >> i, views: 182000 >> i }))
+        .filter((l) => hit(l.name)).slice(0, query.limit),
+      tags: [...new Set(PLAYLIST.flatMap((r) => r.tags || []))]
+        .map((tag, i) => ({ slug: tag, name: '#' + tag, reel_count: 64 >> i, views: 410000 >> i, reason: i ? 'MATCH' : 'TRENDING' }))
+        .filter((t) => hit(t.name)).slice(0, query.limit),
+      posts: SHELL_REELS.slice(0, PLAYLIST.length)
+        .filter((r) => hit(r.title) || hit(r.caption || '') || hit(JSON.stringify(r.location || {})))
+        .slice(0, query.limit),
+    };
   }
   if (/^\/api\/users\/[^/]+\/packs$/.test(path)) return { items: SHELL_PACKS };
   if ((m = /^\/api\/users\/(.+)$/.exec(path))) {
@@ -528,6 +551,7 @@ export default function VRPanelWorkbench() {
       request: (path, query) => Promise.resolve(shellRequest(path, query || {})),
       send: (method, path, body) => Promise.resolve(shellSend(method, path, body)),
       exitAndNavigate: (path) => setLastAction(`SHELL › exit VR › ${path}`),
+      gridMaxScroll: SC ? (route) => SC.gridMaxScroll(route) : undefined,
       playFeed: ({ startIndex }) => setLastAction(`SHELL › play reel ${startIndex + 1}`),
       // REELS / EARTH nav tabs drive the mock dock, as they drive sceneMode in VR.
       getScene: () => (live.current.mock.dock === 'EARTH' ? 'earth' : 'reels'),
@@ -549,7 +573,7 @@ export default function VRPanelWorkbench() {
 
   const scrollComments = (delta) => {
     const s = interact.current;
-    const listH = UI.CP_LIST_BOTTOM - UI.CP_LIST_TOP;
+    const listH = UI.CP_LIST_BOTTOM - UI.commentsListTop();
     const contentH = filterByTab(live.current.comments, s.tab).length * (UI.CP_ITEM_H + UI.CP_ITEM_GAP);
     s.scroll = Math.max(0, Math.min(Math.max(0, contentH - listH), s.scroll + delta));
   };

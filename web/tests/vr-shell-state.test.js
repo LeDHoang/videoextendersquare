@@ -237,6 +237,28 @@ test('scrolling near the end of a reel grid appends the next page once', async (
   assert.equal(calls.length, 2, 'last page: nothing more to fetch');
 });
 
+test('grid scroll uses the masonry limit when the canvas supplies it', async () => {
+  const reel = (n) => ({ path: 'r' + n + '.mp4', post_id: 'p' + n });
+  const calls = [];
+  const s = loadShell().create({
+    // 1 step per item: the content foot moves with the item count.
+    gridMaxScroll: (route) => route.items.length,
+    request: (path, query) => {
+      calls.push({ ...query });
+      return Promise.resolve(query.cursor ? { videos: [reel(99)], next_cursor: null } : { videos: Array.from({ length: 20 }, (_, i) => reel(i)), next_cursor: 'c1' });
+    },
+  });
+  s.open('/explore');
+  await tick();
+  s.scroll(13);
+  assert.equal(calls.length, 1, 'more than six steps from the end');
+  s.scroll(1);
+  await tick();
+  assert.equal(calls.length, 2, 'six steps from the end fetches the next page');
+  s.scroll(100);
+  assert.equal(s.getRenderState().route.scroll, 21, 'clamped to the masonry limit');
+});
+
 test('search field: focus, type, backspace, enter opens the search route', () => {
   const s = loadShell().create({});
   s.open('/explore');
@@ -252,6 +274,59 @@ test('search field: focus, type, backspace, enter opens the search route', () =>
   assert.equal(s.getRenderState().field.text, 'cat s', 'search route seeds the field');
   s.type('close');
   assert.equal(s.getRenderState().field.focused, false);
+});
+
+test('search field on a tag page: starts with the tag; erasing it goes back to explore', () => {
+  const s = loadShell().create({});
+  s.open('/explore');
+  s.open('/explore/tag/rain');
+  s.focusField(true);
+  assert.equal(s.getRenderState().field.text, '#rain');
+  s.type('enter');
+  assert.equal(s.getRenderState().route.path, '/explore/tag/rain', 'untouched text stays on the tag');
+  s.focusField(true);
+  for (let i = 0; i < 5; i++) s.type('backspace');
+  s.type('enter');
+  assert.equal(s.getRenderState().route.path, '/explore');
+  assert.equal(s.getRenderState().depth, 1, 'the tag page is dropped, not stacked on');
+  s.open('/explore/location/tokyo');
+  s.focusField(true);
+  s.type('backspace');
+  s.type('x');
+  s.type('enter');
+  assert.equal(s.getRenderState().route.path, '/explore?q=tokyx', 'new text searches');
+});
+
+test('search field: a dropdown of people, places, tags and posts follows the typed text', async () => {
+  const asked = [];
+  const played = [];
+  const s = loadShell().create({
+    playFeed: (f) => played.push(f),
+    request: (path, query) => {
+      asked.push([path, query.q]);
+      if (path !== '/api/search/suggestions') return Promise.resolve({ videos: [] });
+      // The 'c' reply arrives after 'ca' was typed and is dropped.
+      return new Promise((done) => setTimeout(() => done({ users: [{ username: query.q }], locations: [], tags: [{ slug: 't' }], posts: [{ path: query.q + '.mp4' }] }), query.q === 'c' ? 20 : 0));
+    },
+  });
+  s.open('/explore');
+  s.handleHit({ action: 'search-focus' });
+  s.type('c');
+  s.type('a');
+  await new Promise((r) => setTimeout(r, 40));
+  assert.deepEqual(asked.filter((a) => a[0] === '/api/search/suggestions').map((a) => a[1]), ['', 'c', 'ca'], 'focus asks for trending first');
+  const sug = s.getRenderState().field.suggest;
+  assert.deepEqual([sug.users[0].username, sug.locations.length, sug.tags.length, sug.posts[0].path], ['ca', 0, 1, 'ca.mp4']);
+  assert.equal(s.handleHit({ action: 'play-suggested', arg: 0 }), true);
+  assert.equal(JSON.stringify(played.map((f) => f.videoData.map((v) => v.path))), '[["ca.mp4"]]', 'a post row plays that post alone');
+  assert.equal(s.isOpen(), false, 'the shell closes for the player');
+  s.open('/explore');
+  s.handleHit({ action: 'search-focus' });
+  await new Promise((r) => setTimeout(r, 10));
+  s.type('close');
+  assert.equal(s.getRenderState().field.suggest, null, 'closed field hides the dropdown');
+  s.focusField(true);
+  assert.equal(s.getRenderState().field.suggest, null, 'a new focus starts empty');
 });
 
 test('keystrokes bump the version but not the content version', () => {
