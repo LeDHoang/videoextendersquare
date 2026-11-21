@@ -159,6 +159,12 @@ const radio = (group, name) => within(screen.getByRole('radiogroup', { name: gro
 const renderButton = () => screen.getByRole('button', { name: /^(Fill|Retry quote & fill)|^(Upscale|Retry quote & upscale)/ });
 const postButton = () => screen.getByRole('button', { name: 'POST' });
 const button = (name) => screen.getByRole('button', { name });
+// Quality starts on No upscale; these flows check the Fast output and its size.
+async function pickFast(size) {
+  await waitFor(() => radio('Upscale Engine', 'Fast'));
+  fireEvent.click(radio('Upscale Engine', 'Fast'));
+  return screen.findByText(size);
+}
 const MINE = { items: [], stages: [], retention: { stage_seconds: 6 * 3600, result_seconds: 30 * 86400 } };
 
 beforeEach(() => {
@@ -194,7 +200,7 @@ describe('UploadPage — video extender parity', () => {
   it('maps a portrait clip onto the square stage with its outpaint bands', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    expect(await screen.findByText('1080×1350 ➔ 2048×2048')).toBeInTheDocument();
+    expect(await pickFast('1080×1350 ➔ 2048×2048')).toBeInTheDocument();
     expect(screen.queryByText('PAD: 135px [L/R]')).toBeNull();
     expect(screen.getAllByText('+135px OUTPAINT')).toHaveLength(2);
     // The stage stays uncluttered: no zone names, telemetry box or spec grid.
@@ -218,7 +224,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v1' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
 
     fireEvent.click(radio('Outpaint Model', /LTX 2\.3 Quality \+ LoRA/));
     const addLora = () => fireEvent.click(screen.getByRole('button', { name: '+ ADD LoRA' }));
@@ -291,7 +297,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-v2' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     const group = screen.getByRole('group', { name: 'Bytedance upscaler settings' });
     fireEvent.change(within(group).getByLabelText('TARGET RESOLUTION'), { target: { value: '2k' } });
@@ -336,7 +342,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, vapoursynth: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeInTheDocument();
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
@@ -361,7 +367,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, ffms2: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     expect(screen.getByText('STUDIO ENGINE UNAVAILABLE')).toBeInTheDocument();
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
@@ -371,7 +377,7 @@ describe('UploadPage — video extender parity', () => {
     mocks.probes = { ...ALL_PROBES, cas: { ok: false } };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     expect(screen.getByLabelText('CAS Sharpening level')).toBeDisabled();
     expect(screen.getByText('CAS FILTER UNAVAILABLE — SHARPENING WILL BE SKIPPED')).toBeInTheDocument();
   });
@@ -387,7 +393,7 @@ describe('UploadPage — video extender parity', () => {
     };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     expect(radio('FAL Upscale Model', /CUSTOM \(my-upscaler\)/)).toHaveAttribute('aria-checked', 'true');
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
@@ -403,7 +409,7 @@ describe('UploadPage — video extender parity', () => {
     };
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     const values = (select) => within(select).getAllByRole('option').map((node) => node.value);
     const ltx = screen.getByLabelText('OUTPUT RESOLUTION TIER');
     expect(values(ltx)).toEqual(['1080p', '480p']);
@@ -449,7 +455,7 @@ describe('UploadPage — H3 Max and LTX 2.5 reframe settings', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-h3' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Outpaint Model', /MiniMax H3 Max Reframe/));
     const group = screen.getByRole('group', { name: 'MiniMax H3 Max settings' });
     const values = (select) => within(select).getAllByRole('option').map((node) => node.value);
@@ -473,7 +479,7 @@ describe('UploadPage — H3 Max and LTX 2.5 reframe settings', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-ltx25' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Outpaint Model', /LTX 2\.5 Reframe/));
     expect(screen.queryByLabelText('NEGATIVE PROMPT FILTER')).toBeNull();
     expect(screen.queryByLabelText('OUTPUT RESOLUTION TIER')).toBeNull();
@@ -497,7 +503,7 @@ describe('UploadPage — image extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i1' });
     renderPage();
     await pick(['wide.png']);
-    expect(await screen.findByText('1500×1200 ➔ 2048×2048')).toBeInTheDocument();
+    expect(await pickFast('1500×1200 ➔ 2048×2048')).toBeInTheDocument();
     expect(screen.queryByText('PAD: 150px [T/B]')).toBeNull();
     const engines = within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio').map((node) => node.textContent.trim());
     expect(engines).toEqual(['No upscale', 'Fast', 'Cloud AI']);
@@ -532,7 +538,7 @@ describe('UploadPage — image extender parity', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-i2' });
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('1500×1200 ➔ 2048×2048');
+    await pickFast('1500×1200 ➔ 2048×2048');
     fireEvent.click(radio('Pipeline Mode', 'Original'));
     expect(screen.getByText('1500×1200 ➔ 2560×2048')).toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'Shape' })).toBeNull();
@@ -556,7 +562,7 @@ describe('UploadPage — image extender parity', () => {
     mocks.models = { ...MODELS, outpaint_img: 'me/my-outpaint' };
     renderPage();
     await pick(['wide.png']);
-    await screen.findByText('1500×1200 ➔ 2048×2048');
+    await pickFast('1500×1200 ➔ 2048×2048');
     expect(screen.getAllByText(/CUSTOM OUTPAINT \(my-outpaint\)|CUSTOM \(my-outpaint\)/).length).toBeGreaterThan(0);
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
   });
@@ -584,13 +590,12 @@ describe('UploadPage — image extender parity', () => {
   it('keeps each kind\'s settings when another file is staged', async () => {
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     fireEvent.change(screen.getByLabelText('OUTPAINT EXTENSION PROMPT'), { target: { value: 'video prompt' } });
     fireEvent.click(radio('Upscale Engine', 'Studio'));
     await pick(['wide.png']);
-    await screen.findByText('1500×1200 ➔ 2048×2048');
-    expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue(IMG_PROMPT_DEFAULT);
-    expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'true');
+    await waitFor(() => expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue(IMG_PROMPT_DEFAULT));
+    expect(radio('Upscale Engine', 'No upscale')).toHaveAttribute('aria-checked', 'true');
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1350 ➔ 2048×2048');
     expect(screen.getByLabelText('OUTPAINT EXTENSION PROMPT')).toHaveValue('video prompt');
@@ -635,15 +640,17 @@ describe('UploadPage — posting', () => {
     expect(radio('Upscale Engine', 'No upscale')).toHaveAttribute('aria-checked', 'true');
     // Kept as it is: no target size is promised.
     expect(screen.getByText('480×480')).toBeInTheDocument();
-    // Extend keeps the quality the options hold.
-    fireEvent.click(radio('Video Pipeline Mode', 'Extend'));
-    expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'true');
-    expect(radio('Video Shape', '1:1')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByText('480×480 ➔ 2048×2048')).toBeInTheDocument();
     // Extend with no upscale: a square file has nothing to fill until another shape is picked.
-    fireEvent.click(radio('Upscale Engine', 'No upscale'));
+    fireEvent.click(radio('Video Pipeline Mode', 'Extend'));
+    expect(radio('Upscale Engine', 'No upscale')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Video Shape', '1:1')).toHaveAttribute('aria-checked', 'true');
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
     expect(renderButton()).toHaveAccessibleDescription('PICK ANOTHER SHAPE OR AN UPSCALE');
+    // Extend with an upscale makes it 2K at the same shape.
+    fireEvent.click(radio('Upscale Engine', 'Fast'));
+    expect(screen.getByText('480×480 ➔ 2048×2048')).toBeInTheDocument();
+    expect(renderButton()).not.toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(radio('Upscale Engine', 'No upscale'));
     // Original goes back to the post form, with no upscale.
     fireEvent.click(radio('Video Pipeline Mode', 'Original'));
     expect(screen.getByLabelText('TITLE')).toHaveValue('square');
@@ -661,7 +668,7 @@ describe('UploadPage — posting', () => {
     mocks.form.mockResolvedValue({ job_id: 'job-none' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'No upscale'));
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
@@ -672,7 +679,7 @@ describe('UploadPage — posting', () => {
     mocks.post.mockResolvedValue({ meta: { title: 'portrait' }, rel_path: 'uploads/p.mp4', media_url: '/m' });
     renderPage();
     await pick(['portrait.mp4']);
-    await screen.findByText('1080×1350 ➔ 2048×2048');
+    await pickFast('1080×1350 ➔ 2048×2048');
     fireEvent.click(radio('Upscale Engine', 'No upscale'));
     fireEvent.click(radio('Video Pipeline Mode', 'Original'));
     // Nothing is filled or upscaled: the file is ready and goes to the post form,
@@ -704,11 +711,11 @@ describe('UploadPage — posting', () => {
     expect(button('Open portrait.mp4').closest('li')).toHaveClass('sx-needs');
     fireEvent.click(button('Options'));
     expect(radio('Video Pipeline Mode', 'Extend')).toHaveAttribute('aria-checked', 'true');
-    expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Upscale Engine', 'No upscale')).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(button('Close'));
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
-    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-portrait.mp4', upscale_engine: 'fast', upscale_only: 'false' });
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-portrait.mp4', upscale_engine: 'none', upscale_only: 'false' });
   });
 
   it('posts a 16:9 file as it is, and fills it to another shape once one is picked', async () => {
@@ -721,11 +728,23 @@ describe('UploadPage — posting', () => {
     fireEvent.click(radio('Pipeline Mode', 'Extend'));
     expect(radio('Shape', '16:9')).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(radio('Shape', '1:1'));
-    expect(await screen.findByText('1920×1080 ➔ 2048×2048')).toBeInTheDocument();
-    expect(button('Open hd.png').closest('li')).toHaveClass('sx-needs');
+    await waitFor(() => expect(button('Open hd.png').closest('li')).toHaveClass('sx-needs'));
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
-    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-hd.png', upscale_only: 'false', upscale_engine: 'fast', target_aspect: '1:1' });
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-hd.png', upscale_only: 'false', upscale_engine: 'none', target_aspect: '1:1' });
+  });
+
+  it('sends files already in shape to To make once an upscale is picked', async () => {
+    renderPage();
+    await pick(['hd.png', 'square.png']);
+    await screen.findByRole('button', { name: 'Open hd.png' });
+    expect(button('Open hd.png').closest('li')).toHaveClass('sx-ready');
+    expect(button('Open square.png').closest('li')).toHaveClass('sx-ready');
+    fireEvent.click(button('Open hd.png'));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Fast' }));
+    fireEvent.click(button('Close'));
+    expect(button('Open hd.png').closest('li')).toHaveClass('sx-needs');
+    expect(button('Open square.png').closest('li')).toHaveClass('sx-needs');
   });
 
   it('makes a square image square again, shows the result on the stage, then posts the result', async () => {
@@ -794,7 +813,12 @@ describe('UploadPage — posting', () => {
     await pick(['a.png', 'square.mp4']);
     const mixed = await screen.findByRole('button', { name: 'Post 2 as one' });
     expect(mixed).toHaveAttribute('aria-disabled', 'true');
-    expect(mixed).toHaveAccessibleDescription('A post holds one video. Only images can be posted together.');
+    expect(mixed).toHaveAccessibleDescription('Images and videos can’t be posted together.');
+    await pick(['square.mp4', 'portrait.mp4']);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open portrait.mp4' }));
+    fireEvent.click(radio('Video Pipeline Mode', 'Original'));
+    fireEvent.click(button('Close'));
+    expect(await screen.findByRole('button', { name: 'Post 2 as one' })).toHaveAccessibleDescription('A video can only be posted on its own.');
     await pick(Array.from({ length: 11 }, (_, i) => `img-${i}.png`).map((name) => {
       META[name] = meta(name, 400, 400);
       return name;

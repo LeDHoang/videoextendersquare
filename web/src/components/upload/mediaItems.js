@@ -71,11 +71,11 @@ export function stereoOf(item) {
 
 // What a post of this item points at, or null while it still needs to be made.
 // `target` is the shape a live upload must already have to post as it is
-// (null: any shape).
+// (null: any shape; false: none, an upscale is picked).
 export function postSource(item, target = '1:1') {
   if (item.convert?.status === 'ready') return { job_id: item.convert.jobId, stereo_layout: item.convert.result?.stereo_layout };
   if (item.render?.status === 'ready') return { job_id: item.render.jobId };
-  if (item.live && item.meta && (metaMatches(item.meta, target) || stereoOf(item))) return { stage_id: item.meta.stage_id };
+  if (item.live && item.meta && ((target !== false && metaMatches(item.meta, target)) || stereoOf(item))) return { stage_id: item.meta.stage_id };
   return null;
 }
 
@@ -94,7 +94,9 @@ export function spatialOf(item) {
 
 // Why these items cannot be one post, or ''.
 export function groupProblem(items) {
-  if (items.some((item) => item.kind === 'video')) return 'A post holds one video. Only images can be posted together.';
+  const videos = items.filter((item) => item.kind === 'video').length;
+  if (videos && videos < items.length) return 'Images and videos can’t be posted together.';
+  if (videos) return 'A video can only be posted on its own.';
   if (items.length > MAX_POST_IMAGES) return `A post holds at most ${MAX_POST_IMAGES} images (you picked ${items.length}).`;
   if (items.some((item) => item.convert)) return 'An image made 3D is posted on its own.';
   if (new Set(items.map((item) => stereoOf(item) || 'flat')).size > 1) return '3D and flat images cannot share a post.';

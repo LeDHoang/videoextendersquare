@@ -54,8 +54,8 @@ function useTargetShape(upscaleOnly, noUpscale) {
     setShape,
     shapeFor,
     // The shape a file must already have to post as it is (null: any). With an
-    // upscale under Keep shape, square files still post as they are.
-    asIsShapeFor: (meta) => (upscaleOnly ? (noUpscale ? null : '1:1') : shapeFor(meta)),
+    // upscale picked no file posts as it is (false): each one is made.
+    asIsShapeFor: (meta) => (!noUpscale ? false : upscaleOnly ? null : shapeFor(meta)),
   };
 }
 
@@ -66,7 +66,7 @@ export function useImageExtendConfig(models) {
 
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState(IMG_PROMPT_DEFAULT);
-  const [engine, setEngine] = useState('FAST');
+  const [engine, setEngine] = useState('');
   const [falModel, setFalModel] = useState('Clarity Upscaler');
   const [sharpening, setSharpening] = useState(0.5);
   const [outArgs, setOutArgs] = useState(VALID_ARGS);
@@ -159,7 +159,7 @@ export function useVideoExtendConfig(models) {
 
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState(VID_PROMPT_DEFAULT);
-  const [engine, setEngine] = useState('FAST');
+  const [engine, setEngine] = useState('');
   const [outpaintOpt, setOutpaintOpt] = useState(outpaintOptions[0] || 'LTX 2.3 Quality');
   const [falUpscale, setFalUpscale] = useState(upscaleOptions[0] || 'Bytedance Upscaler');
   const [sharpening, setSharpening] = useState(0.5);

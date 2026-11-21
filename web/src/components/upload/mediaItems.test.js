@@ -109,7 +109,8 @@ describe('groupProblem', () => {
     expect(groupProblem(flat)).toBe('');
     expect(groupProblem([eyes, item('eyes2.png', 800, 400, SBS)])).toBe('');
     expect(groupProblem([...flat, eyes])).toMatch(/3D and flat/);
-    expect(groupProblem([...flat, item('clip.mp4', 480, 480)])).toMatch(/one video/);
+    expect(groupProblem([...flat, item('clip.mp4', 480, 480)])).toBe('Images and videos can’t be posted together.');
+    expect(groupProblem([item('a.mp4', 480, 480), item('b.mp4', 480, 480)])).toBe('A video can only be posted on its own.');
     expect(groupProblem(Array.from({ length: 11 }, (_, i) => item(`i${i}.png`, 400, 400)))).toMatch(/at most 10 images \(you picked 11\)/);
     expect(groupProblem([flat[0], { ...flat[1], convert: ready('j3d') }])).toMatch(/posted on its own/);
   });

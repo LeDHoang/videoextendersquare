@@ -45,8 +45,10 @@ There are two modes. "Stretch to fit" is gone.
 - **Original** (Keep shape): nothing is added. Upscale is optional and keeps
   the native ratio.
 
-Upscale is picked under Quality: No upscale, or an engine. Original with no
-upscale posts the upload as it is.
+Upscale is picked under Quality: No upscale, or an engine. No upscale is the
+default. Original with no upscale posts the upload as it is. With an engine
+picked, every upload of that kind goes to To make, including files that
+already have their shape.
 
 With extend on and no upscale, the master keeps the native short side and
 the target sets the long side.

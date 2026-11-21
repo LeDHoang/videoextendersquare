@@ -26,7 +26,8 @@ import {
 
 // Upload: the person's media, grouped by what each file needs next. Files that
 // do not have their shape yet (the picked one, else the nearest of 1:1, 16:9
-// and 9:16; any shape under Keep shape) wait on the first shelf to be made;
+// and 9:16; any shape under Keep shape), and every file while an upscale is
+// picked, wait on the first shelf to be made;
 // files that have it and finished results wait on the second to be posted.
 // The Gallery tab lists everything by time.
 
