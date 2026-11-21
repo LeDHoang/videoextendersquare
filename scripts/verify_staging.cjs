@@ -282,11 +282,12 @@ async function main() {
       h.get('x-content-type-options') === 'nosniff' && h.get('x-frame-options') === 'DENY'
         && !!h.get('referrer-policy') && !!h.get('permissions-policy'));
   }
-  // Production default is report-only (SX_CSP_MODE=report); the nonce in the
-  // header must match the one stamped on the shell's scripts.
-  const csp = shell.headers.get('content-security-policy-report-only') || '';
+  // SX_CSP_MODE=report sends the report-only header, enforce the real one; the
+  // nonce in the header must match the one stamped on the shell's scripts.
+  const csp = shell.headers.get('content-security-policy')
+    || shell.headers.get('content-security-policy-report-only') || '';
   const nonce = (csp.match(/'nonce-([^']+)'/) || [])[1];
-  check('SPA: report-only CSP with matching nonce', !!nonce && shellHtml.includes(`nonce="${nonce}"`), csp ? '' : 'no CSP header');
+  check('SPA: CSP with matching nonce', !!nonce && shellHtml.includes(`nonce="${nonce}"`), csp ? '' : 'no CSP header');
   const echoed = await appFetch(`${APP}/api/healthz`, { headers: { 'X-Request-ID': 'verify-staging-0001' } });
   check('incoming X-Request-ID echoed', echoed.headers.get('x-request-id') === 'verify-staging-0001');
   const ready = await appFetch(`${APP}/api/readyz`);
