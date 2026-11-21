@@ -210,7 +210,7 @@ describe('UploadPage — video extender parity', () => {
     renderPage();
     await pick(['portrait.mp4']);
     expect(await screen.findByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeInTheDocument();
-    fireEvent.click(radio('Video Pipeline Mode', 'Keep shape'));
+    fireEvent.click(radio('Video Pipeline Mode', 'Original'));
     expect(screen.queryByText('12.5s EXCEEDS THE 10s THRESHOLD')).toBeNull();
   });
 
@@ -500,7 +500,7 @@ describe('UploadPage — image extender parity', () => {
     expect(await screen.findByText('1500×1200 ➔ 2048×2048')).toBeInTheDocument();
     expect(screen.queryByText('PAD: 150px [T/B]')).toBeNull();
     const engines = within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio').map((node) => node.textContent.trim());
-    expect(engines).toEqual(['Fast', 'Cloud AI']);
+    expect(engines).toEqual(['No upscale', 'Fast', 'Cloud AI']);
     fireEvent.click(radio('Upscale Engine', 'Cloud AI'));
     fireEvent.click(radio('FAL Model', /CCSR/));
     await waitFor(() => expect(radio('Cloud payment source', 'MY FAL KEY')).toHaveAttribute('aria-checked', 'true'));
@@ -533,7 +533,7 @@ describe('UploadPage — image extender parity', () => {
     renderPage();
     await pick(['wide.png']);
     await screen.findByText('1500×1200 ➔ 2048×2048');
-    fireEvent.click(radio('Pipeline Mode', 'Keep shape'));
+    fireEvent.click(radio('Pipeline Mode', 'Original'));
     expect(screen.getByText('1500×1200 ➔ 2560×2048')).toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'Shape' })).toBeNull();
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
@@ -604,8 +604,9 @@ describe('UploadPage — posting', () => {
     renderPage();
     await pick(['square.png']);
     expect(await screen.findByText('ALREADY 1:1')).toBeInTheDocument();
-    // Nothing to make square: the dialog goes straight to the post form.
-    expect(screen.queryByRole('radiogroup', { name: 'Upscale Engine' })).toBeNull();
+    // Nothing to make square: the dialog goes straight to the post form, as Original with no upscale.
+    expect(radio('Pipeline Mode', 'Original')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Upscale Engine', 'No upscale')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('TITLE')).toHaveValue('square');
     fireEvent.click(postButton());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
@@ -625,46 +626,64 @@ describe('UploadPage — posting', () => {
     expect(postButton()).toHaveAccessibleDescription('A TITLE IS NEEDED TO POST');
   });
 
-  it('offers a square video to be kept as it is or upscaled, with the real output size', async () => {
+  it('offers a square video as the original or extended, upscaled or not, with the real output size', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-up' });
     renderPage();
     await pick(['square.mp4']);
     await screen.findByText('ALREADY 1:1');
-    expect(radio('Ready file', 'Keep as is')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Video Pipeline Mode', 'Original')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Upscale Engine', 'No upscale')).toHaveAttribute('aria-checked', 'true');
     // Kept as it is: no target size is promised.
     expect(screen.getByText('480×480')).toBeInTheDocument();
-    fireEvent.click(radio('Ready file', 'Upscale'));
-    expect(screen.getByText('480×480 ➔ 2048×2048')).toBeInTheDocument();
-    // A square file can still be filled to another shape.
-    expect(radio('Video Pipeline Mode', 'Fill with AI')).toHaveAttribute('aria-checked', 'true');
+    // Extend keeps the quality the options hold.
+    fireEvent.click(radio('Video Pipeline Mode', 'Extend'));
+    expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'true');
     expect(radio('Video Shape', '1:1')).toHaveAttribute('aria-checked', 'true');
-    // Unpicking the quality leaves nothing to do.
-    fireEvent.click(radio('Upscale Engine', 'Fast'), { detail: 1 });
-    expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText('480×480 ➔ 2048×2048')).toBeInTheDocument();
+    // Extend with no upscale: a square file has nothing to fill until another shape is picked.
+    fireEvent.click(radio('Upscale Engine', 'No upscale'));
     expect(renderButton()).toHaveAttribute('aria-disabled', 'true');
-    expect(renderButton()).toHaveAccessibleDescription('PICK A QUALITY TO UPSCALE, OR KEEP THE FILE AS IT IS');
-    fireEvent.click(radio('Ready file', 'Keep as is'));
+    expect(renderButton()).toHaveAccessibleDescription('PICK ANOTHER SHAPE OR AN UPSCALE');
+    // Original goes back to the post form, with no upscale.
+    fireEvent.click(radio('Video Pipeline Mode', 'Original'));
     expect(screen.getByLabelText('TITLE')).toHaveValue('square');
+    expect(radio('Upscale Engine', 'No upscale')).toHaveAttribute('aria-checked', 'true');
+    // Original with an upscale keeps the shape and makes it 2K.
+    fireEvent.click(radio('Upscale Engine', 'Fast'));
+    expect(screen.getByText('480×480 ➔ 2048×2048')).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Video Shape' })).toBeNull();
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ upscale_engine: 'fast', upscale_only: 'true' });
   });
 
-  it('fills a clip with no upscale when the quality is unpicked', async () => {
+  it('fills a clip with no upscale', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-none' });
     renderPage();
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1350 ➔ 2048×2048');
-    fireEvent.click(radio('Upscale Engine', 'Fast'), { detail: 1 });
+    fireEvent.click(radio('Upscale Engine', 'No upscale'));
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
     expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ upscale_engine: 'none', upscale_only: 'false', target_aspect: '1:1' });
   });
 
-  it('posts a clip as it is under Keep shape with no upscale', async () => {
+  it('posts a clip as it is as the Original with no upscale', async () => {
     mocks.post.mockResolvedValue({ meta: { title: 'portrait' }, rel_path: 'uploads/p.mp4', media_url: '/m' });
     renderPage();
     await pick(['portrait.mp4']);
     await screen.findByText('1080×1350 ➔ 2048×2048');
-    fireEvent.click(radio('Upscale Engine', 'Fast'), { detail: 1 });
-    fireEvent.click(radio('Video Pipeline Mode', 'Keep shape'));
-    // Nothing is filled or upscaled: the file is ready and goes to the post form.
+    fireEvent.click(radio('Upscale Engine', 'No upscale'));
+    fireEvent.click(radio('Video Pipeline Mode', 'Original'));
+    // Nothing is filled or upscaled: the file is ready and goes to the post form,
+    // which still offers Extend to go back to the options.
+    expect(await screen.findByRole('button', { name: 'POST' })).toBeInTheDocument();
+    expect(radio('Video Pipeline Mode', 'Original')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Upscale Engine', 'No upscale')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(radio('Video Pipeline Mode', 'Extend'));
+    expect(renderButton()).toBeInTheDocument();
+    expect(radio('Video Pipeline Mode', 'Extend')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(radio('Video Pipeline Mode', 'Original'));
     fireEvent.click(await screen.findByRole('button', { name: 'POST' }));
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     expect(mocks.post.mock.calls[0][1]).toMatchObject({ kind: 'video', stage_id: 'st-portrait.mp4' });
@@ -672,21 +691,41 @@ describe('UploadPage — posting', () => {
     expect(mocks.form).not.toHaveBeenCalled();
   });
 
+  it('keeps the options of the other files when a square file goes back to Original', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-p' });
+    renderPage();
+    await pick(['square.mp4', 'portrait.mp4']);
+    await screen.findByRole('button', { name: /^Fill/ });
+    fireEvent.click(button('Open square.mp4'));
+    fireEvent.click(radio('Video Pipeline Mode', 'Extend'));
+    fireEvent.click(radio('Video Pipeline Mode', 'Original'));
+    expect(screen.getByLabelText('TITLE')).toHaveValue('square');
+    fireEvent.click(button('Close'));
+    expect(button('Open portrait.mp4').closest('li')).toHaveClass('sx-needs');
+    fireEvent.click(button('Options'));
+    expect(radio('Video Pipeline Mode', 'Extend')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Upscale Engine', 'Fast')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(button('Close'));
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-portrait.mp4', upscale_engine: 'fast', upscale_only: 'false' });
+  });
+
   it('posts a 16:9 file as it is, and fills it to another shape once one is picked', async () => {
     mocks.form.mockResolvedValue({ job_id: 'job-hd' });
     renderPage();
     await pick(['hd.png']);
     expect(await screen.findByText('ALREADY 16:9')).toBeInTheDocument();
-    expect(radio('Ready file', 'Keep as is')).toHaveAttribute('aria-checked', 'true');
+    expect(radio('Pipeline Mode', 'Original')).toHaveAttribute('aria-checked', 'true');
     expect(button('Open hd.png').closest('li')).toHaveClass('sx-ready');
-    fireEvent.click(radio('Ready file', 'Upscale'));
+    fireEvent.click(radio('Pipeline Mode', 'Extend'));
     expect(radio('Shape', '16:9')).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(radio('Shape', '1:1'));
     expect(await screen.findByText('1920×1080 ➔ 2048×2048')).toBeInTheDocument();
     expect(button('Open hd.png').closest('li')).toHaveClass('sx-needs');
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
-    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-hd.png', upscale_only: 'false', target_aspect: '1:1' });
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-hd.png', upscale_only: 'false', upscale_engine: 'fast', target_aspect: '1:1' });
   });
 
   it('makes a square image square again, shows the result on the stage, then posts the result', async () => {
@@ -695,7 +734,7 @@ describe('UploadPage — posting', () => {
     renderPage();
     await pick(['square.png']);
     await screen.findByText('ALREADY 1:1');
-    fireEvent.click(radio('Ready file', 'Upscale'));
+    fireEvent.click(radio('Upscale Engine', 'Fast'));
     expect(screen.getByText('LOCAL PROCESSING · NO CREDITS REQUIRED')).toBeInTheDocument();
     fireEvent.click(renderButton());
     await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
@@ -873,9 +912,9 @@ describe('UploadPage — several files at once', () => {
     await screen.findByRole('button', { name: /^Fill 3/ });
     fireEvent.click(button('Options'));
     expect(radio('Options for', 'IMAGES')).toHaveAttribute('aria-checked', 'true');
-    expect(within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio')).toHaveLength(2);
-    fireEvent.click(radio('Options for', 'VIDEOS'));
     expect(within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio')).toHaveLength(3);
+    fireEvent.click(radio('Options for', 'VIDEOS'));
+    expect(within(screen.getByRole('radiogroup', { name: 'Upscale Engine' })).getAllByRole('radio')).toHaveLength(4);
     fireEvent.click(button('Close'));
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select tall.png' }));

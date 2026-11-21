@@ -13,7 +13,7 @@ import { appendProcessingParameters, matchesTarget } from '../utils/cloudBilling
 import { billingErrorMessage } from '../utils/billingErrors.js';
 import { assertUploadSize } from '../utils/uploadLimits.js';
 import { ActivityIcon, ClockIcon, CloseIcon, SlidersIcon, IndustrialUploadIcon, SquareIcon, StackIcon } from '../components/icons/index.jsx';
-import { useImageExtendConfig, useVideoExtendConfig } from '../components/upload/useExtendConfig.js';
+import { MODES, useImageExtendConfig, useVideoExtendConfig } from '../components/upload/useExtendConfig.js';
 import { useRenderFunding } from '../components/upload/useRenderFunding.js';
 import { useMediaLibrary } from '../components/upload/useMediaLibrary.js';
 import JobWatcher from '../components/upload/JobWatcher.jsx';
@@ -339,7 +339,7 @@ export default function UploadPage() {
         !blocked.length && studioBlocked && 'STUDIO ENGINE NOT INSTALLED — PLEASE SWITCH TO FAST OR FAL AI',
         !blocked.length && !studioBlocked && fundingBlocked && 'CHOOSE HOW TO PAY IN OPTIONS',
         !targets.length && 'TICK THE FILES TO MAKE',
-        nothingToDo && 'PICK A QUALITY TO UPSCALE, OR KEEP THE FILE AS IT IS',
+        nothingToDo && 'PICK ANOTHER SHAPE OR AN UPSCALE',
       ]}
       loading={makeBusy}
       onClick={make}
@@ -353,9 +353,24 @@ export default function UploadPage() {
       <div>{makeError}</div>
     </div>
   ) : null;
-  const optionsFor = (kind) => (
+  // Original / Extend or a quality picked in the file dialog. Original with no upscale
+  // posts the upload as it is; any other pick keeps the options open to make it.
+  const pickFor = (kind) => (mode, engine) => {
+    const original = mode === MODES[1] && engine === '';
+    // A file that already has its shape goes back to its post form; the options the
+    // other files of its kind use stay as they were.
+    if (original && open.redo && shelf(cover) === 'ready') {
+      setOpen({ ...open, redo: false });
+      return;
+    }
+    cfgs[kind].setMode(mode);
+    cfgs[kind].setEngine(engine);
+    setOpen({ ...open, redo: !original });
+  };
+  const optionsFor = (kind, onPick) => (
     <>
       <OptionsPanel
+        onPick={onPick}
         cfg={cfgs[kind]}
         funding={{ ...fundings[kind], setPaymentSource }}
         probes={probes}
@@ -448,7 +463,7 @@ export default function UploadPage() {
       {!items.length && !staging ? (
         <div className="sx-media-empty">
           <p className="sx-media-empty-line">Nothing here yet.</p>
-          <UploadZone accept={ACCEPT} multiple onFiles={onFiles} caption="Photos and videos. Fill to 1:1, 16:9 or 9:16, or keep the shape." />
+          <UploadZone accept={ACCEPT} multiple onFiles={onFiles} caption="Photos and videos. Keep the original, or extend to 1:1, 16:9 or 9:16." />
         </div>
       ) : tab === 'gallery' ? (
         <ul className="sx-media-grid" aria-label="All media">{sortItems(items, sort).map((item) => tile(item))}</ul>
@@ -526,7 +541,7 @@ export default function UploadPage() {
           onClose={() => setOpen(null)}
           onStep={!group && items.length > 1 ? step : undefined}
           makeMode={makeMode}
-          options={makeMode ? optionsFor(cover.kind) : null}
+          options={makeMode ? optionsFor(cover.kind, pickFor(cover.kind)) : null}
           progress={progress}
           cfg={cfgs[cover.kind]}
           draft={draft}
@@ -534,6 +549,7 @@ export default function UploadPage() {
           onStereo={(change) => patch(cover.id, change)}
           onRedo={!group && cover.live && !cover.posted && shelf(cover) === 'ready' && !stereoOf(cover) && !converting ? () => setOpen({ ...open, redo: true }) : undefined}
           onRedoBack={open.redo && shelf(cover) === 'ready' ? () => setOpen({ ...open, redo: false }) : undefined}
+          onPick={pickFor(cover.kind)}
           canConvert={!!features.stereo_convert && !group && !stereoOf(cover)}
           convertBusy={convertBusy || blocked.length > 0}
           convertError={convertError}

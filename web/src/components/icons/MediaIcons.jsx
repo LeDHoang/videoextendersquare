@@ -17,6 +17,7 @@ import closeRaw from './svg/media-close.svg?raw';
 import trashRaw from './svg/media-trash.svg?raw';
 import alertRaw from './svg/media-alert.svg?raw';
 import sendRaw from './svg/media-send.svg?raw';
+import noneRaw from './svg/media-none.svg?raw';
 
 const icon = (src) => function MediaIcon({ className = 'sx-media-icon', ...props }) {
   return <RawIcon src={src} className={className} {...props} />;
@@ -38,3 +39,4 @@ export const CloseIcon = icon(closeRaw);
 export const TrashIcon = icon(trashRaw);
 export const AlertIcon = icon(alertRaw);
 export const SendIcon = icon(sendRaw);
+export const NoneIcon = icon(noneRaw);

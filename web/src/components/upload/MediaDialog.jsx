@@ -7,8 +7,10 @@ import { Button, ToggleRow } from '../ui/controls.jsx';
 import { STEREO_LABELS, stereoEyeSize, stereoFrame } from '../../utils/mediaFormat.js';
 import { masterSize } from '../../utils/aspect.js';
 import { matchesTarget } from '../../utils/cloudBilling.js';
-import { CheckIcon, CloseIcon, CubeIcon, DownloadIcon, RedoIcon, SendIcon, SquareIcon, StackIcon } from '../icons/index.jsx';
+import { CloseIcon, CubeIcon, DownloadIcon, RedoIcon, SendIcon, SquareIcon } from '../icons/index.jsx';
 import StudioStage from './StudioStage.jsx';
+import { ModeChoice, QualityChoice, Step } from './OptionsPanel.jsx';
+import { MODES } from './useExtendConfig.js';
 import PostForm from './PostForm.jsx';
 import { metaStereoCandidate, postSource, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
 import { onRovingKeyDown } from '../ui/roving.js';
@@ -102,6 +104,7 @@ export default function MediaDialog({
   onDraft,
   onStereo,
   onRedo,          // open the options for a file that is already postable, or undefined
+  onPick,          // (mode, engine): Original / Extend or the quality was picked
   onRedoBack,
   canConvert,
   convertBusy,
@@ -142,8 +145,14 @@ export default function MediaDialog({
   const stereoChoice = !group && !posted && cover.live && !render
     && (metaStereoCandidate(cover.meta) || stereoFrame(cover.meta?.width, cover.meta?.height)?.manual);
   const title = group ? `${items.length} images, one post` : cover.name;
-  // An upload that already has its shape can be posted as it is or upscaled first.
+  // An upload that already has its shape can be posted as it is, or extended / upscaled first.
   const asIsChoice = !group && !posted && !render && !stereo && !!cover.meta && !!postSource(cover, cfg.asIsShapeFor(meta)) && (onRedo || onRedoBack);
+  // Original / Extend shows over the options, and over the post form of such an upload.
+  // Posting as it is is Original with no upscale, whatever the options hold.
+  const modeChoice = asIsChoice || (makeMode && !group);
+  const shownMode = makeMode ? cfg.mode : MODES[1];
+  // Original on such an upload goes back to posting it as it is; Extend keeps the quality the options hold.
+  const pickMode = (mode) => onPick(mode, asIsChoice && mode === MODES[1] ? '' : cfg.engine);
   // The shape the stage shows: the one being made, else the file's own.
   const making = makeMode || working || !!render;
   const target = making ? cfg.shapeFor(meta) : null;
@@ -189,27 +198,11 @@ export default function MediaDialog({
           />
           <div className="sx-media-side">
             {stereoChoice ? <StereoChoice item={cover} onChange={onStereo} /> : null}
-            {asIsChoice ? (
-              <div className="sx-media-choices" role="radiogroup" aria-label="Ready file" onKeyDown={onRovingKeyDown}>
-                {[
-                  ['Keep as is', 'Post the file at its own resolution', CheckIcon, !makeMode, onRedoBack],
-                  ['Upscale', 'Upscale it to 2K before posting', StackIcon, makeMode, onRedo],
-                ].map(([name, hint, Icon, picked, pick]) => (
-                  <button
-                    type="button"
-                    key={name}
-                    role="radio"
-                    aria-checked={picked}
-                    tabIndex={picked ? 0 : -1}
-                    className={`sx-media-choice ${picked ? 'sx-selected' : ''}`}
-                    title={hint}
-                    onClick={picked ? undefined : pick}
-                  >
-                    <Icon />
-                    <span className="sx-media-choice-name">{name}</span>
-                  </button>
-                ))}
-              </div>
+            {modeChoice ? <ModeChoice value={shownMode} onChange={pickMode} isVideo={cover.kind === 'video'} /> : null}
+            {asIsChoice && !makeMode ? (
+              <Step title="Quality">
+                <QualityChoice engines={cfg.engines} value="" onChange={(engine) => onPick(shownMode, engine)} />
+              </Step>
             ) : null}
 
             {posted ? (

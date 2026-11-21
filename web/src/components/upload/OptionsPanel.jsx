@@ -3,7 +3,7 @@ import { ToggleRow } from '../ui/controls.jsx';
 import CustomModelPanel from '../ui/CustomModelPanel.jsx';
 import { onRovingKeyDown, tabStop } from '../ui/roving.js';
 import CloudFundingPanel from '../billing/CloudFundingPanel.jsx';
-import { CloudIcon, CubeIcon, SendIcon, SquareIcon, StackIcon } from '../icons/index.jsx';
+import { CheckIcon, CloudIcon, CubeIcon, NoneIcon, SendIcon, SquareIcon } from '../icons/index.jsx';
 import { MODES, MAX_LORAS } from './useExtendConfig.js';
 import { LTX25_ANCHORS } from '../../utils/modelOptions.js';
 import { TARGET_ASPECTS } from '../../utils/aspect.js';
@@ -12,9 +12,11 @@ import { TARGET_ASPECTS } from '../../utils/aspect.js';
 // pages, in the order a person decides them, plus the shape. It binds to the
 // same config object (useExtendConfig), so the /process form does not change.
 
+// Original first: the file as it came, then Extend (Fill with AI) to a shape.
+const MODE_ORDER = [MODES[1], MODES[0]];
 const MODE_CARDS = {
-  [MODES[0]]: { name: 'Fill with AI', hint: 'New picture is painted out to the shape', Icon: SquareIcon },
-  [MODES[1]]: { name: 'Keep shape', hint: 'Nothing is added; the file keeps its shape', Icon: StackIcon },
+  [MODES[0]]: { name: 'Extend', hint: 'New picture is painted out to 1:1, 16:9 or 9:16', Icon: SquareIcon },
+  [MODES[1]]: { name: 'Original', hint: 'Nothing is added; the file keeps its shape', Icon: CheckIcon },
 };
 // A plain frame in the shape, centred in the 24×24 icon box.
 const shapeIcon = (width, height) => function ShapeIcon() {
@@ -29,13 +31,15 @@ const SHAPE_CARDS = {
   '16:9': { name: '16:9', hint: 'Wide', Icon: shapeIcon(20, 11.25) },
   '9:16': { name: '9:16', hint: 'Tall', Icon: shapeIcon(11.25, 20) },
 };
+// '' is no upscale: the file keeps its own resolution.
 const ENGINE_CARDS = {
+  '': { name: 'No upscale', hint: 'Keeps its own resolution', Icon: NoneIcon },
   FAST: { name: 'Fast', hint: 'On this server, no credits', Icon: SendIcon },
   STUDIO: { name: 'Studio', hint: 'Slower, cleaner detail', Icon: CubeIcon },
   'FAL AI': { name: 'Cloud AI', hint: 'Best detail, uses credits', Icon: CloudIcon },
 };
 
-function Step({ title, children }) {
+export function Step({ title, children }) {
   return (
     <section className="sx-media-step">
       <h3 className="sx-media-step-title">{title}</h3>
@@ -54,8 +58,7 @@ function Label({ children, htmlFor, value }) {
 }
 
 // Large picture choices (a radiogroup). `cards` maps each option to its name, hint and icon.
-// `clearable`: clicking the picked card unpicks it (value '').
-function ChoiceCards({ options, cards, value, onChange, ariaLabel, clearable }) {
+function ChoiceCards({ options, cards, value, onChange, ariaLabel }) {
   const stop = tabStop(options.map((option) => option === value));
   return (
     <div className="sx-media-choices" role="radiogroup" aria-label={ariaLabel} onKeyDown={onRovingKeyDown}>
@@ -70,11 +73,8 @@ function ChoiceCards({ options, cards, value, onChange, ariaLabel, clearable }) 
             tabIndex={index === stop ? 0 : -1}
             className={`sx-media-choice ${option === value ? 'sx-selected' : ''}`}
             title={hint}
-            onClick={(event) => {
+            onClick={() => {
               if (option !== value) onChange(option);
-              // Only a single pointer click clears: not the second click of a double-click,
-              // and not Space or Enter on the focused card (event.detail is 0 for those).
-              else if (clearable && event.detail === 1) onChange('');
             }}
           >
             <Icon />
@@ -84,6 +84,16 @@ function ChoiceCards({ options, cards, value, onChange, ariaLabel, clearable }) 
       })}
     </div>
   );
+}
+
+// Original or Extend (cfg.mode).
+export function ModeChoice({ value, onChange, isVideo }) {
+  return <ChoiceCards options={MODE_ORDER} cards={MODE_CARDS} value={value} onChange={onChange} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />;
+}
+
+// No upscale, then the kind's engines (cfg.engine; '' is no upscale).
+export function QualityChoice({ engines, value, onChange }) {
+  return <ChoiceCards options={['', ...engines]} cards={ENGINE_CARDS} value={value} onChange={onChange} ariaLabel="Upscale Engine" />;
 }
 
 const modelShort = (model) => (model || '').split('/').filter(Boolean).slice(-2).join('/');
@@ -209,7 +219,9 @@ function Trim({ cfg, maxSourceDur }) {
 // `allMatch`: every file already has the picked shape, so there is nothing to fill.
 // `shape`: the shape shown as picked: the person's pick, else the one all the
 // files would be made in (null when they differ).
-export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSourceDur, allMatch, shape }) {
+// `onPick(mode, engine)`: set in the file dialog, which shows Original / Extend
+// above the panel; the panel then leaves the mode out and routes picks there.
+export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSourceDur, allMatch, shape, onPick }) {
   const isVideo = cfg.kind === 'video';
   const outpaint = !cfg.upscaleOnly && !allMatch;
   const ltx = isVideo && outpaint && cfg.ltxPicked;
@@ -219,16 +231,17 @@ export default function OptionsPanel({ cfg, funding, probes, studioOk, maxSource
   const seedvr = isVideo && cfg.falPicked && cfg.falUpscale.includes('SeedVR');
   return (
     <div className="sx-media-options">
-      <Step title="How">
-        <ChoiceCards options={MODES} cards={MODE_CARDS} value={cfg.mode} onChange={cfg.setMode} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />
-        {cfg.upscaleOnly ? null : (
-          <ChoiceCards options={TARGET_ASPECTS} cards={SHAPE_CARDS} value={shape} onChange={cfg.setShape} ariaLabel={isVideo ? 'Video Shape' : 'Shape'} />
-        )}
-      </Step>
+      {onPick && cfg.upscaleOnly ? null : (
+        <Step title={onPick ? 'Shape' : 'How'}>
+          {onPick ? null : <ModeChoice value={cfg.mode} onChange={cfg.setMode} isVideo={isVideo} />}
+          {cfg.upscaleOnly ? null : (
+            <ChoiceCards options={TARGET_ASPECTS} cards={SHAPE_CARDS} value={shape} onChange={cfg.setShape} ariaLabel={isVideo ? 'Video Shape' : 'Shape'} />
+          )}
+        </Step>
+      )}
 
       <Step title="Quality">
-        <ChoiceCards options={cfg.engines} cards={ENGINE_CARDS} value={cfg.engine} onChange={cfg.setEngine} ariaLabel="Upscale Engine" clearable />
-        {cfg.noUpscale ? <p className="sx-studio-note">No upscale: the file keeps its own resolution. Pick a card to upscale to 2K.</p> : null}
+        <QualityChoice engines={cfg.engines} value={cfg.engine} onChange={onPick ? (engine) => onPick(cfg.mode, engine) : cfg.setEngine} />
         {isVideo && cfg.studioPicked && !studioOk ? (
           <AccentBlock
             title="STUDIO ENGINE UNAVAILABLE"

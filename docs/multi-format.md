@@ -39,11 +39,14 @@ Quote and submit fingerprints bind these dims.
 
 There are two modes. "Stretch to fit" is gone.
 
-- **Fill with AI:** outpaint to a picked shape (`target_aspect`). The
+- **Extend** (Fill with AI): outpaint to a picked shape (`target_aspect`). The
   default is the nearest shape to the source. The pick is remembered per kind
   for the visit.
-- **Keep shape:** nothing is added. Upscale is optional and keeps the native
-  ratio.
+- **Original** (Keep shape): nothing is added. Upscale is optional and keeps
+  the native ratio.
+
+Upscale is picked under Quality: No upscale, or an engine. Original with no
+upscale posts the upload as it is.
 
 With extend on and no upscale, the master keeps the native short side and
 the target sets the long side.
