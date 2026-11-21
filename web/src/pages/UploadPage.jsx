@@ -66,7 +66,6 @@ export default function UploadPage() {
   const [settled, setSettled] = useState(0);
   const [convertBusy, setConvertBusy] = useState(false);
   const [convertError, setConvertError] = useState('');
-  const [spatialOff, setSpatialOff] = useState(false);
   const spatialStarting = useRef(false);
   const [publishing, setPublishing] = useState(false);
   const [postError, setPostError] = useState('');
@@ -256,7 +255,9 @@ export default function UploadPage() {
   // ── Depth version (spatial 3D) of the open post: only a 2D post gets one ──
   const posting = !!cover && !makeMode && !cover.posted && openItems.every((item) => postSource(item, asIs(item)));
   const spatialShown = posting && !!features.spatial_default && openItems.every((item) => !stereoOf(item) && !item.convert);
-  const spatialSlots = spatialShown && !spatialOff ? openItems : [];
+  // Made only once asked for: the ADD DEPTH button marks every file of the open post.
+  const spatialWanted = openItems.some((item) => item.depth);
+  const spatialSlots = spatialShown && spatialWanted ? openItems : [];
   const spatialPending = spatialSlots.some((item) => !['done', 'failed', 'skipped'].includes(spatialOf(item)?.status));
   const spatialReady = spatialSlots.length > 0 && spatialSlots.every((item) => spatialOf(item)?.status === 'done');
   const spatialFailed = spatialSlots.filter((item) => spatialOf(item)?.status === 'failed');
@@ -557,8 +558,10 @@ export default function UploadPage() {
           onDropConvert={() => patch(cover.id, { convert: null })}
           spatial={{
             shown: spatialShown,
-            on: !spatialOff,
-            onToggle: (on) => setSpatialOff(!on),
+            on: spatialWanted,
+            ready: spatialReady,
+            onAdd: () => openItems.forEach((item) => patch(item.id, { depth: true })),
+            onRemove: () => openItems.forEach((item) => patch(item.id, { depth: false })),
             failed: spatialFailed.length > 0,
             errors: spatialFailed.map((item) => spatialOf(item).error).filter(Boolean),
             skipped: spatialSkipped.length > 0,

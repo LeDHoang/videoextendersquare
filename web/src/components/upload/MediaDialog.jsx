@@ -7,7 +7,7 @@ import { Button, ToggleRow } from '../ui/controls.jsx';
 import { STEREO_LABELS, stereoEyeSize, stereoFrame } from '../../utils/mediaFormat.js';
 import { masterSize } from '../../utils/aspect.js';
 import { matchesTarget } from '../../utils/cloudBilling.js';
-import { CloseIcon, CubeIcon, DownloadIcon, RedoIcon, SendIcon, SquareIcon } from '../icons/index.jsx';
+import { CloseIcon, CubeIcon, DownloadIcon, IndustrialReelsIcon, RedoIcon, SendIcon, SquareIcon } from '../icons/index.jsx';
 import StudioStage from './StudioStage.jsx';
 import { ModeChoice, QualityChoice, Step } from './OptionsPanel.jsx';
 import { MODES } from './useExtendConfig.js';
@@ -266,7 +266,15 @@ export default function MediaDialog({
 
                 {spatial?.shown ? (
                   <div className="sx-media-spatial">
-                    <ToggleRow label="Add depth for VR" checked={spatial.on} onChange={spatial.onToggle} help="A depth version for VR headsets, posted beside the 2D file. No credits. Videos up to 60 s." />
+                    {!spatial.on ? (
+                      <>
+                        <Button onClick={spatial.onAdd}><IndustrialReelsIcon className="sx-btn-icon" aria-hidden="true" /> ADD DEPTH FOR VR</Button>
+                        <p className="sx-studio-note">A depth version for VR headsets, posted beside the 2D file. No credits. Videos up to 60 s.</p>
+                      </>
+                    ) : (
+                      <Button onClick={spatial.onRemove}><SquareIcon /> REMOVE DEPTH</Button>
+                    )}
+                    {spatial.ready ? <p role="status" className="sx-studio-note">The depth version is ready. It posts beside the 2D file.</p> : null}
                     {spatial.on ? items.map((item) => {
                       const job = spatialOf(item);
                       const state = job?.jobId ? progress[job.jobId] : null;

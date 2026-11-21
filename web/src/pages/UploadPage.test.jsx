@@ -1285,6 +1285,7 @@ describe('UploadPage — depth version for VR', () => {
   ));
   const convertCalls = () => mocks.post.mock.calls.filter(([path]) => path === '/api/stereo/convert');
   const publishBody = () => mocks.post.mock.calls.find(([path]) => path === '/api/uploads/publish')?.[1];
+  const addDepth = () => screen.findByRole('button', { name: /ADD DEPTH FOR VR/ });
 
   beforeEach(() => {
     failOn = null;
@@ -1293,14 +1294,17 @@ describe('UploadPage — depth version for VR', () => {
     answer();
   });
 
-  it('makes the depth version on its own and publishes it beside the 2D file', async () => {
+  it('makes the depth version once asked and publishes it beside the 2D file', async () => {
     renderPage();
     await pick(['square.png']);
+    await waitFor(() => expect(postButton()).toBeEnabled());
+    expect(convertCalls()).toHaveLength(0);
+    fireEvent.click(await addDepth());
     await waitFor(() => expect(mocks.post).toHaveBeenCalledWith('/api/stereo/convert', { kind: 'image', depth_pack: true, stage_id: 'st-square.png' }));
-    expect(screen.getByRole('checkbox', { name: 'Add depth for VR' })).toBeChecked();
     expect(postButton()).toBeDisabled();
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-square.png' }));
     await waitFor(() => expect(postButton()).toBeEnabled());
+    expect(screen.getByText('The depth version is ready. It posts beside the 2D file.')).toBeInTheDocument();
     fireEvent.click(postButton());
     await waitFor(() => expect(publishBody()).toMatchObject({ stage_id: 'st-square.png', spatial_job_ids: ['job-sp-st-square.png'] }));
   });
@@ -1309,6 +1313,7 @@ describe('UploadPage — depth version for VR', () => {
     failOn = 'st-square.mp4';
     renderPage();
     await pick(['square.mp4']);
+    fireEvent.click(await addDepth());
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-square.mp4-fail' }));
     expect(await screen.findByText('DEPTH VERSION FAILED — THE POST IS 2D ONLY')).toBeInTheDocument();
     fireEvent.click(postButton());
@@ -1320,6 +1325,7 @@ describe('UploadPage — depth version for VR', () => {
     skipOn = 'st-square.png';
     renderPage();
     await pick(['square.png']);
+    fireEvent.click(await addDepth());
     expect(await screen.findByText(/Depth versions take 1:1, 16:9 or 9:16 files only/)).toBeInTheDocument();
     await waitFor(() => expect(postButton()).toBeEnabled());
     fireEvent.click(postButton());
@@ -1327,10 +1333,12 @@ describe('UploadPage — depth version for VR', () => {
     expect(publishBody().spatial_job_ids).toBeUndefined();
   });
 
-  it('publishes 2D only when switched off', async () => {
+  it('publishes 2D only when the depth is removed', async () => {
     renderPage();
     await pick(['square.png']);
-    fireEvent.click(await screen.findByRole('checkbox', { name: 'Add depth for VR' }));
+    fireEvent.click(await addDepth());
+    expect(postButton()).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /REMOVE DEPTH/ }));
     expect(postButton()).toBeEnabled();
     fireEvent.click(postButton());
     await waitFor(() => expect(publishBody()).toBeDefined());
@@ -1348,6 +1356,7 @@ describe('UploadPage — depth version for VR', () => {
     renderPage();
     await pick(['a.png', 'b.png', 'c.png']);
     fireEvent.click(await screen.findByRole('button', { name: 'Post 3 as one' }));
+    fireEvent.click(await addDepth());
     await waitFor(() => expect(convertCalls()).toHaveLength(1));
     expect(convertCalls()[0][1]).toEqual({ kind: 'image', depth_pack: true, stage_id: 'st-a.png' });
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-sp-st-a.png' }));
@@ -1370,6 +1379,7 @@ describe('UploadPage — depth version for VR', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Fill/ }));
     expect(convertCalls()).toHaveLength(0);
     fireEvent.click(await screen.findByRole('button', { name: 'FINISH job-ext' }));
+    fireEvent.click(await addDepth());
     await waitFor(() => expect(convertCalls()).toHaveLength(1));
     expect(convertCalls()[0][1]).toEqual({ kind: 'image', depth_pack: true, job_id: 'job-ext' });
   });
@@ -1378,7 +1388,7 @@ describe('UploadPage — depth version for VR', () => {
     renderPage();
     await pick(['eyes1.png']);
     await screen.findByLabelText(/STEREOSCOPIC 3D/);
-    expect(screen.queryByRole('checkbox', { name: 'Add depth for VR' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /ADD DEPTH FOR VR/ })).toBeNull();
     expect(convertCalls()).toHaveLength(0);
   });
 });
