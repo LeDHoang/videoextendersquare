@@ -1931,6 +1931,29 @@ def test_pipeline_context_decays_recent_daily_stats(app):
     assert context.recent_stats[post.id]["qualified_views"] == pytest.approx(6.0)
 
 
+def test_recent_daily_stats_are_read_once_per_ttl(app, monkeypatch):
+    from server.social.recommendations import actor_identity
+
+    post = seed_catalog(app, creators=1, posts_per_creator=1)[0]
+    today = utcnow().date()
+
+    def views():
+        context = service._pipeline_context(
+            db, actor=actor_identity(None, "ttl-probe"), session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+        return context.recent_stats.get(post.id, {}).get("qualified_views")
+
+    with app.state.testing_session() as db:
+        assert views() is None
+        db.add(PostRecommendationDailyStats(post_id=post.id, day=today, qualified_views=3))
+        db.commit()
+        # Within the TTL the cached read is reused, so the new row is not seen yet.
+        assert views() is None
+        monkeypatch.setattr(service, "RECENT_STATS_TTL_S", 0.0)
+        assert views() == pytest.approx(3.0)
+
+
 def _trending_order(items, stats, recent_stats):
     from types import SimpleNamespace
 
@@ -2117,6 +2140,24 @@ def test_pipeline_context_loads_negative_reel_affinities(app):
         )
     assert context.item_affinity[posts[24].id] == -8.0
     assert posts[25].id not in context.item_affinity
+
+
+def test_pipeline_context_keeps_negative_reel_affinities_below_the_top_rows_limit(app):
+    from server.social.recommendations import actor_identity
+
+    posts = seed_catalog(app, creators=1, posts_per_creator=3)
+    actor = actor_identity(None, "few-rows")
+    with app.state.testing_session() as db:
+        # Fewer than 24 rows: the top-rows read holds them all, the disliked one included.
+        db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="few-rows", post_id=posts[0].id, score=4.0))
+        db.add(ActorItemAffinity(actor_key=actor.actor_key, anonymous_id="few-rows", post_id=posts[1].id, score=-8.0))
+        db.commit()
+        context = service._pipeline_context(
+            db, actor=actor, session=None, surface="for_you", seed_post_id=None,
+            allowed_post_ids=None, manual_order=None,
+        )
+    assert context.item_affinity[posts[1].id] == -8.0
+    assert posts[2].id not in context.item_affinity
 
 
 def test_decayed_affinity_halves_positives_and_fades_negatives_in_whole_days():

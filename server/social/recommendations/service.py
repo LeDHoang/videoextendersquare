@@ -55,6 +55,7 @@ from .config import (
     GRID_CREATOR_STEP,
     MAX_CATALOG_SIZE,
     MAX_PAGE_SIZE,
+    RECENT_STATS_TTL_S,
     REELS_ALGORITHM_VERSION,
     SESSION_IDLE_MINUTES,
     SESSION_MAX_HOURS,
@@ -477,6 +478,34 @@ def _catalog(
     return catalog
 
 
+# Last week's daily stats for every post, each day decayed by its age, keyed by
+# post then column. They are the same for every viewer, so one read serves all
+# requests for RECENT_STATS_TTL_S, and a new day starts a new read.
+_recent_stats_cache: dict = {"entry": (None, 0.0, {})}
+_DAILY_COLUMNS = ("impressions", "qualified_views", "completions", "likes", "saves", "shares")
+
+
+def _recent_stats(db: Session) -> dict[str, dict[str, float]]:
+    today = utcnow().date()
+    now = time.monotonic()
+    cached_day, at, totals_by_post = _recent_stats_cache["entry"]
+    if cached_day == today and now - at < RECENT_STATS_TTL_S:
+        return totals_by_post
+    totals_by_post = {}
+    # Plain columns, not entities: hydrating the rows cost more than the query.
+    for post_id, day, *values in db.query(
+        PostRecommendationDailyStats.post_id,
+        PostRecommendationDailyStats.day,
+        *(getattr(PostRecommendationDailyStats, column) for column in _DAILY_COLUMNS),
+    ).filter(PostRecommendationDailyStats.day > today - timedelta(days=TRENDING_WINDOW_DAYS)):
+        weight = 0.5 ** (max(0, (today - day).days) / TRENDING_HALF_LIFE_DAYS)
+        totals = totals_by_post.setdefault(post_id, {})
+        for column, value in zip(_DAILY_COLUMNS, values):
+            totals[column] = totals.get(column, 0.0) + weight * int(value or 0)
+    _recent_stats_cache["entry"] = (today, now, totals_by_post)
+    return totals_by_post
+
+
 def _pipeline_context(
     db: Session,
     *,
@@ -502,11 +531,12 @@ def _pipeline_context(
             )
             .all()
         }
+    top_items = 24
     item_rows = (
         db.query(ActorItemAffinity)
         .filter(ActorItemAffinity.actor_key == actor.actor_key)
         .order_by(ActorItemAffinity.score.desc(), ActorItemAffinity.last_event_at.desc())
-        .limit(24)
+        .limit(top_items)
         .all()
     )
     now = utcnow()
@@ -539,14 +569,17 @@ def _pipeline_context(
     )
     post_ids = set(items)
     # Disliked reels among the candidates; the top-24 rows above hold only the strongest.
-    item_affinity.update(
-        (row.post_id, _score(row))
-        for row in db.query(ActorItemAffinity).filter(
-            ActorItemAffinity.actor_key == actor.actor_key,
-            ActorItemAffinity.score < 0,
-            ActorItemAffinity.post_id.in_(post_ids) if post_ids else False,
+    # Fewer than 24 rows means they are all of the actor's rows, so there is nothing more
+    # to read (a first-time visitor has none).
+    if len(item_rows) == top_items:
+        item_affinity.update(
+            (row.post_id, _score(row))
+            for row in db.query(ActorItemAffinity).filter(
+                ActorItemAffinity.actor_key == actor.actor_key,
+                ActorItemAffinity.score < 0,
+                ActorItemAffinity.post_id.in_(post_ids) if post_ids else False,
+            )
         )
-    )
     owner_ids = {item.owner_id for item in items.values()}
     tag_ids = {tag_id for item in items.values() for tag_id in item.tag_ids}
 
@@ -628,18 +661,8 @@ def _pipeline_context(
         .filter(PostRecommendationStats.post_id.in_(post_ids) if post_ids else False)
         .all()
     }
-    # Last week's daily stats, each day decayed by its age, keyed by post then column.
-    recent_stats: dict[str, dict[str, float]] = {}
-    if post_ids:
-        today = utcnow().date()
-        for row in db.query(PostRecommendationDailyStats).filter(
-            PostRecommendationDailyStats.post_id.in_(post_ids),
-            PostRecommendationDailyStats.day > today - timedelta(days=TRENDING_WINDOW_DAYS),
-        ):
-            weight = 0.5 ** (max(0, (today - row.day).days) / TRENDING_HALF_LIFE_DAYS)
-            totals = recent_stats.setdefault(row.post_id, {})
-            for column in ("impressions", "qualified_views", "completions", "likes", "saves", "shares"):
-                totals[column] = totals.get(column, 0.0) + weight * int(getattr(row, column) or 0)
+    recent_by_post = _recent_stats(db) if post_ids else {}
+    recent_stats = {post_id: recent_by_post[post_id] for post_id in post_ids if post_id in recent_by_post}
     following_ids = set()
     if actor.user_id:
         following_ids = {

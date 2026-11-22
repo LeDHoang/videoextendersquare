@@ -39,6 +39,8 @@ WATCHED_MS = 3000
 # Trending reads daily stats from this many days back, each day weighted 0.5 ** (days_ago / half-life).
 TRENDING_WINDOW_DAYS = 7
 TRENDING_HALF_LIFE_DAYS = 2.0
+# The decayed daily stats are the same for every viewer; each process reads them again after this.
+RECENT_STATS_TTL_S = 30.0
 # Stored creator, tag and reel affinities halve every this many whole days since their last event.
 AFFINITY_HALF_LIFE_DAYS = 30.0
 # Negative affinities instead fade in a straight line and are gone after this many whole days.

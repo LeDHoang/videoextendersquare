@@ -134,6 +134,14 @@ def _fresh_grid_cache():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_recent_stats():
+    """Last week's daily stats are cached in process memory for every post."""
+    from server.social.recommendations import service
+
+    service._recent_stats_cache["entry"] = (None, 0.0, {})
+
+
+@pytest.fixture(autouse=True)
 def _roomy_device_limits(monkeypatch):
     """Tests sign up several users from one TestClient cookie jar, which is one
     device; tests/test_device_limits.py lowers these again."""
