@@ -8,4 +8,14 @@ const rec = k => window.log.push({ k, t: Math.round(performance.now() - t0), ct:
 const f = (t, md) => { mt = +md.mediaTime.toFixed(2); pf = md.presentedFrames; v.requestVideoFrameCallback(f); }; v.requestVideoFrameCallback(f);
 setInterval(() => t0 && rec('s'), 250);
 window.go = src => { window.log = []; mt = null; pf = 0; t0 = performance.now(); v.src = src; return v.play().then(() => 'ok', e => String(e)); };
+window.xr = async () => {
+  const c = document.createElement('canvas'); const gl = c.getContext('webgl2', { xrCompatible: true });
+  const s = await navigator.xr.requestSession('immersive-vr'); window.__xs = s;
+  s.updateRenderState({ baseLayer: new XRWebGLLayer(s, gl) }); const ref = await s.requestReferenceSpace('local');
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  const frame = (t, f) => { s.requestAnimationFrame(frame); f.getViewerPose(ref);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, s.renderState.baseLayer.framebuffer); gl.clearColor(0.1, 0.1, 0.1, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    if (v.readyState >= 2) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v); window.__up = (window.__up || 0) + 1; } };
+  s.requestAnimationFrame(frame); return 'xr';
+};
 </script>

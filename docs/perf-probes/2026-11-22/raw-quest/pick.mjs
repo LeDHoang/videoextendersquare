@@ -1,6 +1,6 @@
 // Returns the visible echomultiverse page tab.
 export async function pickTab() {
-  const list = (await (await fetch('http://127.0.0.1:9222/json/list')).json()).filter(x => x.type === 'page' && /echomultiverse/.test(x.url));
+  const list = (await (await fetch('http://127.0.0.1:9222/json/list')).json()).filter(x => x.type === 'page' && new RegExp(process.env.PICK || 'echomultiverse').test(x.url));
   for (const t of list) {
     const ws = new WebSocket(t.webSocketDebuggerUrl); await new Promise(r => ws.addEventListener('open', r));
     const v = await new Promise(r => { ws.addEventListener('message', e => r(JSON.parse(e.data).result?.result?.value)); ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: 'document.visibilityState', returnByValue: true } })); });

@@ -14,7 +14,7 @@ The scripts and raw samples are in `raw-quest/`. `ttvr.mjs` times a cold open an
 - **The limit is between the home connection and the Cloudflare edge.** It is not the headset's Wi-Fi, and it is not R2. Most video requests were edge cache hits, and 8 parallel streams from the headset still reached only 10.7 Mbps. See "Where the link limit is".
 - **"Keeps loading" is two separate things:**
   - **Mid-clip stalls.** A file above the link rate runs out of buffer. The worst case was 5 stalls and 17.9 s of waiting in a 15 s clip.
-  - **The slow end.** On some clips the player's clock runs ahead of the downloaded data and reaches the clip's end early. The remaining frames then come in at the download rate, about 7 fps, with no spinner. The next reel starts only when the download finishes. The worst case was 15.2 s at the end of a 6.7 s clip. Every clip that did this has no audio track. See "Why the slow end shows no spinner".
+  - **The slow end.** On some clips the player's clock runs ahead of the downloaded data and reaches the clip's end early. The remaining frames then come in at the download rate, about 7 fps, with no spinner. The next reel starts only when the download finishes. The worst case was 15.2 s at the end of a 6.7 s clip. It happens only to clips with no audio track, and only in an XR session. See "Why the slow end shows no spinner".
 - **The 2k VR rendition is never played.** All 24 items in the feed have `vr2k_url: null`. If a post had one, the player still would not pick it, because the link estimate is fed only by the manual "Preload All" button.
 - **Images are the original PNGs, and each is downloaded twice.** The WebP renditions are missing on R2. A CORS fetch and a no-CORS `<img>` cannot share one cache entry under `Vary: Origin`. In VR each image change showed the previous frame for 1.2 to 3.2 s.
 
@@ -92,14 +92,20 @@ The slow end matched the audio track exactly. `ffprobe` of the clips in both run
 | `12827489_fast`, `12492094_fast`, `12492094_3840_3840`, `bW3F3oZ…_studio_4k`, `test_cas` | HEVC 3840×3840, no audio | Slow end |
 | `…Lil Durk & Prince Dre`, `camtestupload`, `…h264-9-7mb` and two other 4K clips with audio | Video and AAC audio | Normal stalls (`waiting`) |
 
-A check outside the player did not reproduce the slow end. A bare 2D `<video>` page on the Quest, throttled to 10 Mbps, played `12827489_fast` as it is and with a silent AAC track added (`ffmpeg -c:v copy`, 64 kb/s AAC). The raw output is `raw-quest/ab-video-10mbps.json`.
+A bare `<video>` page on the Quest isolates the cause. It plays `12827489_fast` as it is, and with a silent AAC track added (`ffmpeg -c:v copy`, 64 kb/s AAC), throttled to 10 Mbps. With `XR=1` the page also opens an immersive session that copies the video into a WebGL texture every frame, as the player does. The raw output is `raw-quest/ab-video-10mbps.json` and `raw-quest/ab-video-xr-10mbps.json`.
 
-| File | `waiting` events | Clock ahead of the buffer | `ended` at |
-|---|---|---|---|
-| No audio (original) | 66 | 0 s | 34.95 s |
-| Silent AAC added | 5 | 0 s | 37.87 s |
+| Page | File | `waiting` events | Clock ahead of the buffer | Clock at the end | `ended` |
+|---|---|---|---|---|---|
+| 2D | No audio (original) | 66 | 0 s | 34.5 s | 34.95 s |
+| 2D | Silent AAC added | 5 | 0 s | 37.8 s | 37.87 s |
+| XR | No audio (original) | 1 | 32 s | 7.2 s | 34.66 s |
+| XR | Silent AAC added | 5 | 0 s | 37.4 s | 37.57 s |
 
-In the bare page the clock never ran ahead of the buffer, with or without audio. So the missing audio track is not enough on its own. The video-only file did stall 66 times against 5, so with no audio clock to follow, the browser stops and starts far more often. Something in the VR session, the player, or the unthrottled real network adds the slow end. A run of the same page in an immersive session was not done: it stopped at the headset's VR permission prompt for `localhost`.
+The XR run with no audio was made twice, with the same numbers to within 0.1 s.
+
+So the slow end needs both things: a file with no audio track, and an open XR session. In that case `currentTime` runs at wall-clock speed from the start, whatever is buffered. At 3.2 s the clock was at 2.56 s with only 0.61 s buffered. The clock reached the end at 7.2 s. The frames on screen (`requestVideoFrameCallback` `mediaTime`) followed the download instead, at about 5 to 6 fps, and the last one came at about 35 s. Only one `waiting` fired, before the first frame. With an audio track, the same XR page stalled normally: the clock stopped, `readyState` dropped to 2 and `waiting` fired each time.
+
+The video was muted in every run. The players' own videos are muted too.
 
 A player change that skipped to the next reel at the end was tried and withdrawn. On these clips it would cut each one to about 30% of its frames.
 
@@ -131,7 +137,7 @@ These are in order of effect on the choppiness. None of them are done. The first
 2. **Add a lower rung, or a ladder.** Even a 2048-per-eye file can be above a 9 to 13 Mbps link. A rung at about 6 to 8 Mbps fits under every rate measured here except the 5.2 Mbps case. A ladder (for example about 4 Mbps, about 8 Mbps and the master) covers that case too.
 3. **Feed the link estimate from real playback.** Note each video's transfer rate as it plays (bytes over time from `progress` and `buffered`), not only from Preload All.
 4. **Choose the rendition by the file's bitrate.** Pick the master only when the measured link is above the master's own bitrate plus headroom, not above a fixed 35 Mbps.
-5. **Open the loading overlay when the clock is past the buffer.** When the video is not paused, `currentTime` is past the buffered end, and the buffered end is short of the duration, treat it as a stall and open the overlay. Do not skip to the next reel: that cuts the clip. Ship this only after it is shown on a repro of the slow end. As a test, a silent audio track could be added to the video-only clips. In the bare page it cut the stalls from 66 to 5. It did not show that it would stop the slow end.
+5. **Give the video-only files an audio track.** A silent AAC track (`ffmpeg -c:v copy`, no re-encode) turned the slow end into normal stalls in the XR test, so the loading overlay can open. It does not make the file lighter, so the stalls remain. New uploads with no audio could get the track at ingest, and the existing files could be remuxed by a batch. In the player, `currentTime` past the buffered end while playing can also be treated as a stall. The frame time from `requestVideoFrameCallback` gives the true position for that case.
 6. **Load each image once.** Use `crossorigin="anonymous"` on the `<img>` and on every warmer, and drop `cache: 'reload'` from `vrImageLoad`. Prefetch the next slide for VR.
 7. **Let the edge cache the player scripts and the font.** `three.min.js` and `webxr_vr.js` are `DYNAMIC` at the edge. The 4 MB Material Symbols font could be subset.
 
