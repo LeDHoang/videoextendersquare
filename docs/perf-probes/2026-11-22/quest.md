@@ -5,15 +5,16 @@ A Quest 3 on a home connection, driven over USB through adb and the Quest Browse
 1. How fast does a first-time visitor get from the URL to a playing reel in VR?
 2. Why do reels play choppy and "keep loading", even on a good connection?
 
-The scripts and raw samples are in `raw-quest/`. `ttvr.mjs` times a cold open and the VR entry. `mon2.mjs` watches the player in VR for 240 s. It hooks every `<video>` event, samples the buffer and frame counters every 400 ms, and records each network transfer. `an2.py` turns its output into the stall and freeze columns below.
+The scripts and raw samples are in `raw-quest/`. `ttvr.mjs` times a cold open and the VR entry. `mon2.mjs` watches the player in VR for 240 s. It hooks every `<video>` event, samples the buffer and frame counters every 400 ms, and records each network transfer. `an2.py` turns its output into the stall and end-wait columns below. `par3.js` is the parallel download test. `ab-video.html`, `ab-video.mjs` and `ab-serve.mjs` are the bare `<video>` test.
 
 ## Summary
 
 - **Getting into VR is fast enough.** From a cold cache, the first XR frame comes 6.0 to 7.2 s after the URL is opened. The player is ready at 3.8 to 4.4 s. From the click on the VR button to the first XR frame takes 0.9 to 1.3 s.
 - **The choppiness is the network, not the headset.** The heavy videos are 4K masters at 22 to 51 Mbps. Each one plays as a single progressive file. One file's download ran at about 9 to 13 Mbps, and 5.2 Mbps at the lowest. The decoder dropped no frames on any of these files, and the XR loop ran at about 89 fps.
+- **The limit is between the home connection and the Cloudflare edge.** It is not the headset's Wi-Fi, and it is not R2. Most video requests were edge cache hits, and 8 parallel streams from the headset still reached only 10.7 Mbps. See "Where the link limit is".
 - **"Keeps loading" is two separate things:**
   - **Mid-clip stalls.** A file above the link rate runs out of buffer. The worst case was 5 stalls and 17.9 s of waiting in a 15 s clip.
-  - **The end-of-clip freeze.** The player's clock reaches the end before the last bytes arrive. The picture freezes on its last frame with no spinner, and the next reel starts only when the download finishes. The worst case was a 15.2 s freeze after a 6.7 s clip.
+  - **The slow end.** On some clips the player's clock runs ahead of the downloaded data and reaches the clip's end early. The remaining frames then come in at the download rate, about 7 fps, with no spinner. The next reel starts only when the download finishes. The worst case was 15.2 s at the end of a 6.7 s clip. Every clip that did this has no audio track. See "Why the slow end shows no spinner".
 - **The 2k VR rendition is never played.** All 24 items in the feed have `vr2k_url: null`. If a post had one, the player still would not pick it, because the link estimate is fed only by the manual "Preload All" button.
 - **Images are the original PNGs, and each is downloaded twice.** The WebP renditions are missing on R2. A CORS fetch and a no-CORS `<img>` cannot share one cache entry under `Vary: Origin`. In VR each image change showed the previous frame for 1.2 to 3.2 s.
 
@@ -26,6 +27,8 @@ There were three cold runs, with no load test running. Before each run, the scri
 | 0 | 621 | 1412 | 3845 | 4522 | 4617 | 5359 | 5961 |
 | 1 | 1237 | 1868 | 4380 | 5500 | 5658 | 6129 | 6564 |
 | 2 | 622 | 1476 | 4001 | 6267 | 6287 | 6745 | 7203 |
+
+In all three runs the first reel was an image post, so "First reel" is the image's `load` event.
 
 An earlier set of three runs (`raw-quest/ttvr-cold.json`) ran while the proxy load test was on the VPS. It gave the first XR frame at 6.5 to 7.0 s, so the load test did not change the result much.
 
@@ -42,11 +45,11 @@ These are the videos the player reached in 240 s of natural play. Image posts we
 - **dl s:** the time to download the whole file.
 - **Rate Mbps:** the file size over the download time. For a light file, the browser can pause the download once its buffer is full. So for a light file this is only a lower bound on the link.
 - **Stalls:** the number of `waiting` events after playback started.
-- **End freeze s:** the time between the clock reaching the end and the next reel starting.
+- **End wait s:** the time between the clock reaching the end and the next reel starting. For a light file this is the normal 0.4 s hand-over. For a heavy file with no audio track, it is the slow end described below.
 
 The probe's own byte count (`Network.dataReceived`) was 10 to 27% above the true file sizes, so the table does not use it.
 
-| Video | Length (s) | MB | Mbps | dl s | Rate Mbps | Stalls | Stall s | End freeze s |
+| Video | Length (s) | MB | Mbps | dl s | Rate Mbps | Stalls | Stall s | End wait s |
 |---|---|---|---|---|---|---|---|---|
 | `wkbslx0shh8q7` | 14.8 | 1.9 | 1.0 | 7.2 | — | 0 | 0 | 0.4 |
 | `SnapReels_studio` | 14.8 | 15.0 | 8.1 | 10.5 | 11.4 | 0 | 0 | 0 |
@@ -64,20 +67,41 @@ The probe's own byte count (`Network.dataReceived`) was 10 to 27% above the true
 
 The two `studio_4k` files could not be matched to a URL for a `HEAD` request. Their sizes (≈) are the probe's count divided by 1.2, so they are estimates.
 
-An earlier 150 s run (`mon1.json`) had one more case: `test_cas.mp4`, 6.7 s long. Its true size was not measured. The download took 59 s. Its picture froze at 6.7 / 6.7 for 37.5 s, and the feed moved on 180 ms after the transfer finished.
+An earlier 150 s run (`mon1.json`) had one more case: `test_cas.mp4`, 6.7 s long. Its true size was not measured. The download took 59 s. Its clock sat at 6.7 / 6.7 for 37.5 s, and the feed moved on 180 ms after the transfer finished.
 
 The rows show these patterns:
 
 - **Files at or below about 14 Mbps played cleanly.** The one stall among them was 0.8 s.
-- **Above about 20 Mbps, every file but one either stalled or froze at the end.** The heavier the file, the longer the wait. The exception was `camtestupload`, a 5.1 s clip. The probe did not record why it played cleanly.
+- **Above about 20 Mbps, every file but one either stalled or had a slow end.** The heavier the file, the longer the wait. The exception was `camtestupload`, a 5.1 s clip. Its download started 5.1 s before it came on screen, while the previous reel played. It played 0.1 s after it came on, and the download finished 0.7 s before the clip ended.
 - **The download time, not the clip length, sets how long a heavy reel stays on screen.** `12827489_fast` is 6.7 s long, but it held the screen for 26.5 s.
 - **Frame drops were 0** on every file except the first, which dropped 24 of 120 frames during the VR entry.
 
-### Why the end freeze shows no spinner
+### Why the slow end shows no spinner
 
 The files are laid out for streaming: `ftyp` and `moov` come first, then `mdat`, with the frames in order. So the layout is not what holds the clip back.
 
-The cause is the download. The player's clock runs ahead of the downloaded data. At the last frames the clock stops at the clip's length, with 0 s of buffer ahead. `readyState` stays at 4 and no `waiting` event fires, so the VR loading overlay (`reelLoadState` in `webxr_vr.js`) never opens. `ended` fires only once the last bytes arrive, and `nextVideo('autoplay')` runs on `ended`. A screenshot taken during the `12827489_fast` freeze (`hang-10.png`, not committed) shows the last frame held, with no overlay.
+The cause is the download, but it shows up in two ways:
+
+- **A normal stall.** The clock stops at the buffered end, `waiting` fires, `readyState` drops to 2, and the VR loading overlay (`reelLoadState` in `webxr_vr.js`) opens.
+- **The slow end.** `currentTime` jumps to the clip's length while the buffered end is still about 2 s in. No `waiting` fires and `readyState` stays at 4, so the overlay never opens. The decoded frame count keeps rising, at about 7 fps, as the bytes arrive. So the clip plays the rest of its frames in slow motion, at the download rate, with the clock already at the end. `ended` fires only once the download finishes, and `nextVideo('autoplay')` runs on `ended`.
+
+The slow end matched the audio track exactly. `ffprobe` of the clips in both runs:
+
+| Clips | Streams | What happened |
+|---|---|---|
+| `12827489_fast`, `12492094_fast`, `12492094_3840_3840`, `bW3F3oZ…_studio_4k`, `test_cas` | HEVC 3840×3840, no audio | Slow end |
+| `…Lil Durk & Prince Dre`, `camtestupload`, `…h264-9-7mb` and two other 4K clips with audio | Video and AAC audio | Normal stalls (`waiting`) |
+
+A check outside the player did not reproduce the slow end. A bare 2D `<video>` page on the Quest, throttled to 10 Mbps, played `12827489_fast` as it is and with a silent AAC track added (`ffmpeg -c:v copy`, 64 kb/s AAC). The raw output is `raw-quest/ab-video-10mbps.json`.
+
+| File | `waiting` events | Clock ahead of the buffer | `ended` at |
+|---|---|---|---|
+| No audio (original) | 66 | 0 s | 34.95 s |
+| Silent AAC added | 5 | 0 s | 37.87 s |
+
+In the bare page the clock never ran ahead of the buffer, with or without audio. So the missing audio track is not enough on its own. The video-only file did stall 66 times against 5, so with no audio clock to follow, the browser stops and starts far more often. Something in the VR session, the player, or the unthrottled real network adds the slow end. A run of the same page in an immersive session was not done: it stopped at the headset's VR permission prompt for `localhost`.
+
+A player change that skipped to the next reel at the end was tried and withdrawn. On these clips it would cut each one to about 30% of its frames.
 
 ### Why the 2k rendition is never played
 
@@ -86,7 +110,7 @@ The 2k rendition (`<stem>-2k.mp4`) is the file meant for this case. There are fo
 1. **It does not exist.** All 24 items in `/api/reels/feed` have `vr2k_url: null`. On R2, `<stem>-2k.mp4` returns 404 for the four heavy files probed: `12827489_fast`, `12492094_fast`, `12492094_3840_3840` and `test_cas`.
 2. **The batch would not build all of them.** `scripts/batch_vr2k.py` builds the missing files only for posts where `vr2k_shrinks` (`server/media.py`) is true. That test is `width × height > eyes × VR2K_EYE_SIDE²`. The 3840² mono masters and `vc-2160-eye` pass it. The 4092×2046 side-by-side files (`h264-9-7mb`, `hevc-4-6mb`) do not, so they would keep only the master. The `12827489_fast`, `12492094_*` and `test_cas` files are not in `/api/reels/feed` or `/api/reels?limit=500`. They may not be posts at all, and this run did not check whether the batch covers them. The batch has not been run on production.
 3. **The link estimate is never fed.** `noteDownload` is called only from `preloadAllVideos` (`reels.html`), the manual "Preload All" button. In normal play `vrLinkMbps()` stays at 0, which means "not measured", so the player keeps the master.
-4. **The threshold is fixed.** The player drops to 2k only when the link is below 35 Mbps (`VR_MASTER_MIN_MBPS`). It does not compare the link with the file's own bitrate. The 36 to 51 Mbps masters above would stall on a 40 Mbps link too, and stay on the master.
+4. **The threshold is fixed.** The player drops to 2k only when the link is below 35 Mbps (`VR_MASTER_MIN_MBPS`). It does not compare the link with the file's own bitrate. `12827489_fast` (51 Mbps) would stall on a 40 Mbps link too, and stay on the master.
 
 ### Images
 
@@ -107,11 +131,29 @@ These are in order of effect on the choppiness. None of them are done. The first
 2. **Add a lower rung, or a ladder.** Even a 2048-per-eye file can be above a 9 to 13 Mbps link. A rung at about 6 to 8 Mbps fits under every rate measured here except the 5.2 Mbps case. A ladder (for example about 4 Mbps, about 8 Mbps and the master) covers that case too.
 3. **Feed the link estimate from real playback.** Note each video's transfer rate as it plays (bytes over time from `progress` and `buffered`), not only from Preload All.
 4. **Choose the rendition by the file's bitrate.** Pick the master only when the measured link is above the master's own bitrate plus headroom, not above a fixed 35 Mbps.
-5. **Show the loading overlay during the end freeze, or move on.** When the clock is at the end with no buffer ahead, open the overlay. Another option is to move to the next reel and let the download finish in the background.
+5. **Open the loading overlay when the clock is past the buffer.** When the video is not paused, `currentTime` is past the buffered end, and the buffered end is short of the duration, treat it as a stall and open the overlay. Do not skip to the next reel: that cuts the clip. Ship this only after it is shown on a repro of the slow end. As a test, a silent audio track could be added to the video-only clips. In the bare page it cut the stalls from 66 to 5. It did not show that it would stop the slow end.
 6. **Load each image once.** Use `crossorigin="anonymous"` on the `<img>` and on every warmer, and drop `cache: 'reload'` from `vrImageLoad`. Prefetch the next slide for VR.
 7. **Let the edge cache the player scripts and the font.** `three.min.js` and `webxr_vr.js` are `DYNAMIC` at the edge. The 4 MB Material Symbols font could be subset.
 
+## Where the link limit is
+
+Three checks were made after the 240 s run. Together they put the limit between the home connection and the Cloudflare edge.
+
+- **The headset's Wi-Fi is not the limit.** `dumpsys wifi` shows Wi-Fi 6 on 5 GHz, an RSSI of −34 dBm, and a link speed of 1200 Mbps both ways.
+- **R2 is not the limit.** The media is served from the nearest Cloudflare edge (`colo=SIN`). In the 240 s run, 12 of the 15 video requests were `cf-cache-status: HIT`. Only 3 were `MISS`.
+- **Parallel streams help little.** From the headset, the same 42.7 MB file (`12827489_fast`, a `HIT`) was downloaded in four ways (`raw-quest/par3.js`):
+
+| Mode | s | Mbps |
+|---|---|---|
+| 1 stream | 59.2 | 5.8 |
+| 4 range requests in parallel | 44.0 | 7.8 |
+| 8 range requests in parallel | 32.1 | 10.7 |
+| 1 stream, again | 37.8 | 9.0 |
+
+- **A laptop on the same connection did better, but not by much.** `curl` of the same file (through a local proxy) gave 11, 20 and 25 Mbps on three single-stream runs.
+
+So the path to the edge carried about 6 to 25 Mbps during the run, and it varied from minute to minute. A speed test to a nearby server can show much more than that, because it does not cross the same path. Parallel range requests would not fix this. A lower bitrate would.
+
 ## Other findings
 
-- **The 9 to 13 Mbps is from R2 to the headset, one stream per file.** The home connection may be faster across parallel streams. Range requests in parallel, or a lower bitrate, would make better use of it.
 - **Four stale fal requests are re-polled about every 15 minutes.** Each poll returns 422. This is unrelated to playback.

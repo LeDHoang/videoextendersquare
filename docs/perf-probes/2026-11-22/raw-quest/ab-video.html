@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<video id="v" crossorigin="anonymous" muted playsinline preload="auto" style="width:90vw"></video>
+<script>
+const v = document.getElementById('v'); window.log = []; let t0 = 0, mt = null, pf = 0;
+const be = () => { for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 0.1) { if (v.buffered.end(i) >= v.currentTime) return v.buffered.end(i); } return v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0; };
+const rec = k => window.log.push({ k, t: Math.round(performance.now() - t0), ct: +v.currentTime.toFixed(2), bt: +be().toFixed(2), rs: v.readyState, mt, pf, ended: v.ended, paused: v.paused });
+['waiting', 'stalled', 'playing', 'ended', 'canplay', 'canplaythrough', 'pause', 'error', 'loadedmetadata'].forEach(n => v.addEventListener(n, () => rec(n)));
+const f = (t, md) => { mt = +md.mediaTime.toFixed(2); pf = md.presentedFrames; v.requestVideoFrameCallback(f); }; v.requestVideoFrameCallback(f);
+setInterval(() => t0 && rec('s'), 250);
+window.go = src => { window.log = []; mt = null; pf = 0; t0 = performance.now(); v.src = src; return v.play().then(() => 'ok', e => String(e)); };
+</script>
