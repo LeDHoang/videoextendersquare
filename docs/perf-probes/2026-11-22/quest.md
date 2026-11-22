@@ -83,7 +83,7 @@ The files are laid out for streaming: `ftyp` and `moov` come first, then `mdat`,
 The cause is the download, but it shows up in two ways:
 
 - **A normal stall.** The clock stops at the buffered end, `waiting` fires, `readyState` drops to 2, and the VR loading overlay (`reelLoadState` in `webxr_vr.js`) opens.
-- **The slow end.** `currentTime` jumps to the clip's length while the buffered end is still about 2 s in. No `waiting` fires and `readyState` stays at 4, so the overlay never opens. The decoded frame count keeps rising, at about 7 fps, as the bytes arrive. So the clip plays the rest of its frames in slow motion, at the download rate, with the clock already at the end. `ended` fires only once the download finishes, and `nextVideo('autoplay')` runs on `ended`.
+- **The slow end.** `currentTime` runs at wall-clock speed from the start, whatever is buffered, and reaches the clip's length while the buffered end is still about 2 s in. For `12827489_fast` in the 240 s run, the clock was at 3.19 s with 1.22 s buffered, and at 6.67 s with 1.85 s buffered about 5 s later. No `waiting` fires and `readyState` stays at 4 at the end, so the overlay never opens. The decoded frame count keeps rising, at about 7 fps, as the bytes arrive. So the clip plays the rest of its frames in slow motion, at the download rate, with the clock already at the end. `ended` fires only once the download finishes, and `nextVideo('autoplay')` runs on `ended`.
 
 The slow end matched the audio track exactly. `ffprobe` of the clips in both runs:
 
@@ -101,9 +101,9 @@ A bare `<video>` page on the Quest isolates the cause. It plays `12827489_fast` 
 | XR | No audio (original) | 1 | 32 s | 7.2 s | 34.66 s |
 | XR | Silent AAC added | 5 | 0 s | 37.4 s | 37.57 s |
 
-The XR run with no audio was made twice, with the same numbers to within 0.1 s.
+The XR run with no audio was made twice, with the same numbers to within 0.1 s. The raw file holds the second run. The first was read from the console output only.
 
-So the slow end needs both things: a file with no audio track, and an open XR session. In that case `currentTime` runs at wall-clock speed from the start, whatever is buffered. At 3.2 s the clock was at 2.56 s with only 0.61 s buffered. The clock reached the end at 7.2 s. The frames on screen (`requestVideoFrameCallback` `mediaTime`) followed the download instead, at about 5 to 6 fps, and the last one came at about 35 s. Only one `waiting` fired, before the first frame. With an audio track, the same XR page stalled normally: the clock stopped, `readyState` dropped to 2 and `waiting` fired each time.
+So the slow end needs both things: a file with no audio track, and an immersive session that draws the video to a texture each frame. The test did not separate the session from the texture copy. In that case `currentTime` runs at wall-clock speed from the start, whatever is buffered. At 3.2 s the clock was at 2.56 s with only 0.61 s buffered. The clock reached the end at 7.2 s. The frames on screen (`requestVideoFrameCallback` `mediaTime`) followed the download instead, at about 5 to 6 fps, and the last one came at about 35 s. Only one `waiting` fired, before the first frame. With an audio track, the same XR page stalled normally: the clock stopped, `readyState` dropped to 2 and `waiting` fired each time.
 
 The video was muted in every run. The player's `#reelsVideo` also starts muted. Whether an unmuted video behaves differently was not tested.
 
@@ -131,9 +131,9 @@ R2 answers with `Vary: Origin`, so the two kinds of request cannot share a cache
 
 ## Recommendations
 
-These are in order of effect on the choppiness. None of them are done. The first two change production data, and the rest change the player.
+These are in order of effect on the choppiness. None of them are done. Recommendations 1, 2 and 5 change production data or the upload path. The rest change the player.
 
-1. **Build the missing renditions on production.** Run `scripts/batch_vr2k.py` and `scripts/batch_image_renditions.py` (each has `--dry-run`). This gives the player a lighter file to fall back to, and cuts each image to its WebP size. Check first which of the heavy files above the batch covers.
+1. **Build the missing renditions on production.** Run `scripts/batch_vr2k.py` and `scripts/batch_image_renditions.py` (each has `--dry-run`). This gives the player a lighter file to fall back to, and cuts each image to its WebP size. Check first which of the heavy files above the batch covers. The rendition commands in `server/media.py` pass `-c:a aac` but add no audio source, so a rendition of a video-only master is also video-only. A rendition still above the link would keep the slow end in VR unless it gets a silent track too (see 5).
 2. **Add a lower rung, or a ladder.** Even a 2048-per-eye file can be above a 9 to 13 Mbps link. A rung at about 6 to 8 Mbps fits under every rate measured here except the 5.2 Mbps case. A ladder (for example about 4 Mbps, about 8 Mbps and the master) covers that case too.
 3. **Feed the link estimate from real playback.** Note each video's transfer rate as it plays (bytes over time from `progress` and `buffered`), not only from Preload All.
 4. **Choose the rendition by the file's bitrate.** Pick the master only when the measured link is above the master's own bitrate plus headroom, not above a fixed 35 Mbps.
