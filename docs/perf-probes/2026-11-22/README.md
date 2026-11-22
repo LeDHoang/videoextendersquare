@@ -21,6 +21,26 @@ A full probe of production after the `852ca88` deploy. It has five parts:
 - **From outside, the API costs about 0.3 to 1.1 s TTFB at p50, depending on the location.** Through the VPN, every exit outside Asia is noisy.
 - **The SPA's `/api/reels` request never hits the edge cache.** The SPA always sends `refresh=false`, and `server/edge_cache.py` treats any `refresh` parameter as a forced re-scan. So the response gets `private, no-store` and Cloudflare reports `BYPASS` in every location (see "Flags"). The fix is made in the working tree but not deployed.
 
+## After deploying 7ab15a6
+
+The same player and loopback set was run again on the VPS after `7ab15a6` was deployed. That release includes the two player-inline fixes (`f6928bc`) and the edge-cache fix (`d4da631`). The raw logs are in `raw-after-deploy/`. Every step returned only 200 again.
+
+- **On the writer alone, the player routes recovered about two thirds of the fall.** The player went from 11.8 to 14.2 rps (+20%), against 17.7 on 11-12. player-inline went from 10.6 to 13.0 rps (+23%), against 17.5. The feed went from 15.1 to 18.1 rps (+19%). Session starts went from 330 to 381 per minute (+16%).
+- **Through the proxy, the gain is smaller.** The player went from 21.2 to 22.9 rps (+8%), player-inline from 20.0 to 21.8 rps (+9%), and the feed from 27.8 to 32.7 rps (+18%). Session starts went from 596 to 686 per minute (+15%). The player and player-inline gains through the proxy are inside the ±9% run-to-run noise, so only the feed and session gains there are clear.
+- **Max concurrent players is about the same.** Cold `/reels` opens still saturate at about 720 per minute. The 10-player request p95 fell from 236 to 204 ms.
+- **The other routes are within ±9%.**
+- **The SPA's first reels page is now cached at the edge.** `GET /api/reels?refresh=false` returns `public, max-age=0, s-maxage=30`. The first request is a `MISS` and the second is a `HIT`.
+
+| Route | Writer 852ca88 (rps) | Writer 7ab15a6 (rps) | Proxy 852ca88 (rps) | Proxy 7ab15a6 (rps) |
+|---|---|---|---|---|
+| `/api/reels/feed` | 15.1 | 18.1 | 27.8 | 32.7 |
+| `/api/reels/player` | 11.8 | 14.2 | 21.2 | 22.9 |
+| `/api/reels/player-inline` | 10.6 | 13.0 | 20.0 | 21.8 |
+| session, sessions per minute | 330 | 381 | 596 | 686 |
+| session_spa, sessions per minute | 309 | 367 | 566 | 666 |
+
+The Quest 3 run on this release is in `quest.md`. It covers the time to VR and why reels play choppy in the headset.
+
 ## Results
 
 The ceiling is the highest rate across the steps. The 11-12 numbers are from `docs/perf-probes/2026-11-12/README.md` (release `7bf201b`).
@@ -225,7 +245,7 @@ Limits: this is one thread on a laptop, with a synthetic seed and macOS fsync. I
 1. **Player routes are 28 to 39% slower than in the 11-12 run,** on both the writer and the reader. The cause is the code between `7bf201b` and `852ca88` (see "Profile of player-inline"). Two fixes are made in the working tree but not deployed:
    - `_recent_stats` reads last week's daily stats for every post as plain columns, once per process every 30 s (`RECENT_STATS_TTL_S`) and again when the day changes.
    - The negative item-affinity query runs only when the viewer has 24 or more affinity rows. With fewer, the top-rows read already holds them all.
-   - After the deploy, run the loopback probe again to confirm the player and feed rates.
+   - **Deployed in `7ab15a6`.** The probe after the deploy confirms the gain: on the writer alone, the player is up 20%, player-inline 23% and the feed 19% (see "After deploying 7ab15a6"). They are still below the 11-12 rates.
 2. **The feed fell 17 to 19%,** and the session starts fell with it. It shares the `_pipeline_context` cost with the player routes.
 3. **The SPA's first reels page never hits the edge cache.**
    - `ReelsPage.jsx` always sends `refresh: refreshKey > 0`. `web/src/api/client.js` drops only `undefined` and `null`, so every request carries `refresh=false`.
@@ -233,13 +253,14 @@ Limits: this is one thread on a laptop, with a synthetic seed and macOS fsync. I
    - Checked with `curl`: bare `/api/reels` gets `public, max-age=0, s-maxage=30` and `HIT`. The SPA's URL gets `private, no-store` and `BYPASS`.
    - The result is that every visitor's first reels page goes to Oregon.
    - **Fixed in the working tree, not deployed.** `EdgeCacheMiddleware` now treats `refresh=false` and `refresh=0` as no re-scan. `test_refresh_false_is_cacheable` covers the SPA's URL. After the deploy, check with `curl` that the SPA's URL gets `HIT`. If it stays `BYPASS`, the Cloudflare Cache Rule may also exclude the `refresh` parameter.
+   - **Deployed in `7ab15a6` and confirmed.** The SPA's URL gets `public, max-age=0, s-maxage=30`, then `HIT` on a second request.
 4. **The DB pool reached 15 of 15** during the writer-alone run at high concurrency.
 5. **SIT is open to the public.** This is already tracked in `docs/to-beta.md`.
 6. **Sentry noise from `REWARDS_DISABLED`,** 61 events in 24 h. It is expected while rewards are off, but it hides real issues.
 
 ## Online capacity / SX_CAPACITY_ONLINE
 
-The rule in `2026-11-12/README.md` is: the writer feed ceiling × 50, rounded down for headroom. The writer feed ceiling is now 15.1 rps, so 15.1 × 50 ≈ 755 viewers. That is below the current 800. Set `SX_CAPACITY_ONLINE=650`, which keeps the same headroom as 930 → 800 on 11-12. The watchdog then alerts at 70%, which is 455. Raise it again once the feed regression is fixed and a new probe confirms the ceiling.
+The rule in `2026-11-12/README.md` is: the writer feed ceiling × 50, rounded down for headroom. The writer feed ceiling is now 15.1 rps, so 15.1 × 50 ≈ 755 viewers. That is below the current 800. Set `SX_CAPACITY_ONLINE=650`, which keeps the same headroom as 930 → 800 on 11-12. The watchdog then alerts at 70%, which is 455. Raise it again once the feed regression is fixed and a new probe confirms the ceiling. After `7ab15a6` the writer feed ceiling is 18.1 rps, so 18.1 × 50 ≈ 905 viewers. With the same headroom, that allows about 780.
 
 ## Files
 

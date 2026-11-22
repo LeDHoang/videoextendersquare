@@ -1,0 +1,1678 @@
+[
+ {
+  "run": 0,
+  "cold": true,
+  "playerReady": 3845,
+  "ttfb": 621,
+  "dcl": 977,
+  "load": 977,
+  "fcp": 1412,
+  "origin": 1795338222165,
+  "vrClick": 4617,
+  "firstReel": 4522,
+  "firstVideoPlaying": null,
+  "firstFrame2d": null,
+  "playing2d": null,
+  "xrStart": 5359,
+  "xrFirstFrame": 5961,
+  "vrPlaying": null,
+  "rebuffers": [],
+  "waitingOpen": 0,
+  "srcs": [],
+  "net": [
+   {
+    "at": 19,
+    "url": "echomultiverse.com/reels",
+    "type": "Document",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 631,
+    "end": 685,
+    "bytes": 2761
+   },
+   {
+    "at": 673,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 700,
+    "end": 700,
+    "bytes": 1522
+   },
+   {
+    "at": 673,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 700,
+    "end": 701,
+    "bytes": 459
+   },
+   {
+    "at": 673,
+    "url": "echomultiverse.com/assets/index-BFoNeFFu.css",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 725,
+    "end": 804,
+    "bytes": 49629
+   },
+   {
+    "at": 673,
+    "url": "static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092",
+    "type": "Script",
+    "status": 200,
+    "cf": null,
+    "hdr": 805,
+    "end": 806,
+    "bytes": 10478
+   },
+   {
+    "at": 673,
+    "url": "echomultiverse.com/assets/index-BDWYo04Y.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 953,
+    "end": 954,
+    "bytes": 127238
+   },
+   {
+    "at": 1046,
+    "url": "echomultiverse.com/assets/ReelsPlayer-Cf2PrzaO.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1123,
+    "end": 1123,
+    "bytes": 4153
+   },
+   {
+    "at": 1052,
+    "url": "echomultiverse.com/cdn-cgi/rum",
+    "type": "XHR",
+    "status": 204,
+    "cf": null,
+    "hdr": 1137,
+    "end": 1137,
+    "bytes": 490
+   },
+   {
+    "at": 1047,
+    "url": "echomultiverse.com/assets/mediaFormat-ybV0UnfM.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1144,
+    "end": 1144,
+    "bytes": 2482
+   },
+   {
+    "at": 1046,
+    "url": "echomultiverse.com/assets/ReelsPage-OD-yKu_2.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1176,
+    "end": 1176,
+    "bytes": 5646
+   },
+   {
+    "at": 1057,
+    "url": "fonts.gstatic.com/s/instrumentsans/v4/pxiTypc9vsFDm051Uf6KVwgkfoSxQ0GsQv8ToedPibnr0SZe1Q.w",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 1178,
+    "end": 1178,
+    "bytes": 30121
+   },
+   {
+    "at": 1047,
+    "url": "echomultiverse.com/assets/aspect-D-yo_SEL.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1184,
+    "end": 1184,
+    "bytes": 2013
+   },
+   {
+    "at": 1075,
+    "url": "echomultiverse.com/logo-echo-glass.png",
+    "type": "Other",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1264,
+    "end": 1336,
+    "bytes": 38724
+   },
+   {
+    "at": 1079,
+    "url": "echomultiverse.com/logo-echo-glass.png",
+    "type": "Other",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1265,
+    "end": 1351,
+    "bytes": 0
+   },
+   {
+    "at": 1067,
+    "url": "echomultiverse.com/api/auth/me",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1409,
+    "end": 1409,
+    "bytes": 1247
+   },
+   {
+    "at": 1067,
+    "url": "echomultiverse.com/api/billing/catalog",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1486,
+    "end": 1488,
+    "bytes": 3053
+   },
+   {
+    "at": 1390,
+    "url": "fonts.gstatic.com/s/fraunces/v38/6NU78FyLNQOQZAnv9bYEvDiIdE9Ea92uemAk_WBq8U_9v0c2Wa0KxC9Te",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 1510,
+    "end": 1511,
+    "bytes": 67341
+   },
+   {
+    "at": 1390,
+    "url": "echomultiverse.com/api/config",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1687,
+    "end": 1688,
+    "bytes": 3135
+   },
+   {
+    "at": 1391,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1744,
+    "end": 1744,
+    "bytes": 1478
+   },
+   {
+    "at": 1391,
+    "url": "echomultiverse.com/api/messages/capabilities",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1882,
+    "end": 1883,
+    "bytes": 1565
+   },
+   {
+    "at": 1390,
+    "url": "echomultiverse.com/api/reels",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2079,
+    "end": 2378,
+    "bytes": 14200
+   },
+   {
+    "at": 1390,
+    "url": "echomultiverse.com/api/reels/player-inline",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2049,
+    "end": 2604,
+    "bytes": 95329
+   },
+   {
+    "at": 2621,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 2647,
+    "end": 2647,
+    "bytes": 401
+   },
+   {
+    "at": 2620,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 2647,
+    "end": 2648,
+    "bytes": 929
+   },
+   {
+    "at": 2622,
+    "url": "echomultiverse.com/api/reels/player-script/reels_feed_state.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2859,
+    "end": 2861,
+    "bytes": 2487
+   },
+   {
+    "at": 2622,
+    "url": "echomultiverse.com/api/reels/player-script/reels_rewards.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2868,
+    "end": 2869,
+    "bytes": 1994
+   },
+   {
+    "at": 2624,
+    "url": "echomultiverse.com/api/reels/player-script/reels_pack_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2887,
+    "end": 2888,
+    "bytes": 8260
+   },
+   {
+    "at": 2622,
+    "url": "echomultiverse.com/api/reels/player-script/reels_pack_state.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2895,
+    "end": 2895,
+    "bytes": 2971
+   },
+   {
+    "at": 2626,
+    "url": "echomultiverse.com/api/reels/player-script/vr_shell.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3029,
+    "end": 3029,
+    "bytes": 12598
+   },
+   {
+    "at": 2624,
+    "url": "echomultiverse.com/api/reels/player-script/vr_ui_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3170,
+    "end": 3171,
+    "bytes": 34613
+   },
+   {
+    "at": 2625,
+    "url": "echomultiverse.com/api/reels/player-script/vr_shell_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3288,
+    "end": 3289,
+    "bytes": 27857
+   },
+   {
+    "at": 2642,
+    "url": "fonts.gstatic.com/s/materialsymbolsoutlined/v385/kJEhBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oF",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 3661,
+    "end": 3666,
+    "bytes": 4026399
+   },
+   {
+    "at": 2626,
+    "url": "echomultiverse.com/api/reels/player-script/webxr_vr.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3719,
+    "end": 3720,
+    "bytes": 183916
+   },
+   {
+    "at": 2624,
+    "url": "echomultiverse.com/api/reels/player-script/three.min.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3730,
+    "end": 3731,
+    "bytes": 220686
+   },
+   {
+    "at": 3825,
+    "url": "echomultiverse.com/api/events",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 4094,
+    "end": 4094,
+    "bytes": 1270
+   },
+   {
+    "at": 3825,
+    "url": "echomultiverse.com/api/auth/me",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 4108,
+    "end": 4109,
+    "bytes": 1240
+   },
+   {
+    "at": 3825,
+    "url": "media.echomultiverse.com/uploads/legacy-20260919-192949-79b493.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4285,
+    "end": 4532,
+    "bytes": 521
+   },
+   {
+    "at": 3825,
+    "url": "media.echomultiverse.com/uploads/legacy-20260919-192949-79b493.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 3924,
+    "end": 4532,
+    "bytes": 1218013
+   },
+   {
+    "at": 3825,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4843,
+    "end": 5873,
+    "bytes": 1280451
+   },
+   {
+    "at": 3825,
+    "url": "media.echomultiverse.com/uploads/cap-0-20261003-094404-0b8075.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4418,
+    "end": 5876,
+    "bytes": 1105999
+   },
+   {
+    "at": 5873,
+    "url": "echomultiverse.com/assets/earth-natural-4096x2048.jpg",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 6201,
+    "end": 6321,
+    "bytes": 1316640
+   },
+   {
+    "at": 5962,
+    "url": "echomultiverse.com/api/posts/17221e64-c5ef-431b-8d88-2d3164d5cc95/view",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 6501,
+    "end": 6550,
+    "bytes": 1342
+   },
+   {
+    "at": 5960,
+    "url": "media.echomultiverse.com/uploads/cap-0-20261003-094404-0b8075.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 6202,
+    "end": 6735,
+    "bytes": 1106011
+   },
+   {
+    "at": 6647,
+    "url": "echomultiverse.com/api/reels/player-script/quest_controller_img.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 7221,
+    "end": 7222,
+    "bytes": 652987
+   },
+   {
+    "at": 7407,
+    "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAh4AAAOECAYAAADuSTjbAAAAAXNSR0IArs4c6QAAAERl",
+    "type": "Image",
+    "status": 200,
+    "cf": null,
+    "hdr": 7412,
+    "end": 7413,
+    "bytes": 0
+   },
+   {
+    "at": 9387,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 9909,
+    "end": 9909,
+    "bytes": 1476
+   },
+   {
+    "at": 11324,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 11328,
+    "end": 11338,
+    "bytes": 0
+   },
+   {
+    "at": 11336,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 11545,
+    "end": 12737,
+    "bytes": 1280463
+   },
+   {
+    "at": 17389,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 17634,
+    "end": 17635,
+    "bytes": 1483
+   }
+  ],
+  "events": [
+   {
+    "k": "img-load",
+    "t": 4522,
+    "src": "legacy-20260919-192949-79b493.png"
+   },
+   {
+    "k": "xr-request",
+    "t": 4615
+   },
+   {
+    "k": "xr-start",
+    "t": 5359
+   },
+   {
+    "k": "xr-first-frame",
+    "t": 5961
+   },
+   {
+    "k": "img-load",
+    "t": 11331,
+    "src": "legacy-20261005-061214-82fd63.png"
+   }
+  ]
+ },
+ {
+  "run": 1,
+  "cold": true,
+  "playerReady": 4380,
+  "ttfb": 1237,
+  "dcl": 1454,
+  "load": 1454,
+  "fcp": 1868,
+  "origin": 1795338243958,
+  "vrClick": 5658,
+  "firstReel": 5500,
+  "firstVideoPlaying": null,
+  "firstFrame2d": null,
+  "playing2d": null,
+  "xrStart": 6129,
+  "xrFirstFrame": 6564,
+  "vrPlaying": null,
+  "rebuffers": [],
+  "waitingOpen": 0,
+  "srcs": [],
+  "net": [
+   {
+    "at": 16,
+    "url": "echomultiverse.com/reels",
+    "type": "Document",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1247,
+    "end": 1286,
+    "bytes": 2729
+   },
+   {
+    "at": 1277,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 1309,
+    "end": 1309,
+    "bytes": 1522
+   },
+   {
+    "at": 1277,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 1315,
+    "end": 1315,
+    "bytes": 459
+   },
+   {
+    "at": 1277,
+    "url": "static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092",
+    "type": "Script",
+    "status": 200,
+    "cf": null,
+    "hdr": 1393,
+    "end": 1393,
+    "bytes": 10478
+   },
+   {
+    "at": 1277,
+    "url": "echomultiverse.com/assets/index-BFoNeFFu.css",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1354,
+    "end": 1415,
+    "bytes": 49596
+   },
+   {
+    "at": 1277,
+    "url": "echomultiverse.com/assets/index-BDWYo04Y.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1425,
+    "end": 1425,
+    "bytes": 127231
+   },
+   {
+    "at": 1519,
+    "url": "echomultiverse.com/cdn-cgi/rum",
+    "type": "XHR",
+    "status": 204,
+    "cf": null,
+    "hdr": 1586,
+    "end": 1587,
+    "bytes": 488
+   },
+   {
+    "at": 1517,
+    "url": "fonts.gstatic.com/s/instrumentsans/v4/pxiTypc9vsFDm051Uf6KVwgkfoSxQ0GsQv8ToedPibnr0SZe1Q.w",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 1599,
+    "end": 1600,
+    "bytes": 30121
+   },
+   {
+    "at": 1517,
+    "url": "echomultiverse.com/assets/mediaFormat-ybV0UnfM.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1623,
+    "end": 1623,
+    "bytes": 2480
+   },
+   {
+    "at": 1516,
+    "url": "echomultiverse.com/assets/ReelsPlayer-Cf2PrzaO.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1634,
+    "end": 1634,
+    "bytes": 4148
+   },
+   {
+    "at": 1517,
+    "url": "echomultiverse.com/assets/aspect-D-yo_SEL.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1634,
+    "end": 1635,
+    "bytes": 2013
+   },
+   {
+    "at": 1531,
+    "url": "echomultiverse.com/logo-echo-glass.png",
+    "type": "Other",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1591,
+    "end": 1657,
+    "bytes": 38724
+   },
+   {
+    "at": 1534,
+    "url": "echomultiverse.com/logo-echo-glass.png",
+    "type": "Other",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1592,
+    "end": 1669,
+    "bytes": 0
+   },
+   {
+    "at": 1516,
+    "url": "echomultiverse.com/assets/ReelsPage-OD-yKu_2.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1704,
+    "end": 1704,
+    "bytes": 5646
+   },
+   {
+    "at": 1531,
+    "url": "echomultiverse.com/api/billing/catalog",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1756,
+    "end": 1764,
+    "bytes": 3049
+   },
+   {
+    "at": 1531,
+    "url": "echomultiverse.com/api/auth/me",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1850,
+    "end": 1851,
+    "bytes": 1249
+   },
+   {
+    "at": 1844,
+    "url": "fonts.gstatic.com/s/fraunces/v38/6NU78FyLNQOQZAnv9bYEvDiIdE9Ea92uemAk_WBq8U_9v0c2Wa0KxC9Te",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 1953,
+    "end": 1953,
+    "bytes": 67341
+   },
+   {
+    "at": 1845,
+    "url": "echomultiverse.com/api/config",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2094,
+    "end": 2103,
+    "bytes": 3062
+   },
+   {
+    "at": 1845,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2113,
+    "end": 2115,
+    "bytes": 1476
+   },
+   {
+    "at": 1845,
+    "url": "echomultiverse.com/api/messages/capabilities",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2118,
+    "end": 2118,
+    "bytes": 1571
+   },
+   {
+    "at": 1845,
+    "url": "echomultiverse.com/api/reels",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2272,
+    "end": 2523,
+    "bytes": 14684
+   },
+   {
+    "at": 1845,
+    "url": "echomultiverse.com/api/reels/player-inline",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2524,
+    "end": 3139,
+    "bytes": 95787
+   },
+   {
+    "at": 3161,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 3268,
+    "end": 3269,
+    "bytes": 401
+   },
+   {
+    "at": 3161,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 3269,
+    "end": 3269,
+    "bytes": 929
+   },
+   {
+    "at": 3161,
+    "url": "echomultiverse.com/api/reels/player-script/reels_feed_state.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3411,
+    "end": 3412,
+    "bytes": 2483
+   },
+   {
+    "at": 3164,
+    "url": "echomultiverse.com/api/reels/player-script/vr_ui_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3791,
+    "end": 3791,
+    "bytes": 34548
+   },
+   {
+    "at": 3163,
+    "url": "echomultiverse.com/api/reels/player-script/reels_rewards.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3794,
+    "end": 3795,
+    "bytes": 1991
+   },
+   {
+    "at": 3163,
+    "url": "echomultiverse.com/api/reels/player-script/reels_pack_state.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3829,
+    "end": 3829,
+    "bytes": 2981
+   },
+   {
+    "at": 3166,
+    "url": "echomultiverse.com/api/reels/player-script/vr_shell.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3919,
+    "end": 3920,
+    "bytes": 12400
+   },
+   {
+    "at": 3163,
+    "url": "echomultiverse.com/api/reels/player-script/reels_pack_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3964,
+    "end": 3965,
+    "bytes": 8273
+   },
+   {
+    "at": 3164,
+    "url": "echomultiverse.com/api/reels/player-script/vr_shell_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3979,
+    "end": 3979,
+    "bytes": 27180
+   },
+   {
+    "at": 3167,
+    "url": "echomultiverse.com/api/reels/player-script/webxr_vr.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 4246,
+    "end": 4248,
+    "bytes": 183935
+   },
+   {
+    "at": 3163,
+    "url": "echomultiverse.com/api/reels/player-script/three.min.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 4271,
+    "end": 4272,
+    "bytes": 220916
+   },
+   {
+    "at": 4365,
+    "url": "echomultiverse.com/api/auth/me",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 4613,
+    "end": 4614,
+    "bytes": 1251
+   },
+   {
+    "at": 4364,
+    "url": "echomultiverse.com/api/events",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 4622,
+    "end": 4627,
+    "bytes": 1270
+   },
+   {
+    "at": 3185,
+    "url": "fonts.gstatic.com/s/materialsymbolsoutlined/v385/kJEhBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oF",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 4741,
+    "end": 4746,
+    "bytes": 4026399
+   },
+   {
+    "at": 4365,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4614,
+    "end": 5337,
+    "bytes": 1280450
+   },
+   {
+    "at": 4365,
+    "url": "media.echomultiverse.com/uploads/cap-4-20261006-054525-6288fb.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4437,
+    "end": 5443,
+    "bytes": 1106016
+   },
+   {
+    "at": 4365,
+    "url": "media.echomultiverse.com/uploads/legacy-20260919-192949-79b493.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4457,
+    "end": 5504,
+    "bytes": 1218023
+   },
+   {
+    "at": 4365,
+    "url": "media.echomultiverse.com/uploads/legacy-20260919-192949-79b493.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4758,
+    "end": 5506,
+    "bytes": 307
+   },
+   {
+    "at": 6565,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 6571,
+    "end": 6785,
+    "bytes": 0
+   },
+   {
+    "at": 6566,
+    "url": "echomultiverse.com/api/posts/17221e64-c5ef-431b-8d88-2d3164d5cc95/view",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 6884,
+    "end": 6885,
+    "bytes": 1342
+   },
+   {
+    "at": 6479,
+    "url": "echomultiverse.com/assets/earth-natural-4096x2048.jpg",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 6784,
+    "end": 7121,
+    "bytes": 1316590
+   },
+   {
+    "at": 6565,
+    "url": "media.echomultiverse.com/uploads/cap-4-20261006-054525-6288fb.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 6786,
+    "end": 7615,
+    "bytes": 411
+   },
+   {
+    "at": 6564,
+    "url": "media.echomultiverse.com/uploads/cap-4-20261006-054525-6288fb.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 6786,
+    "end": 7615,
+    "bytes": 1106031
+   },
+   {
+    "at": 7340,
+    "url": "echomultiverse.com/api/reels/player-script/quest_controller_img.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 7867,
+    "end": 7869,
+    "bytes": 653013
+   },
+   {
+    "at": 8079,
+    "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAh4AAAOECAYAAADuSTjbAAAAAXNSR0IArs4c6QAAAERl",
+    "type": "Image",
+    "status": 200,
+    "cf": null,
+    "hdr": 8098,
+    "end": 8099,
+    "bytes": 0
+   },
+   {
+    "at": 9838,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 10072,
+    "end": 10073,
+    "bytes": 1480
+   },
+   {
+    "at": 11861,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 11865,
+    "end": 11878,
+    "bytes": 0
+   },
+   {
+    "at": 11876,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 12273,
+    "end": 13205,
+    "bytes": 1280467
+   },
+   {
+    "at": 17839,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 18073,
+    "end": 18073,
+    "bytes": 1476
+   }
+  ],
+  "events": [
+   {
+    "k": "img-load",
+    "t": 5500,
+    "src": "legacy-20260919-192949-79b493.png"
+   },
+   {
+    "k": "xr-request",
+    "t": 5655
+   },
+   {
+    "k": "xr-start",
+    "t": 6129
+   },
+   {
+    "k": "xr-first-frame",
+    "t": 6564
+   },
+   {
+    "k": "img-load",
+    "t": 11872,
+    "src": "legacy-20261005-061214-82fd63.png"
+   }
+  ]
+ },
+ {
+  "run": 2,
+  "cold": true,
+  "playerReady": 4001,
+  "ttfb": 622,
+  "dcl": 1388,
+  "load": 1389,
+  "fcp": 1476,
+  "origin": 1795338266692,
+  "vrClick": 6287,
+  "firstReel": 6267,
+  "firstVideoPlaying": null,
+  "firstFrame2d": null,
+  "playing2d": null,
+  "xrStart": 6745,
+  "xrFirstFrame": 7203,
+  "vrPlaying": null,
+  "rebuffers": [],
+  "waitingOpen": 0,
+  "srcs": [],
+  "net": [
+   {
+    "at": 16,
+    "url": "echomultiverse.com/reels",
+    "type": "Document",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 631,
+    "end": 696,
+    "bytes": 2783
+   },
+   {
+    "at": 695,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 752,
+    "end": 752,
+    "bytes": 853
+   },
+   {
+    "at": 695,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 752,
+    "end": 752,
+    "bytes": 1128
+   },
+   {
+    "at": 696,
+    "url": "echomultiverse.com/assets/index-BFoNeFFu.css",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 861,
+    "end": 1043,
+    "bytes": 49508
+   },
+   {
+    "at": 695,
+    "url": "echomultiverse.com/assets/index-BDWYo04Y.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1046,
+    "end": 1047,
+    "bytes": 126538
+   },
+   {
+    "at": 1121,
+    "url": "echomultiverse.com/assets/ReelsPage-OD-yKu_2.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1182,
+    "end": 1182,
+    "bytes": 5680
+   },
+   {
+    "at": 1122,
+    "url": "echomultiverse.com/assets/mediaFormat-ybV0UnfM.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1185,
+    "end": 1186,
+    "bytes": 2485
+   },
+   {
+    "at": 1122,
+    "url": "echomultiverse.com/assets/aspect-D-yo_SEL.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1200,
+    "end": 1202,
+    "bytes": 2010
+   },
+   {
+    "at": 1121,
+    "url": "echomultiverse.com/assets/ReelsPlayer-Cf2PrzaO.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1246,
+    "end": 1247,
+    "bytes": 4149
+   },
+   {
+    "at": 1126,
+    "url": "fonts.gstatic.com/s/instrumentsans/v4/pxiTypc9vsFDm051Uf6KVwgkfoSxQ0GsQv8ToedPibnr0SZe1Q.w",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 1282,
+    "end": 1282,
+    "bytes": 30121
+   },
+   {
+    "at": 1133,
+    "url": "echomultiverse.com/api/billing/catalog",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1373,
+    "end": 1379,
+    "bytes": 3052
+   },
+   {
+    "at": 696,
+    "url": "static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092",
+    "type": "Script",
+    "status": 200,
+    "cf": null,
+    "hdr": 1386,
+    "end": 1386,
+    "bytes": 10478
+   },
+   {
+    "at": 1133,
+    "url": "echomultiverse.com/api/auth/me",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1385,
+    "end": 1392,
+    "bytes": 1251
+   },
+   {
+    "at": 1404,
+    "url": "echomultiverse.com/cdn-cgi/rum",
+    "type": "XHR",
+    "status": 204,
+    "cf": null,
+    "hdr": 1466,
+    "end": 1466,
+    "bytes": 484
+   },
+   {
+    "at": 1409,
+    "url": "echomultiverse.com/logo-echo-glass.png",
+    "type": "Other",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1481,
+    "end": 1548,
+    "bytes": 38719
+   },
+   {
+    "at": 1417,
+    "url": "echomultiverse.com/logo-echo-glass.png",
+    "type": "Other",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 1482,
+    "end": 1558,
+    "bytes": 0
+   },
+   {
+    "at": 1453,
+    "url": "fonts.gstatic.com/s/fraunces/v38/6NU78FyLNQOQZAnv9bYEvDiIdE9Ea92uemAk_WBq8U_9v0c2Wa0KxC9Te",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 1570,
+    "end": 1570,
+    "bytes": 67341
+   },
+   {
+    "at": 1454,
+    "url": "echomultiverse.com/api/messages/capabilities",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1686,
+    "end": 1686,
+    "bytes": 1565
+   },
+   {
+    "at": 1454,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1686,
+    "end": 1687,
+    "bytes": 1483
+   },
+   {
+    "at": 1454,
+    "url": "echomultiverse.com/api/config",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1698,
+    "end": 1701,
+    "bytes": 3057
+   },
+   {
+    "at": 1454,
+    "url": "echomultiverse.com/api/reels",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 1902,
+    "end": 2190,
+    "bytes": 14721
+   },
+   {
+    "at": 1454,
+    "url": "echomultiverse.com/api/reels/player-inline",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2129,
+    "end": 2527,
+    "bytes": 95484
+   },
+   {
+    "at": 2548,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 2588,
+    "end": 2588,
+    "bytes": 929
+   },
+   {
+    "at": 2548,
+    "url": "fonts.googleapis.com/css2",
+    "type": "Stylesheet",
+    "status": 200,
+    "cf": null,
+    "hdr": 2589,
+    "end": 2589,
+    "bytes": 401
+   },
+   {
+    "at": 2549,
+    "url": "echomultiverse.com/api/reels/player-script/reels_rewards.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2797,
+    "end": 2798,
+    "bytes": 1990
+   },
+   {
+    "at": 2549,
+    "url": "echomultiverse.com/api/reels/player-script/reels_feed_state.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2798,
+    "end": 2798,
+    "bytes": 2486
+   },
+   {
+    "at": 2550,
+    "url": "echomultiverse.com/api/reels/player-script/reels_pack_state.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2806,
+    "end": 2807,
+    "bytes": 3020
+   },
+   {
+    "at": 2551,
+    "url": "echomultiverse.com/api/reels/player-script/vr_ui_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2864,
+    "end": 2864,
+    "bytes": 34203
+   },
+   {
+    "at": 2553,
+    "url": "echomultiverse.com/api/reels/player-script/vr_shell.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2891,
+    "end": 2892,
+    "bytes": 12363
+   },
+   {
+    "at": 2550,
+    "url": "echomultiverse.com/api/reels/player-script/reels_pack_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2904,
+    "end": 2904,
+    "bytes": 8271
+   },
+   {
+    "at": 2553,
+    "url": "echomultiverse.com/api/reels/player-script/vr_shell_canvas.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 2917,
+    "end": 2917,
+    "bytes": 27103
+   },
+   {
+    "at": 2553,
+    "url": "echomultiverse.com/api/reels/player-script/webxr_vr.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3035,
+    "end": 3036,
+    "bytes": 184085
+   },
+   {
+    "at": 2571,
+    "url": "fonts.gstatic.com/s/materialsymbolsoutlined/v385/kJEhBvYX7BgnkSrUwT8OhrdQw4oELdPIeeII9v6oF",
+    "type": "Font",
+    "status": 200,
+    "cf": null,
+    "hdr": 3279,
+    "end": 3282,
+    "bytes": 4026399
+   },
+   {
+    "at": 2550,
+    "url": "echomultiverse.com/api/reels/player-script/three.min.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 3887,
+    "end": 3888,
+    "bytes": 220798
+   },
+   {
+    "at": 3977,
+    "url": "echomultiverse.com/api/events",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 4239,
+    "end": 4240,
+    "bytes": 1267
+   },
+   {
+    "at": 3977,
+    "url": "echomultiverse.com/api/auth/me",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 4344,
+    "end": 4346,
+    "bytes": 1244
+   },
+   {
+    "at": 3979,
+    "url": "media.echomultiverse.com/uploads/cap-4-20261006-054525-6288fb.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4066,
+    "end": 5450,
+    "bytes": 1106053
+   },
+   {
+    "at": 5968,
+    "url": "echomultiverse.com/api/posts/17221e64-c5ef-431b-8d88-2d3164d5cc95/view",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 6256,
+    "end": 6256,
+    "bytes": 1341
+   },
+   {
+    "at": 3977,
+    "url": "media.echomultiverse.com/uploads/legacy-20260919-192949-79b493.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4368,
+    "end": 6272,
+    "bytes": 1217987
+   },
+   {
+    "at": 3977,
+    "url": "media.echomultiverse.com/uploads/legacy-20260919-192949-79b493.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4592,
+    "end": 6273,
+    "bytes": 338
+   },
+   {
+    "at": 3979,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 4273,
+    "end": 6554,
+    "bytes": 1280406
+   },
+   {
+    "at": 6567,
+    "url": "echomultiverse.com/api/reels/player-script/quest_controller_img.js",
+    "type": "Script",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 7201,
+    "end": 7201,
+    "bytes": 652895
+   },
+   {
+    "at": 7200,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 7204,
+    "end": 7207,
+    "bytes": 0
+   },
+   {
+    "at": 7552,
+    "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAh4AAAOECAYAAADuSTjbAAAAAXNSR0IArs4c6QAAAERl",
+    "type": "Image",
+    "status": 200,
+    "cf": null,
+    "hdr": 7563,
+    "end": 7564,
+    "bytes": 0
+   },
+   {
+    "at": 7126,
+    "url": "echomultiverse.com/assets/earth-natural-4096x2048.jpg",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 7565,
+    "end": 7920,
+    "bytes": 1316887
+   },
+   {
+    "at": 7200,
+    "url": "media.echomultiverse.com/uploads/cap-4-20261006-054525-6288fb.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 8096,
+    "end": 9417,
+    "bytes": 338
+   },
+   {
+    "at": 7200,
+    "url": "media.echomultiverse.com/uploads/cap-4-20261006-054525-6288fb.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 7859,
+    "end": 9417,
+    "bytes": 1106041
+   },
+   {
+    "at": 9450,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 9686,
+    "end": 9687,
+    "bytes": 1474
+   },
+   {
+    "at": 11479,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Image",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 11483,
+    "end": 11494,
+    "bytes": 0
+   },
+   {
+    "at": 11492,
+    "url": "media.echomultiverse.com/uploads/legacy-20261005-061214-82fd63.png",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "HIT",
+    "hdr": 11668,
+    "end": 15505,
+    "bytes": 1280449
+   },
+   {
+    "at": 17449,
+    "url": "echomultiverse.com/api/health",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 17689,
+    "end": 17690,
+    "bytes": 1476
+   },
+   {
+    "at": 18985,
+    "url": "echomultiverse.com/api/events",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 19253,
+    "end": 19253,
+    "bytes": 1263
+   },
+   {
+    "at": 18985,
+    "url": "echomultiverse.com/api/events",
+    "type": "Fetch",
+    "status": 200,
+    "cf": "DYNAMIC",
+    "hdr": 19339,
+    "end": 19340,
+    "bytes": 1267
+   }
+  ],
+  "events": [
+   {
+    "k": "img-load",
+    "t": 6267,
+    "src": "legacy-20260919-192949-79b493.png"
+   },
+   {
+    "k": "xr-request",
+    "t": 6288
+   },
+   {
+    "k": "xr-start",
+    "t": 6745
+   },
+   {
+    "k": "xr-first-frame",
+    "t": 7203
+   },
+   {
+    "k": "img-load",
+    "t": 11488,
+    "src": "legacy-20261005-061214-82fd63.png"
+   },
+   {
+    "k": "img-load",
+    "t": 18978,
+    "src": "cap-4-20261006-054525-6288fb.png"
+   }
+  ]
+ }
+]
