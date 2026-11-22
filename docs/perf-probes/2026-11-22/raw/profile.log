@@ -1,0 +1,22 @@
+# Local profile, 2026-11-22. 207 posts. Medians of 60 requests. See profile_inline.py.
+# prodrows: Postgres 15, real limiter, 291 daily-stats rows (the prod count). Used in the README.
+# lim1: Postgres 15, real limiter, 1449 daily-stats rows (7 per post). Overstates the trending read.
+# nodaily1: Postgres 15, real limiter, no daily-stats rows.
+# new / old: SQLite, limiter stubbed, no daily-stats rows.
+new-pg-feed-prodrows /api/reels/feed db=postgresql limiter=True: posts=207 bytes=16610 median=32.0ms p95=35.3ms mean=32.5ms
+new-pg-player-inline-prodrows /api/reels/player-inline db=postgresql limiter=True: posts=207 bytes=428134 median=38.8ms p95=40.8ms mean=39.3ms
+old-pg-feed-prodrows /api/reels/feed db=postgresql limiter=True: posts=207 bytes=16454 median=24.9ms p95=28.9ms mean=25.4ms
+old-pg-player-inline-prodrows /api/reels/player-inline db=postgresql limiter=True: posts=207 bytes=397968 median=28.7ms p95=32.0ms mean=29.1ms
+new-pg-feed-lim1 /api/reels/feed db=postgresql limiter=True: posts=207 bytes=16671 median=42.8ms p95=75.2ms mean=47.1ms
+new-pg-player-inline-lim1 /api/reels/player-inline db=postgresql limiter=True: posts=207 bytes=428272 median=47.4ms p95=50.9ms mean=50.0ms
+old-pg-feed-lim1 /api/reels/feed db=postgresql limiter=True: posts=207 bytes=16432 median=25.6ms p95=28.8ms mean=25.9ms
+old-pg-player-inline-lim1 /api/reels/player-inline db=postgresql limiter=True: posts=207 bytes=397902 median=29.1ms p95=36.3ms mean=30.0ms
+new-pg-feed-nodaily1 /api/reels/feed db=postgresql limiter=True: posts=207 bytes=16628 median=29.8ms p95=33.1ms mean=30.3ms
+new-pg-player-inline-nodaily1 /api/reels/player-inline db=postgresql limiter=True: posts=207 bytes=428154 median=36.5ms p95=45.1ms mean=37.9ms
+new: posts=207 bytes=427848 median=27.7ms p95=28.9ms mean=27.7ms
+old: posts=207 bytes=397540 median=23.1ms p95=24.1ms mean=23.1ms
+# fix: Postgres 15, real limiter, 291 rows, 852ca88 plus the trending-stats cache and the affinity skip (working tree).
+fix-pg-feed-r1 /api/reels/feed db=postgresql limiter=True: posts=207 bytes=16610 median=26.3ms p95=29.8ms mean=26.6ms
+fix-pg-feed-r2 /api/reels/feed db=postgresql limiter=True: posts=207 bytes=16610 median=26.7ms p95=28.5ms mean=26.8ms
+fix-pg-player-inline-r1 /api/reels/player-inline db=postgresql limiter=True: posts=207 bytes=428134 median=33.2ms p95=36.9ms mean=33.5ms
+fix-pg-player-inline-r2 /api/reels/player-inline db=postgresql limiter=True: posts=207 bytes=428134 median=33.4ms p95=35.3ms mean=33.7ms

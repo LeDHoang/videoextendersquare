@@ -1,0 +1,284 @@
+# Load profile on release 852ca88, 2026-11-22
+
+A full probe of production after the `852ca88` deploy. It has five parts:
+
+- An edge check of every anonymous route and the security headers.
+- A player concurrency test, giving p95 and p99 per step.
+- The loopback set from `2026-11-12/`, through the proxy and against the writer alone.
+- A browser and Sentry check.
+- A geo run from 8 locations: Vietnam with no VPN, then 7 Surfshark exits.
+
+**Status:** done. The Los Angeles VPN run failed, so Seattle covers US West. Hong Kong was left out (see "Geo run").
+
+## Summary
+
+- **The release is healthy.** All 32 anonymous routes return 200, and the enforced CSP is in place. Media Range and CORS work. Every loopback and player step returned only 200, up to 150 concurrent players. No container restarted, and Sentry shows nothing new from this release.
+- **The player routes are 28 to 39% slower than in the 11-12 run on `7bf201b`.** Through the proxy, the player fell from 29.3 to 21.2 rps, and player-inline from 30.8 to 20.0 rps. On the writer alone, the player fell from 17.7 to 11.8 rps, and player-inline from 17.5 to 10.6 rps. The p95 at 10 connections went up by the same share. This is the largest change in the run. A local profile puts the cause in code: on Postgres, player-inline went from 28.7 to 38.8 ms per request, +35% (see "Profile of player-inline"). Two fixes in the working tree bring it to 33.3 ms. They are not deployed.
+- **Feed fell 17 to 19%, and session starts 23 to 28%.** Through the proxy, session starts fell from 770 to 596 per minute. On the writer alone they fell from 443 to 330 per minute. Both falls follow from the player and feed falls, because the session sequence includes both routes.
+- **The other routes changed little.** reels, tags, creators and search/suggestions are within ±9%. locations/activity gained about 25%.
+- **Max concurrent players: about 5 to 7 at an open p95 of 1 s or less, and about 15 at 2 s.** A cold `/reels` open (18 requests) saturates at about 650 to 730 opens per minute from 5 to 10 players up. More players wait longer, but none get an error.
+- **`app-read` is the limit, at its 2-CPU cap.** Postgres and the proxy have room. The writer's DB pool hit 15 of 15 once during the writer-alone run.
+- **From outside, the API costs about 0.3 to 1.1 s TTFB at p50, depending on the location.** Through the VPN, every exit outside Asia is noisy.
+- **The SPA's `/api/reels` request never hits the edge cache.** The SPA always sends `refresh=false`, and `server/edge_cache.py` treats any `refresh` parameter as a forced re-scan. So the response gets `private, no-store` and Cloudflare reports `BYPASS` in every location (see "Flags"). The fix is made in the working tree but not deployed.
+
+## Results
+
+The ceiling is the highest rate across the steps. The 11-12 numbers are from `docs/perf-probes/2026-11-12/README.md` (release `7bf201b`).
+
+| Route | Writer 11-12 (rps) | Writer 11-22 (rps) | Proxy 11-12 (rps) | Proxy 11-22 (rps) | p95 at c=10, writer / proxy, 11-22 (ms) |
+|---|---|---|---|---|---|
+| `/api/reels/feed` | 18.6 | 15.1 | 33.6 | 27.8 | 715 / 578 |
+| `/api/recommendations/creators` | 22.2 | 22.5 | 41.3 | 44.3 | 557 / 352 |
+| `/api/reels` | 89.2 | 81.5 | 142.2 | 142.8 | 149 / 88 |
+| `/api/reels/player` | 17.7 | **11.8** | 29.3 | **21.2** | 910 / 607 |
+| `/api/reels/player-inline` | 17.5 | **10.6** | 30.8 | **20.0** | 1024 / 593 |
+| `/api/reels/tags` | 81.2 | 76.3 | 132.9 | 137.0 | 157 / 112 |
+| `/api/reels/locations/activity` | 21.4 | 26.8 | 20.7 | 27.1 | 464 / 434 |
+| `/api/search/suggestions?q=a` | 33.2 | 31.7 | 32.1 | 33.4 | 382 / 339 |
+| session, sessions per minute | 443 | 330 | 770 | 596 | n/a |
+| session_spa, sessions per minute | 430 | 309 | 772 | 566 | n/a |
+
+The 11-12 p95 at c=10, writer / proxy, was 594 / 468 for the feed, 656 / 412 for the player and 629 / 434 for player-inline. Every step returned only 200.
+
+## Max concurrent players
+
+`player_probe.py` runs on the VPS, through the proxy on `127.0.0.1:8080`, with no Cloudflare in between. Each worker is one player that opens back to back, with steps of 20 s. A target stops when its per-request p95 passes 3 s or any non-200 comes back.
+
+**`player_inline` alone** (the SPA's player route):
+
+| Players | rps | p50 (ms) | p95 (ms) | p99 (ms) |
+|---|---|---|---|---|
+| 1 | 9.7 | 100 | 125 | 189 |
+| 2 | 18.7 | 103 | 132 | 163 |
+| 5 | 20.1 | 222 | 387 | 433 |
+| 10 | 19.2 | 511 | 790 | 963 |
+| 15 | 18.2 | 805 | 1000 | 1066 |
+| 25 | 19.8 | 1237 | 1396 | 1479 |
+| 50 | 19.6 | 2524 | 2766 | 2852 |
+| 75 | 18.7 | 3889 | 4501 | 4599 |
+
+The route is flat at about 20 rps from 2 players up, so extra players only queue. The test stopped at 75 players, where p95 passed 3 s.
+
+**`player_open`**, a cold `/reels` open by a first-time visitor. It is 18 requests in a row: the shell, the boot API calls, player-inline, the first reels page and the ten player scripts, with no browser cache.
+
+| Players | Opens per minute | Open p50 (ms) | Open p95 (ms) | Open p99 (ms) | Per-request p95 (ms) |
+|---|---|---|---|---|---|
+| 1 | 326 | 180 | 217 | 257 | 95 |
+| 2 | 522 | 221 | 283 | 371 | 107 |
+| 5 | 680 | 428 | 624 | 720 | 139 |
+| 10 | 728 | 807 | 1266 | 1462 | 236 |
+| 15 | 672 | 1248 | 1972 | 2472 | 345 |
+| 25 | 652 | 2189 | 3470 | 3666 | 603 |
+| 50 | 649 | 4211 | 6944 | 7163 | 1143 |
+| 75 | 629 | 6546 | 10943 | 11466 | 1710 |
+| 100 | 609 | 7711 | 15076 | 15240 | 2069 |
+| 150 | 630 | 14208 | 21501 | 21771 | 3954 |
+
+Every request returned 200: 1,962 at 1 player, and 3,150 to 4,446 per step from 2 players up.
+
+What this means:
+
+- About 5 to 7 players can open `/reels` at the same moment with an open p95 of 1 s or less. About 15 can at 2 s or less.
+- Throughput tops out at about 650 to 730 opens per minute. Past 10 players, each extra player only adds wait.
+- These are players opening back to back. Real viewers open once, then watch for tens of seconds, so many more viewers fit than these numbers show. The limit applies to a burst of new arrivals.
+- These numbers are from loopback. A real visitor also pays the trip to Oregon (see "Geo run"). Their browser opens several connections, not one.
+
+## CPU
+
+`docker stats` and `/proc/loadavg` were sampled every 8 s (`raw/cpu.log`). Each cell is mean / p95 / max.
+
+| Phase | Time (UTC) | `app-read` | `app` | `postgres` | `proxy` | load1 |
+|---|---|---|---|---|---|---|
+| Player | 21:43–21:50 | 117 / 189 / 190% | 50 / 150 / 158% | 17 / 24 / 36% | 8 / 19 / 21% | 3.2 / 5.5 / 6.2 |
+| Proxy loopback | 21:50–22:17 | 118 / 196 / 201% | 30 / 101 / 186% | 19 / 35 / 46% | 4 / 14 / 17% | 3.0 / 4.1 / 5.0 |
+| Writer loopback | 22:17–22:44 | 1 / 0.5 / 28% | 101 / 186 / 234% | 14 / 25 / 51% | 0 | 1.8 / 2.6 / 3.1 |
+
+`app-read` ran at its `cpus: 2` cap whenever the proxy was in use. This is the same as on 11-12. So the same 2 CPUs now serve fewer player and feed requests than in the 11-12 run. That points to more work per request, but this run does not show whether the code, a larger catalog or larger responses caused it. Postgres stayed under 51%.
+
+## Method
+
+- **Release:** `852ca88` on `main`, read from `/opt/echo`. Alembic was at head. `app` and `app-read` started at 2026-11-21 21:32 UTC, and no container restarted during the run.
+- **Stack:** compose project `echo` on the 4-core, 7.7 GB VPS. The containers are `app` (the writer, on `:8000`), `app-read` (2 workers, capped at `cpus: 2`), `proxy` (Caddy, on `:8080`), `postgres` (pool of 15) and `cloudflared`.
+- **VPS run:** 2026-11-21 from 21:43 to 22:44 UTC, which was 2026-11-22 in Vietnam, hence the folder name. `run-probe.sh` ran three phases in order, with 20 s between them:
+  1. `player_probe.py` through the proxy.
+  2. `loopback.py` through the proxy.
+  3. `loopback.py` against the writer alone.
+- **Loopback probes:** they run on the VPS, with no Cloudflare, tunnel or network trip. Each request sends its own `CF-Connecting-IP`, which keeps the per-IP limits out of the way. Requests send no cookie, so the proxy sends the read paths to `app-read`.
+- **Steps:** `loopback.py` used 1, 2, 5, 10, 15, 25 and 50 connections, 20 s each, as on 11-12. `player_probe.py` used 1 to 150 players, 20 s each.
+- **Edge, browser and geo:** these ran from the laptop. The geo run started at 22:46 UTC, after the VPS run had finished.
+
+## Health and alerts
+
+- `/api/readyz` returned 200.
+- In the 30 minutes before the load test, the access log had 160 × 200 and 2 × 503. Both 503s were `REWARDS_DISABLED` on `POST /api/rewards/reels/claim`. This is expected, because `SX_REEL_REWARDS_ENABLED` is off.
+- The watchdog fired during the writer-alone run, as it should under this load:
+  - 22:20:27Z: p95 of 3324 ms.
+  - 22:22:30Z: `db_pool`, "15 of 15 connections checked out".
+  - 22:43:33Z: p95 of 2094 ms.
+- `rate_limit_events` grew to 35,787 rows. The probes send a new `CF-Connecting-IP` per request, so each one writes rows.
+
+## Edge, browser and Sentry
+
+- **Edge probe** (`edge_probe.py`, from Vietnam, `raw/edge.log`): 43 of 44 checks pass.
+  - All 32 anonymous routes return 200.
+  - The CSP is enforced and has no `unsafe-eval`. HSTS is `max-age=15552000`.
+  - HTTP redirects to HTTPS.
+  - The mp4 Range request returns 206 with ACAO, and the poster returns 200 with ACAO.
+  - An unknown API route returns 404 JSON. SPA deep links serve the index.
+  - An anonymous rewards claim is refused with a 4xx.
+  - The one failure: `sit.echomultiverse.com` is open to the public. It is already tracked in `docs/to-beta.md` (Cloudflare Access for SIT).
+- **Browser:** the Reels, Explore, login and 404 pages load with no CSP violations and no failed requests.
+- **Sentry:** nothing new from this release. The only steady noise is `REWARDS_DISABLED`, 61 events in 24 h.
+
+## Geo run
+
+`geo_probe.py` runs from the laptop. It used no VPN for Vietnam, and a Surfshark exit for each other location. Every request is an anonymous GET through Cloudflare and the tunnel. For each location it records:
+
+- the Cloudflare colo, from `cdn-cgi/trace`;
+- 20 warm samples per route on one keep-alive connection, as TTFB;
+- one 4 MB Range read of a reel mp4 from `media.`;
+- a cold `/reels` open (the same 18 requests as `player_open`) by 1 and 5 players, 15 s each.
+
+The runs went from 2026-11-21 22:46 UTC (Vietnam) to 2026-11-22 06:49 UTC (Frankfurt). Every route returned 200 in every location.
+
+**Warm TTFB, p50 / p95 (ms)**
+
+| Location | Colo | trace | healthz | spa_index | spa_js | config | reels | tags | feed | player_inline |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Vietnam, no VPN | SIN | 59 / 119 | 303 / 750 | 255 / 387 | 143 / 205 | 133 / 976 | 314 / 425 | 65 / 450 | 375 / 717 | 402 / 1404 |
+| Singapore | SIN | 66 / 873 | 310 / 574 | 326 / 1157 | 147 / 311 | 122 / 566 | 302 / 667 | 68 / 500 | 530 / 841 | 568 / 1269 |
+| Tokyo | SJC | 234 / 250 | 273 / 5232 | 503 / 967 | 358 / 806 | 358 / 662 | 419 / 808 | 289 / 1133 | 430 / 1463 | 513 / 999 |
+| Sydney | SYD | 173 / 3458 | 360 / 925 | 408 / 551 | 410 / 759 | 375 / 1232 | 507 / 767 | 370 / 3841 | 842 / 3113 | 641 / 1444 |
+| Seattle | SEA | 260 / 2191 | 273 / 2662 | 853 / 6783 | 857 / 1557 | 968 / 24781 | 963 / 9127 | 648 / 4719 | 837 / 3472 | 769 / 1494 |
+| New York | EWR | 351 / 9319 | 354 / 1191 | 724 / 2206 | 878 / 1241 | 589 / 2218 | 404 / 1613 | 1104 / 4892 | 702 / 1751 | 551 / 1098 |
+| London | LHR | 228 / 639 | 394 / 1616 | 388 / 1949 | 494 / 1521 | 242 / 876 | 417 / 762 | 307 / 1087 | 526 / 891 | 720 / 1044 |
+| Frankfurt | FRA | 247 / 934 | 393 / 847 | 639 / 2233 | 561 / 870 | 382 / 1346 | 419 / 878 | 252 / 1327 | 532 / 724 | 775 / 1302 |
+
+**Media and player open**
+
+| Location | 4 MB Range read: bytes, speed, TTFB (ms) | Open, 1 player, p50 (ms) | Open, 5 players, p50 / p95 (ms) | Opens, 1 / 5 players |
+|---|---|---|---|---|
+| Vietnam, no VPN | 2.9 MB (whole file), 1.52 MB/s, 302 | 9927 | 11896 / 14778 | 2 / 10 |
+| Singapore | 2.9 MB (whole file), 1.02 MB/s, 408 | 18951 | 10452 / 16419 | 1 / 10 |
+| Tokyo | 4 MB, 0.04 MB/s, 685 | 44384 | 15451 / 17110 | 2 / 7 |
+| Sydney | 4 MB, 0.04 MB/s, 1095 | 23350 | 16512 / 23184 | 1 / 5 |
+| Seattle | 4 MB, 0.53 MB/s, 1299 | 37084 | 31766 / 33089 | 1 / 5 |
+| New York | 4 MB, 0.45 MB/s, 1235 | 47486 | 25924 / 34760 | 1 / 5 |
+| London | 4 MB, 0.60 MB/s, 1402 | 17848 | 21176 / 25155 | 1 / 5 |
+| Frankfurt | 4 MB, 0.64 MB/s, 1621 | 18894 | 18245 / 29936 | 1 / 5 |
+
+Each window was 15 s, and one open took 10 to 47 s. So each cell rests on 1 to 10 opens, and a 1-player cell is usually a single open. The open times are also an upper bound. The probe sends the 18 requests one after another on one connection, and it downloads the full player scripts each time. A browser runs them in parallel on several connections and caches the scripts. Compare the open times between locations only, not with the loopback numbers.
+
+**Compared with the 2026-11-10 baseline:** the baseline gives edge+origin, which is TTFB minus the trace RTT. On this run that subtraction is not reliable. trace p95 reached 0.9 to 9.3 s on several VPN exits, and the derived healthz came out as low as 3 ms from New York, below the trip to Oregon. So only rough statements hold:
+
+- **Asia:** Vietnam and Singapore enter at SIN. Their API p50 is 300 to 570 ms, which is mostly the trip to Oregon. `spa_js` is an edge `HIT` there, at about 145 ms.
+- **Tokyo** still enters at SJC, as on 11-10, so it pays a trip to California first. Its trace p50 is 234 ms, and the API p50 is 270 to 510 ms.
+- **Europe and US East:** the API p50 is 400 to 780 ms, with a trace p50 of 230 to 350 ms. On 11-10, edge+origin for these exits was 106 to 384 ms. The numbers cannot be split cleanly between the player regression above and the VPN. A rerun from a real network in those regions would separate the two.
+- **Media throughput through the VPN is 0.04 to 0.64 MB/s.** This is the VPN cap, as on 11-10, not R2. Without the VPN, Vietnam got 1.52 MB/s.
+
+**Not run:**
+
+- Los Angeles: the VPN leg was dead, so the run failed with `TimeoutError` and `gaierror`. `raw/geo-us-los-angeles.json` is empty. A partial earlier attempt saw colo LAX, with trace at 216 / 622 ms, healthz at 266 / 903 ms, feed at 382 / 681 ms and player_inline at 740 / 1146 ms.
+- Hong Kong: excluded on purpose. Claude is not available in Hong Kong or China. `raw/geo-hong-kong.*` is from an early attempt and is not used here.
+
+## Profile of player-inline
+
+`profile_inline.py` runs one anonymous route in-process on a given tree, against a local Postgres. It seeds the prod catalog size: 207 posts from 25 creators, 30 likes per creator, and 291 rows of `post_recommendation_daily_stats` (the prod count for 11-16 to 11-22). Each request has no cookie, like the loopback probe. It times 60 requests after 5 warm-ups, then runs cProfile over 30 more. The rate limiter is real, with a huge limit. `raw/profile.log` has every run.
+
+| Route | `7bf201b` (ms) | `852ca88` (ms) | Change | Prod change in rps |
+|---|---|---|---|---|
+| `/api/reels/player-inline` | 28.7 | 38.8 | +35% | −28 to −39% |
+| `/api/reels/feed` | 24.9 | 32.0 | +29% | −17 to −19% |
+
+The values are medians. The local changes match the prod falls, so the catalog size and the run order do not explain them.
+
+Where the extra time goes, from cProfile (profiled time is about 1.6× wall time):
+
+- **`_pipeline_context` (`server/recommendation/service.py`), about 74% of the gap.** It grew from 8.6 to 23.8 ms per request. Two new queries cause most of it:
+  - The 7-day trending read of `PostRecommendationDailyStats`, added in `c00d325`. It loads every row of the last week as ORM objects on every request, about 7.8 ms. The stats are global, not per viewer.
+  - The negative `ActorItemAffinity` query, with an `IN` list of about 200 post ids, about 2.8 ms. It runs even for a first-time visitor, who has no affinity rows.
+- **The shared rate limiter on the player routes** (`f1fd6b0`), 2.2 ms. It takes an advisory lock and commits on every request. Locally it costs 0 to 1 ms of wall time, but the VPS disk may make the commit dearer. It is a security fix, so keep it.
+- **`_fill_player_data`,** 2.2 ms, new and only on the player routes. The template and icons add 1.4 ms more, and the body is 7.6% larger.
+- **`_hidden_paths`,** 1.4 ms, plus small gains in rank, rerank and sources.
+
+SQL went from 18 to 23 statements per request on Postgres. With no daily-stats rows, player-inline on `852ca88` takes 36.5 ms, so that read is about 2 ms of wall time at the prod row count. It grows with the number of rows.
+
+**With both fixes** (working tree, not deployed), on the same seed:
+
+| Route | `7bf201b` (ms) | `852ca88` (ms) | With fixes (ms) | Gap recovered |
+|---|---|---|---|---|
+| `/api/reels/player-inline` | 28.7 | 38.8 | 33.3 | 54% |
+| `/api/reels/feed` | 24.9 | 32.0 | 26.5 | 77% |
+
+The fixed tree returns bodies of the same size as `852ca88`. The rest of the player-inline gap is the rate limiter, `_fill_player_data` and the larger body.
+
+Limits: this is one thread on a laptop, with a synthetic seed and macOS fsync. It has no concurrency and no pool contention, so it shows where the time goes, not the prod rates.
+
+## Not covered
+
+- Signed-in flows and writes: uploads, publish, likes, comments, DMs, billing. Every probe was anonymous and read-only.
+- The edge ramp and mixed modes of `2026-11-12/load.py`. The geo run replaced them.
+- A real-device check on the Quest.
+
+## Flags
+
+1. **Player routes are 28 to 39% slower than in the 11-12 run,** on both the writer and the reader. The cause is the code between `7bf201b` and `852ca88` (see "Profile of player-inline"). Two fixes are made in the working tree but not deployed:
+   - `_recent_stats` reads last week's daily stats for every post as plain columns, once per process every 30 s (`RECENT_STATS_TTL_S`) and again when the day changes.
+   - The negative item-affinity query runs only when the viewer has 24 or more affinity rows. With fewer, the top-rows read already holds them all.
+   - After the deploy, run the loopback probe again to confirm the player and feed rates.
+2. **The feed fell 17 to 19%,** and the session starts fell with it. It shares the `_pipeline_context` cost with the player routes.
+3. **The SPA's first reels page never hits the edge cache.**
+   - `ReelsPage.jsx` always sends `refresh: refreshKey > 0`. `web/src/api/client.js` drops only `undefined` and `null`, so every request carries `refresh=false`.
+   - `EdgeCacheMiddleware` in `server/edge_cache.py` checks `"refresh" not in request.query_params`, which tests whether the key is present, not its value. So it answers `private, no-store`.
+   - Checked with `curl`: bare `/api/reels` gets `public, max-age=0, s-maxage=30` and `HIT`. The SPA's URL gets `private, no-store` and `BYPASS`.
+   - The result is that every visitor's first reels page goes to Oregon.
+   - **Fixed in the working tree, not deployed.** `EdgeCacheMiddleware` now treats `refresh=false` and `refresh=0` as no re-scan. `test_refresh_false_is_cacheable` covers the SPA's URL. After the deploy, check with `curl` that the SPA's URL gets `HIT`. If it stays `BYPASS`, the Cloudflare Cache Rule may also exclude the `refresh` parameter.
+4. **The DB pool reached 15 of 15** during the writer-alone run at high concurrency.
+5. **SIT is open to the public.** This is already tracked in `docs/to-beta.md`.
+6. **Sentry noise from `REWARDS_DISABLED`,** 61 events in 24 h. It is expected while rewards are off, but it hides real issues.
+
+## Online capacity / SX_CAPACITY_ONLINE
+
+The rule in `2026-11-12/README.md` is: the writer feed ceiling × 50, rounded down for headroom. The writer feed ceiling is now 15.1 rps, so 15.1 × 50 ≈ 755 viewers. That is below the current 800. Set `SX_CAPACITY_ONLINE=650`, which keeps the same headroom as 930 → 800 on 11-12. The watchdog then alerts at 70%, which is 455. Raise it again once the feed regression is fixed and a new probe confirms the ceiling.
+
+## Files
+
+- `edge_probe.py`: the edge check, run from the laptop. Its output is in `raw/edge.log`.
+- `player_probe.py`: max concurrent players, on the VPS. `PORT=8080` targets the proxy, and `8000` targets the writer.
+- `loopback.py`: the 11-12 loopback probe, unchanged.
+- `run-probe.sh`: runs the player probe, then the loopback probe through the proxy, then against the writer, detached on the VPS, with a CPU sampler.
+- `geo_probe.py`: the geo probe, run from the laptop at each VPN location.
+- `profile_inline.py`: the local profile of one route. Its docstring lists the settings. `raw/profile.log` holds the results.
+- `raw/player-proxy.log`, `raw/loopback-proxy.log`, `raw/loopback-writer.log`: one JSON line per step.
+- `raw/cpu.log`: container CPU and memory, and load, with phase markers.
+- `raw/geo-<location>.json`: one JSON object per location. `raw/geo-<location>.log` holds the progress lines.
+
+## How to run
+
+The VPS part takes about 60 minutes. Run it from this folder:
+
+```bash
+ssh -n <user>@<vps> mkdir -p /tmp/probe-20261122
+```
+
+```bash
+scp player_probe.py loopback.py run-probe.sh <user>@<vps>:/tmp/probe-20261122/
+```
+
+```bash
+ssh -n <user>@<vps> 'setsid nohup sh /tmp/probe-20261122/run-probe.sh > /dev/null 2>&1 < /dev/null &'
+```
+
+`/tmp/probe-20261122/done` appears when it finishes. Then copy the logs back:
+
+```bash
+for f in player-proxy loopback-proxy loopback-writer cpu; do scp <user>@<vps>:/tmp/probe-20261122/$f.log raw/$f.log; done
+```
+
+The geo probe takes about 4 minutes per location. Connect the VPN and check the colo in `cdn-cgi/trace`. Then run:
+
+```bash
+python3 -u geo_probe.py <location> > raw/geo-<location>.json 2> raw/geo-<location>.log
+```
+
+Do not run the geo probe while the VPS probe is running, because each would slow the other.

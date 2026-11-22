@@ -1,0 +1,12 @@
+trace {"cold_ms": 551, "ttfb_p50": 66, "ttfb_p95": 873, "total_p50": 67, "cache": "-", "statuses": {"200": 21}}
+healthz {"cold_ms": 395, "ttfb_p50": 310, "ttfb_p95": 574, "total_p50": 310, "cache": "DYNAMIC", "statuses": {"200": 21}}
+spa_index {"cold_ms": 1865, "ttfb_p50": 326, "ttfb_p95": 1157, "total_p50": 326, "cache": "DYNAMIC", "statuses": {"200": 21}}
+spa_js {"cold_ms": 1036, "ttfb_p50": 147, "ttfb_p95": 311, "total_p50": 485, "cache": "HIT", "statuses": {"200": 21}}
+config {"cold_ms": 728, "ttfb_p50": 122, "ttfb_p95": 566, "total_p50": 122, "cache": "EXPIRED", "statuses": {"200": 21}}
+reels {"cold_ms": 1147, "ttfb_p50": 302, "ttfb_p95": 667, "total_p50": 430, "cache": "BYPASS", "statuses": {"200": 21}}
+tags {"cold_ms": 772, "ttfb_p50": 68, "ttfb_p95": 500, "total_p50": 68, "cache": "EXPIRED", "statuses": {"200": 21}}
+feed {"cold_ms": 1603, "ttfb_p50": 530, "ttfb_p95": 841, "total_p50": 559, "cache": "DYNAMIC", "statuses": {"200": 21}}
+player_inline {"cold_ms": 1456, "ttfb_p50": 568, "ttfb_p95": 1269, "total_p50": 1081, "cache": "DYNAMIC", "statuses": {"200": 21}}
+media {"status": 206, "bytes": 2901494, "ttfb_ms": 408, "mb_per_s": 1.02}
+player 1 {"opens": 1, "ok": 1, "p50": 18951, "p95": 18951, "max": 18951}
+player 5 {"opens": 10, "ok": 10, "p50": 10452, "p95": 16419, "max": 16419}
