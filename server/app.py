@@ -129,6 +129,7 @@ async def _cleanup_loop():
     from server.jobs import job_manager
     from server.routers import image, messages, video
     from server.social.auth import prune_shared_rate_limits
+    from server.social.recommendations.service import sweep_expired_sessions
 
     while True:
         await asyncio.sleep(_CLEANUP_INTERVAL_S)
@@ -145,6 +146,7 @@ async def _cleanup_loop():
             prune_shared_rate_limits,
             _backfill_media_info,
             _check_disk,
+            sweep_expired_sessions,
         ):
             try:
                 await asyncio.to_thread(step)

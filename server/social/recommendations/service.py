@@ -59,6 +59,9 @@ from .config import (
     REELS_ALGORITHM_VERSION,
     SESSION_IDLE_MINUTES,
     SESSION_MAX_HOURS,
+    SESSION_SWEEP_BATCH,
+    SESSION_SWEEP_GRACE_HOURS,
+    SESSION_SWEEP_MAX_BATCHES,
     TRENDING_HALF_LIFE_DAYS,
     TRENDING_WINDOW_DAYS,
     WATCHED_DAYS,
@@ -188,6 +191,44 @@ def _purge_actor_history(db: Session, *, actor: ActorIdentity, now: datetime, ke
         RecommendationDismissal.expires_at.is_not(None),
         RecommendationDismissal.expires_at <= now,
     ).delete(synchronize_session=False)
+
+
+def sweep_expired_sessions(
+    *, batch_size: int = SESSION_SWEEP_BATCH, max_batches: int = SESSION_SWEEP_MAX_BATCHES
+) -> int:
+    """Delete sessions expired past the grace window, with their requests and impressions.
+
+    The writer's cleanup loop runs it. `_purge_actor_history` only reaches
+    actors who come back; one-time visitors' rows would otherwise stay forever.
+    Each batch is its own short transaction; children go first so no single
+    statement cascades an unbounded number of rows.
+    """
+    from server.social.database import SessionLocal
+
+    cutoff = utcnow() - timedelta(hours=SESSION_SWEEP_GRACE_HOURS)
+    removed = 0
+    for _ in range(max_batches):
+        with SessionLocal() as db:
+            ids = [
+                row[0]
+                for row in db.query(RecommendationSession.id)
+                .filter(RecommendationSession.expires_at <= cutoff)
+                .order_by(RecommendationSession.expires_at)
+                .limit(batch_size)
+                .all()
+            ]
+            if not ids:
+                break
+            for model in (RecommendationImpression, RecommendationRequest):
+                db.query(model).filter(model.session_id.in_(ids)).delete(synchronize_session=False)
+            db.query(RecommendationSession).filter(RecommendationSession.id.in_(ids)).delete(
+                synchronize_session=False
+            )
+            db.commit()
+        removed += len(ids)
+        if len(ids) < batch_size:
+            break
+    return removed
 
 
 def _resolve_session(

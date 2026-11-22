@@ -8,6 +8,14 @@ CREATOR_ALGORITHM_VERSION = "creator-heuristic-v1"
 CURSOR_VERSION = 1
 SESSION_IDLE_MINUTES = 30
 SESSION_MAX_HOURS = 6
+# The writer's cleanup loop deletes sessions this long past expires_at, with
+# their requests and impressions. The grace keeps late events from a tab still
+# playing an old queue attributable; nothing else reads an expired session.
+SESSION_SWEEP_GRACE_HOURS = 24
+# Sessions per delete transaction, and transactions per cleanup run (every
+# 15 minutes): short locks, and at most 10k sessions a run.
+SESSION_SWEEP_BATCH = 200
+SESSION_SWEEP_MAX_BATCHES = 50
 DEFAULT_PAGE_SIZE = 12
 MAX_PAGE_SIZE = 24
 MAX_CATALOG_SIZE = 1000
