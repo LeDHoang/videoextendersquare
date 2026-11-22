@@ -293,3 +293,56 @@ def test_faststart_leaves_unreadable_files_alone(tmp_path):
     media.make_faststart(junk, "mp4")
     assert junk.read_bytes() == b"\x00\x00\x00\x10mdat" + b"\x00" * 8
     assert [p.name for p in tmp_path.iterdir()] == ["junk.mp4"]
+
+
+def _audio_streams(path: Path) -> list[str]:
+    return subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+
+
+def _video_hash(path: Path) -> str:
+    return subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v", "-c", "copy", "-f", "streamhash", "-"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+
+
+@needs_ffmpeg
+def test_silent_audio_is_added_to_a_video_only_file_without_touching_the_video(tmp_path):
+    clip = tmp_path / ".clip.mp4.part"
+    make_video(tmp_path / "clip.mp4")
+    (tmp_path / "clip.mp4").rename(clip)
+    before = _video_hash(clip)
+    mtime = clip.stat().st_mtime
+
+    assert media.add_silent_audio(clip, "mp4") is True
+
+    assert _audio_streams(clip) == ["aac"]
+    assert _video_hash(clip) == before
+    assert clip.stat().st_mtime == mtime
+    assert not media._moov_after_mdat(clip)
+    assert [p.name for p in tmp_path.iterdir()] == [".clip.mp4.part"]
+    # A file that has audio now is left alone.
+    size = clip.stat().st_size
+    assert media.add_silent_audio(clip, "mp4") is False
+    assert clip.stat().st_size == size
+
+
+def test_silent_audio_leaves_unreadable_and_other_formats_alone(tmp_path):
+    junk = tmp_path / "junk.mp4"
+    junk.write_bytes(b"\x00\x00\x00\x10mdat" + b"\x00" * 8)
+    assert media.add_silent_audio(junk, "mp4") is False
+    assert media.add_silent_audio(junk, "webm") is False
+    assert junk.read_bytes() == b"\x00\x00\x00\x10mdat" + b"\x00" * 8
+    assert [p.name for p in tmp_path.iterdir()] == ["junk.mp4"]
+
+
+@needs_ffmpeg
+def test_a_rendition_of_a_video_only_original_gets_a_silent_track(tmp_path):
+    src = tmp_path / "clip.mp4"
+    make_video(src, size="320x160")
+    assert _audio_streams(src) == []
+    mono = media.make_left_eye_rendition(str(src), "sbs")
+    assert _audio_streams(Path(mono)) == ["aac"]

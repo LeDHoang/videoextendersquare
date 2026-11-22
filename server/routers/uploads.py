@@ -800,6 +800,7 @@ def _publish_upload(
                 shutil.copy2(source, part)
                 if req.kind == "video":
                     SM.make_faststart(part, src_ext)
+                    SM.add_silent_audio(part, src_ext)
                 media_store.commit(part, target)
             finally:
                 part.unlink(missing_ok=True)

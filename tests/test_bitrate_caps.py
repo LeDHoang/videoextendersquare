@@ -70,6 +70,7 @@ def preview_cmds(monkeypatch, tmp_path):
     monkeypatch.setattr(media, "get_video_codec", lambda src: "hevc")
     monkeypatch.setattr(media, "probe_media_info", lambda src: {"duration_ms": 1000, "width": 3840, "height": 3840})
     monkeypatch.setattr(media.subprocess, "run", fake_run)
+    monkeypatch.setattr(media, "_audio_state", lambda src: True)
     monkeypatch.setattr(media, "_commit_part", lambda part, dest: str(dest))
     return cmds
 

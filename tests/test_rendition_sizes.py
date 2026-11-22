@@ -97,6 +97,7 @@ def test_web_preview_scale_per_shape(tmp_path, monkeypatch, size, scale):
     monkeypatch.setattr(media, "get_video_codec", lambda path: "hevc")
     monkeypatch.setattr(media, "probe_media_info", lambda path: {"duration_ms": 1000, "width": size[0], "height": size[1]})
     monkeypatch.setattr(media.subprocess, "run", run)
+    monkeypatch.setattr(media, "_audio_state", lambda path: True)
     monkeypatch.setattr(media, "_commit_part", lambda part, dest: str(dest))
     assert media.make_web_preview(str(src))
     assert cmds[0][cmds[0].index("-vf") + 1] == scale

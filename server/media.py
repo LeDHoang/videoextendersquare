@@ -327,6 +327,55 @@ def make_faststart(path: str | Path, ext: str) -> None:
         out.unlink(missing_ok=True)
 
 
+# A silent AAC track for video-only files. In an immersive WebXR session the
+# Quest browser keeps the clock of a video-only file running past its buffered
+# data (no "waiting", frames trickle in as they download); with an audio track
+# it stalls and resumes like any other video. Silence costs ~1 KB/s.
+SILENT_AUDIO_INPUT = ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+
+
+def _silent_audio_args(src: str) -> tuple[list[str], list[str]]:
+    """(extra input, stream maps) that give an encode of *src* a silent track when it has no audio.
+
+    Nothing changes when *src* has audio, or when ffprobe cannot tell.
+    """
+    if _audio_state(src) is not False:
+        return [], []
+    return SILENT_AUDIO_INPUT, ["-map", "0:v:0", "-map", "1:a", "-shortest"]
+
+
+def add_silent_audio(path: str | Path, ext: str) -> bool:
+    """Give an MP4/MOV with no audio stream a silent AAC track, in place.
+
+    A stream copy: no frame is re-encoded. The file keeps its mtime, so the
+    siblings built from it stay fresh. Best effort; True when a track was
+    added, False when the file was left as it was (has audio, unreadable,
+    not MP4/MOV, or the remux failed).
+    """
+    fmt = {"mp4": "mp4", "m4v": "mp4", "mov": "mov"}.get(ext.lower())
+    path = Path(path)
+    if not fmt or _audio_state(str(path)) is not False:
+        return False
+    out = path.with_name(path.name + ".audio")
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-v", "error", "-i", str(path), *SILENT_AUDIO_INPUT,
+        "-map", "0", "-map", "1:a", "-map_metadata", "0", "-c", "copy", "-c:a", "aac", "-b:a", "32k",
+        "-shortest", "-movflags", "+faststart", "-f", fmt, str(out),
+    ]
+    try:
+        stat = path.stat()
+        p = subprocess.run(cmd, capture_output=True, timeout=300, creationflags=_NO_WINDOW)
+        if p.returncode != 0 or out.stat().st_size == 0:
+            return False
+        os.utime(out, (stat.st_atime, stat.st_mtime))
+        os.replace(out, path)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+    finally:
+        out.unlink(missing_ok=True)
+
+
 def video_codec(src: str, files: dict | None = None) -> str:
     """Codec of *src*: from a post's media record when given, else ffprobe."""
     if files is not None:
@@ -387,10 +436,11 @@ def make_web_preview(src: str, height: int | None = 3840, stereo: str | None = N
     # Hidden temp file + rename: stereo_paths serves any non-empty proxy, and
     # stereo proxies are built in the background after publish.
     part = _part_path(dest)
+    audio_in, audio_maps = _silent_audio_args(src)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
-        "-i", src,
-        *vf_args,
+        "-i", src, *audio_in,
+        *vf_args, *audio_maps,
         "-c:v", "libx264", "-crf", "20", "-preset", "superfast", *rate_args,
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k",
@@ -465,10 +515,11 @@ def make_vr2k_rendition(src: str, stereo: str | None = None) -> str | None:
               f":'if(gte(iw,ih),-2,2*trunc(min(ih,{VR2K_EYE_SIDE})/2))'")
     rate_args = ["-maxrate", "14M", "-bufsize", "28M"] if stereo else ["-maxrate", "8M", "-bufsize", "16M"]
     part = _part_path(dest)
+    audio_in, audio_maps = _silent_audio_args(src)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
-        "-i", src,
-        "-vf", vf,
+        "-i", src, *audio_in,
+        "-vf", vf, *audio_maps,
         "-c:v", "libx265", "-crf", "24", "-preset", "veryfast", *rate_args,
         "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k",
@@ -792,10 +843,11 @@ def make_left_eye_rendition(src: str, layout: str) -> str | None:
     # Encode to a hidden temp file and rename: the feed treats any non-empty
     # -mono file as ready, and this runs in the background after publish.
     part = _part_path(dest)
+    audio_in, audio_maps = _silent_audio_args(src)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-v", "error",
-        "-i", src,
-        "-vf", vf,
+        "-i", src, *audio_in,
+        "-vf", vf, *audio_maps,
         "-c:v", "libx264", "-crf", "20", "-preset", "superfast",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "aac", "-b:a", "192k",
@@ -1036,14 +1088,19 @@ def _caption_model():
     return None
 
 
-def has_audio(src: str) -> bool:
-    """True when *src* has an audio stream (ffprobe)."""
+def _audio_state(src: str) -> bool | None:
+    """True/False when *src* has/lacks an audio stream; None when ffprobe cannot tell."""
     cmd = ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", src]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
-        return False
-    return p.returncode == 0 and bool(p.stdout.strip())
+        return None
+    return bool(p.stdout.strip()) if p.returncode == 0 else None
+
+
+def has_audio(src: str) -> bool:
+    """True when *src* has an audio stream (ffprobe)."""
+    return _audio_state(src) is True
 
 
 def _vtt_time(seconds: float) -> str:

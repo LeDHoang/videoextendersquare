@@ -459,6 +459,7 @@ def test_vr_rendition_is_hevc_at_2048_per_eye(tmp_path, monkeypatch, stereo, siz
         return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr(SM.subprocess, "run", run)
+    monkeypatch.setattr(SM, "_audio_state", lambda path: True)
     monkeypatch.setattr(SM, "_commit_part", lambda part, dest: (part.replace(dest), str(dest))[1])
     assert SM.make_vr2k_rendition(str(src), stereo) == str(tmp_path / "clip-2k.mp4")
     cmd = calls[0]
