@@ -75,7 +75,7 @@ Complete each item once per environment. Tick it in your own copy of this list.
   - Map tiles (`/api/reels/map-tiles/*`) stay cacheable. They are public, and the app sends cache headers for them.
 - [ ] **Cache Rule for anonymous list responses (not applied yet).** It lets the edge answer anonymous visitors from the nearest colo instead of Oregon, about 200 ms per request from Asia (`docs/perf-probes/2026-11-11/bottlenecks.md`, fix 5).
   - What the app sends (`server/edge_cache.py`), for `GET` and `HEAD` of exactly `/api/reels`, `/api/reels/tags`, `/api/reels/locations` and `/api/config`:
-    - no `echo_session` cookie, status 200, no `refresh` parameter: `Cache-Control: public, max-age=0, s-maxage=30`;
+    - no `echo_session` cookie, status 200, no `refresh` parameter or `refresh=false` (the SPA sends it on every grid load): `Cache-Control: public, max-age=0, s-maxage=30`;
     - anything else (a session cookie, valid or not; an error; `refresh=true`): `Cache-Control: private, no-store`;
     - `Vary: Cookie` on both.
   - Why only these four: an anonymous response of each has no viewer fields and depends only on the URL. Auth is the `echo_session` cookie only, and none of them sets a cookie. `/api/reels/feed`, `/api/reels/tags/<tag>`, `/api/reels/locations/<key>`, `/api/reels/locations/activity` and `/api/config/models` are not included.

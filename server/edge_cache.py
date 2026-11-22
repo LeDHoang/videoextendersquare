@@ -38,8 +38,10 @@ class EdgeCacheMiddleware:
             return
 
         request = Request(scope)
-        # refresh=true forces a re-scan; a cached copy would defeat it.
-        anonymous = SESSION_COOKIE not in request.cookies and "refresh" not in request.query_params
+        # refresh=true forces a re-scan; a cached copy would defeat it. The SPA sends
+        # refresh=false on every grid load, which is not a re-scan.
+        refresh = request.query_params.get("refresh", "false").lower() not in ("false", "0")
+        anonymous = SESSION_COOKIE not in request.cookies and not refresh
 
         async def send_with_headers(message):
             if message["type"] == "http.response.start":

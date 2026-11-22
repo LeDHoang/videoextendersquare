@@ -156,6 +156,13 @@ def test_refresh_is_not_cacheable(anonymous):
     assert response.headers["cache-control"] == PRIVATE
 
 
+def test_refresh_false_is_cacheable(anonymous):
+    # The SPA sends refresh=false on every grid load (ReelsPage.jsx); it is not a re-scan.
+    response = anonymous.get("/api/reels?folder=ALL+FOLDERS&search=&sort=for_you&limit=60&refresh=false")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == PUBLIC
+
+
 @pytest.mark.parametrize("path", ["/api/reels/feed", "/api/reels/tags/posted", "/api/reels/locations/activity"])
 def test_neighbouring_routes_are_unchanged(anonymous, path):
     response = anonymous.get(path)
