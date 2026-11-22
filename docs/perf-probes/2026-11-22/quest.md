@@ -105,7 +105,7 @@ The XR run with no audio was made twice, with the same numbers to within 0.1 s.
 
 So the slow end needs both things: a file with no audio track, and an open XR session. In that case `currentTime` runs at wall-clock speed from the start, whatever is buffered. At 3.2 s the clock was at 2.56 s with only 0.61 s buffered. The clock reached the end at 7.2 s. The frames on screen (`requestVideoFrameCallback` `mediaTime`) followed the download instead, at about 5 to 6 fps, and the last one came at about 35 s. Only one `waiting` fired, before the first frame. With an audio track, the same XR page stalled normally: the clock stopped, `readyState` dropped to 2 and `waiting` fired each time.
 
-The video was muted in every run. The players' own videos are muted too.
+The video was muted in every run. The player's `#reelsVideo` also starts muted. Whether an unmuted video behaves differently was not tested.
 
 A player change that skipped to the next reel at the end was tried and withdrawn. On these clips it would cut each one to about 30% of its frames.
 
