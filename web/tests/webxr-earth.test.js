@@ -1354,7 +1354,7 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
-  closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
+  closeTo(guide.center.x, (2 + guide.w / 2 + 0.445) * 1.15);
   closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
   closeTo(comments.center.z, -2.58);
   // Unlocked at the moved pose: UI follows the screen instead.
@@ -2732,7 +2732,7 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   assert.ok(comments.center.x < 0, `comments LEFT: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT: ${guide.center.x}`);
   closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
-  closeTo(guide.center.x, 2 + guide.w / 2 + 0.445);
+  closeTo(guide.center.x, (2 + guide.w / 2 + 0.445) * 1.15);
   // Legacy-exact: locked mode anchors both to the room spot tracking the
   // default screen (NOT the live screenDistance).
   api.setScreenState({ locked: true, distance: 3.0 });

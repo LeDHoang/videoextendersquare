@@ -104,6 +104,10 @@ window.WebXRVR = window.WebXRVR || (function () {
   const PANEL_FWD_OFFSET = -0.34;
   const CPANEL_SCALE_FACTOR = 0.432;
   const GUIDE_SCALE_FACTOR = 0.314;
+  // The guide is narrower than the comments panel, so at the shared side gap
+  // its outer edge stopped short of the comments panel's. Pushing its centre
+  // offset from the screen centre out by 15% lines the two outer edges up.
+  const GUIDE_OFFSET_FACTOR = 1.15;
 
   // v8.4 video upload path A/B: 'subimage' (three same-size updates, default)
   // vs 'respec' (force full texImage2D re-spec per upload, legacy behavior).
@@ -2832,13 +2836,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (lockToViewer) {
       const a = getLockedAnchor();
       center = {
-        x: a.x + half + size.w / 2 + layoutTuning.panelSideGap,
+        x: a.x + (half + size.w / 2 + layoutTuning.panelSideGap) * GUIDE_OFFSET_FACTOR,
         y: a.y,
         z: a.z + layoutTuning.panelFwdOffset,
       };
     } else {
       const off = rotateOffsetByScreenQuat({
-        x: half + size.w / 2 + layoutTuning.panelSideGap, y: 0, z: layoutTuning.panelFwdOffset,
+        x: (half + size.w / 2 + layoutTuning.panelSideGap) * GUIDE_OFFSET_FACTOR, y: 0, z: layoutTuning.panelFwdOffset,
       });
       center = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
