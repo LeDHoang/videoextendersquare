@@ -3000,12 +3000,14 @@ test('the overlay caption sits above the dock, wraps to three lines, and lifts t
   assert.ok(long.boxes.every((box) => box.w <= 1024 * 0.76 + 28));
 
   // The three pop-up comments end 24px above the caption; without one they stay centred.
-  const bottom = (regions) => regions[2].y + regions[2].h - 6;
+  const bottom = (regions) => regions[2].y + regions[2].h;
   assert.equal(bottom(short.regions), 0.57 * 1024 - 44 - 24);
   assert.equal(bottom(long.regions), 0.57 * 1024 - 132 - 24);
   const none = render('');
   assert.equal(none.boxes.length, 0);
-  assert.equal(none.regions[0].y + 6, 512 - (3 * 60 + 2 * 11) / 2);
+  // Each plate is exactly one 34px row: no padding band above or below it.
+  assert.equal(none.regions[0].y, 512 - (3 * 34 + 2 * 6) / 2);
+  assert.ok(none.regions.every((r) => r.h === 34));
 
   // While the reel loads, the caption waits: it would cover the "Loading…" label.
   const { ctx, texts } = makeRecordingCtx();
