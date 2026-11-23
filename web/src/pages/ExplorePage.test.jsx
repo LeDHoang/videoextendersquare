@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ExplorePage from './ExplorePage.jsx';
@@ -151,6 +151,72 @@ describe('ExplorePage beta controls', () => {
     expect(screen.getAllByTestId('tile').map((tile) => tile.textContent)).toEqual(['Reel A', 'Reel B', 'Reel C']);
     expect(mocks.api.get).toHaveBeenCalledWith('/api/reels', expect.objectContaining({ cursor: 'page-2', limit: 48, sort: 'for_you' }));
     expect(screen.queryByRole('button', { name: 'LOAD MORE REELS' })).not.toBeInTheDocument();
+  });
+
+  it('loads the next page of reels on its own when the load-more row nears the viewport', async () => {
+    const observers = [];
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback, options) { this.callback = callback; this.options = options; this.targets = []; observers.push(this); }
+      observe(target) { this.targets.push(target); }
+      disconnect() { this.targets = []; }
+    });
+    const near = () => {
+      const observer = observers.filter((row) => row.targets.length).at(-1);
+      act(() => observer.callback([{ isIntersecting: true, target: observer.targets[0] }]));
+    };
+    const reel = (name) => ({ path: 'published/' + name + '.mp4', title: 'Reel ' + name, preview_url: '/p.mp4', poster_url: '/p.jpg' });
+    let releaseSecond;
+    mocks.api.get.mockImplementation((path, params) => {
+      if (path === '/api/packs') return Promise.resolve({ total: 0, items: [], next_offset: null });
+      if (params.cursor === 'page-2') return new Promise((resolve) => { releaseSecond = () => resolve({ ...reels, count: 3, videos: [reel('B')], next_cursor: 'page-3' }); });
+      if (params.cursor === 'page-3') return Promise.reject(new Error('offline'));
+      return Promise.resolve({ ...reels, count: 3, videos: [reel('A')], next_cursor: 'page-2' });
+    });
+    const reelCalls = () => mocks.api.get.mock.calls.filter(([path]) => path === '/api/reels');
+    renderPage();
+    await screen.findByText('Reel A');
+    expect(observers.at(-1).options.rootMargin).toBe('800px 0px');
+
+    near();
+    near();
+    expect(reelCalls().filter(([, params]) => params.cursor === 'page-2')).toHaveLength(1);
+    await act(async () => releaseSecond());
+    await screen.findByText('Reel B');
+
+    // The row is still in view after a short page: a fresh observer asks for the next one.
+    near();
+    await waitFor(() => expect(reelCalls().filter(([, params]) => params.cursor === 'page-3')).toHaveLength(1));
+    // A failed load leaves the button to retry, and the observer does not loop.
+    expect(await screen.findByRole('button', { name: 'LOAD MORE REELS' })).toBeEnabled();
+    expect(reelCalls().filter(([, params]) => params.cursor === 'page-3')).toHaveLength(1);
+  });
+
+  it('loads the next page of packs on its own in the PACKS tab', async () => {
+    const observers = [];
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback) { this.callback = callback; this.targets = []; observers.push(this); }
+      observe(target) { this.targets.push(target); }
+      disconnect() { this.targets = []; }
+    });
+    mocks.api.get.mockImplementation(async (path, params) => {
+      if (path !== '/api/packs') return reels;
+      return params.offset === 24
+        ? { total: 2, items: [{ id: 'q', title: 'Pack Q' }], next_offset: null }
+        : { total: 2, items: [{ id: 'p', title: 'Pack P' }], next_offset: 24 };
+    });
+    render(
+      <MemoryRouter initialEntries={['/explore?type=packs']}>
+        <ExplorePage />
+      </MemoryRouter>,
+    );
+    await screen.findByText('Pack P');
+    const observer = observers.filter((row) => row.targets.length).at(-1);
+    expect(observer.targets[0]).toContainElement(screen.getByRole('button', { name: 'LOAD MORE PACKS' }));
+    act(() => observer.callback([{ isIntersecting: true }]));
+
+    await screen.findByText('Pack Q');
+    expect(mocks.api.get).toHaveBeenCalledWith('/api/packs', expect.objectContaining({ offset: 24, limit: 24 }));
+    expect(screen.queryByRole('button', { name: 'LOAD MORE PACKS' })).not.toBeInTheDocument();
   });
 
   it('opens a posted reel by its post id, and a file with no post by its path', async () => {

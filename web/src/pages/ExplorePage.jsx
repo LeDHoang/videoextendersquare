@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { EmptyState, Mono } from '../components/ui/primitives.jsx';
@@ -43,6 +43,28 @@ const REEL_PAGE_SIZE = 48;
 const TRENDING_TAGS = 8;
 const TRENDING_PLACES = 4;
 
+// Loads the next page once the load-more row nears the viewport. The observer is rebuilt per page key, so a
+// short page that leaves the row in view still asks for the one after; a failed load keeps the key, so it
+// waits for the button instead of retrying in a loop. Without IntersectionObserver the button is the only way.
+function useAutoLoadMore(pageKey, onLoad) {
+  // A callback ref: the row can mount a render after the page key changes (the grid fills in an effect).
+  const [el, setEl] = useState(null);
+  const onLoadRef = useRef(onLoad);
+  onLoadRef.current = onLoad;
+  useEffect(() => {
+    if (pageKey == null || !el || typeof IntersectionObserver !== 'function') return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onLoadRef.current();
+      },
+      { rootMargin: '800px 0px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [pageKey, el]);
+  return setEl;
+}
+
 function shuffled(items) {
   const next = [...items];
   for (let index = next.length - 1; index > 0; index -= 1) {
@@ -73,6 +95,9 @@ export default function ExplorePage() {
   const [packData, setPackData] = useState(null);
   const [packLoadingMore, setPackLoadingMore] = useState(false);
   const [reelsLoadingMore, setReelsLoadingMore] = useState(false);
+  // The page being fetched, so the observer and the button never ask for the same page twice at once.
+  const reelsFetchingRef = useRef(null);
+  const packsFetchingRef = useRef(null);
   const [packError, setPackError] = useState('');
   const [folder, setFolder] = useState('ALL FOLDERS');
   const [codec, setCodec] = useState(CODEC_DEFAULT);
@@ -247,7 +272,8 @@ export default function ExplorePage() {
 
   const loadMoreReels = async () => {
     const cursor = data?.next_cursor;
-    if (!cursor || reelsLoadingMore) return;
+    if (!cursor || reelsFetchingRef.current === cursor) return;
+    reelsFetchingRef.current = cursor;
     setReelsLoadingMore(true);
     try {
       const next = await api.get('/api/reels', {
@@ -272,13 +298,15 @@ export default function ExplorePage() {
     } catch {
       /* Keep the loaded reels; LOAD MORE REELS stays to retry. */
     } finally {
+      if (reelsFetchingRef.current === cursor) reelsFetchingRef.current = null;
       setReelsLoadingMore(false);
     }
   };
 
   const loadMorePacks = async () => {
     const nextOffset = packData?.next_offset;
-    if (contentType !== 'packs' || nextOffset == null || packLoadingMore) return;
+    if (contentType !== 'packs' || nextOffset == null || packsFetchingRef.current === nextOffset) return;
+    packsFetchingRef.current = nextOffset;
     setPackLoadingMore(true);
     setPackError('');
     try {
@@ -294,6 +322,7 @@ export default function ExplorePage() {
     } catch (requestError) {
       setPackError(String(requestError.message || requestError));
     } finally {
+      if (packsFetchingRef.current === nextOffset) packsFetchingRef.current = null;
       setPackLoadingMore(false);
     }
   };
@@ -316,6 +345,8 @@ export default function ExplorePage() {
     tiles.push(...(packsVisible ? packs : order));
   }
   const reelCount = data ? data.count ?? order.length : null;
+  const reelsAutoRef = useAutoLoadMore(!loading && reelsVisible ? data?.next_cursor ?? null : null, loadMoreReels);
+  const packsAutoRef = useAutoLoadMore(!loading && contentType === 'packs' ? packData?.next_offset ?? null : null, loadMorePacks);
   const masonryRef = useMasonry(tiles.map((tile) => (tile.path ? { key: tile.path, aspect: tileAspect(tile) } : { key: 'pack:' + tile.id, aspect: 1 })), density);
 
   return (
@@ -446,14 +477,14 @@ export default function ExplorePage() {
             </div>
           ) : null}
           {reelsVisible && data?.next_cursor ? (
-            <div className="sx-profile-load-more">
+            <div ref={reelsAutoRef} className="sx-profile-load-more">
               <Button loading={reelsLoadingMore} disabled={reelsLoadingMore} onClick={loadMoreReels}>
                 LOAD MORE REELS
               </Button>
             </div>
           ) : null}
           {contentType === 'packs' && packData?.next_offset != null ? (
-            <div className="sx-profile-load-more">
+            <div ref={packsAutoRef} className="sx-profile-load-more">
               <Button loading={packLoadingMore} disabled={packLoadingMore} onClick={loadMorePacks}>
                 LOAD MORE PACKS
               </Button>
