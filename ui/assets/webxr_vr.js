@@ -11301,6 +11301,12 @@ window.WebXRVR = window.WebXRVR || (function () {
             earthDragEngaged = true;
             earthGrabGeo = { ...normalized };
             earthDragTrail = [];
+            // Single-axis lock per drag, decided here from the press-to-engage
+            // travel in the viewer-facing frame (x across, y up): the
+            // dominant one wins for the whole drag.
+            const pressW = qRotate(earthQuat, vNorm(earthDragStartDir));
+            const engageW = qRotate(earthQuat, normalized);
+            earthDragAxis = Math.abs(engageW.x - pressW.x) >= Math.abs(engageW.y - pressW.y) ? 'yaw' : 'pitch';
           }
         } else {
           let heldLong = false;
@@ -11346,8 +11352,20 @@ window.WebXRVR = window.WebXRVR || (function () {
           // TRUE GRAB at orbit scale: solve yaw/pitch so the geographic point
           // that was grabbed sits exactly under the pointer ray's hit. North
           // stays up (no roll); pitch is clamped at ±1.2 like the sticks.
+          // The axis lock constrains the target: a yaw drag keeps the grabbed
+          // point's height, a pitch drag keeps its sideways position.
           const ll = unitToLatLon(earthGrabGeo);
-          const cursorWorld = vNorm(qRotate(earthQuat, normalized));
+          let cursorWorld = vNorm(qRotate(earthQuat, normalized));
+          const grabW = vNorm(qRotate(earthQuat, earthGrabGeo));
+          if (earthDragAxis === 'yaw') {
+            const h = Math.hypot(cursorWorld.x, cursorWorld.z) || 1;
+            const r = Math.sqrt(Math.max(0, 1 - grabW.y * grabW.y));
+            cursorWorld = { x: cursorWorld.x / h * r, y: grabW.y, z: cursorWorld.z / h * r };
+          } else if (earthDragAxis === 'pitch') {
+            const h = Math.hypot(cursorWorld.y, cursorWorld.z) || 1;
+            const r = Math.sqrt(Math.max(0, 1 - grabW.x * grabW.x));
+            cursorWorld = { x: grabW.x, y: cursorWorld.y / h * r, z: cursorWorld.z / h * r };
+          }
           const solved = solveEarthFocusRotation(ll.lat, ll.lon, cursorWorld, 1.2);
           if (solved && Number.isFinite(solved.yaw) && Number.isFinite(solved.pitch)) {
             earthYaw = solved.yaw;
