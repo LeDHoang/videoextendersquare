@@ -6596,6 +6596,28 @@ test('VR shell: handoff confirm exits XR, then asks the host to navigate', async
   assert.equal(renderer.shell.isOpen(), false);
 });
 
+test('VR shell: an Explore tile tapped in Earth leaves Earth and plays the reel', async () => {
+  const fed = [];
+  const events = [];
+  const { renderer } = await enterLiveSession({ withShell: true });
+  renderer.init(null, {
+    shellRequest: () => Promise.resolve({ videos: [{ post_id: 'p1', path: '/v/1' }, { post_id: 'p2', path: '/v/2' }] }),
+    onShellPlayFeed: (feed) => { fed.push(feed); events.push('feed'); return true; },
+    onEarthClose: (resume) => events.push('earth-close:' + resume),
+  });
+  renderer.setSceneMode('earth');
+  assert.equal(renderer.getPreviewState().sceneMode, 'earth');
+  renderer.shell.open('/explore');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(renderer.__test.activateShellHit({ action: { action: 'play', arg: 1 } }), true);
+  assert.equal(fed.length, 1);
+  assert.equal(fed[0].startIndex, 1);
+  assert.equal(renderer.shell.isOpen(), false);
+  assert.equal(renderer.getPreviewState().sceneMode, 'reels', 'the tapped reel plays in reel mode');
+  // Earth closes first (the host's close aborts a pending feed) and never resumes the old reel.
+  assert.deepEqual(events, ['earth-close:false', 'feed']);
+});
+
 test('VR shell: facade reports false without the shell modules', () => {
   const renderer = loadRenderer({ gl: makeMockGl({ deleted: 0 }) });
   renderer.init(null, {});

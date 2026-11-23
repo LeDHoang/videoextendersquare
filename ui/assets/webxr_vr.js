@@ -8602,6 +8602,12 @@ window.WebXRVR = window.WebXRVR || (function () {
       playFeed(feed) {
         // The new feed autoplays; closing must not toggle it back to paused.
         shellResumePlayback = false;
+        // From Earth, leave it first as a location pick does (the old reel is
+        // not resumed); after, the host's earth close would abort this feed.
+        if (sceneMode === 'earth') {
+          earthResumePlayback = false;
+          setSceneMode('reels');
+        }
         if (callbacks.onShellPlayFeed) {
           try { callbacks.onShellPlayFeed(feed); } catch (e) {}
         }
