@@ -2468,6 +2468,9 @@ window.WebXRVR = window.WebXRVR || (function () {
   // screenDistance and all sizes track the live screenScale, so scale +
   // distance changes keep the control panel on the reel player.
   const DOCK_GAP = 0.08;
+  // The dock is 15% larger than the legacy 0.82 x screen width; below an
+  // unlocked screen it keeps the legacy dock's top edge and grows downward.
+  const DOCK_LEGACY_WIDTH = 0.82;
   // Earth-station console: floats before + below the globe (front surface
   // z≈-0.62, bottom y≈0.44) so it is reachable, fully visible, and carries
   // the ride back to reels. Station chosen with the viewer tilt applied:
@@ -2482,7 +2485,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       screenScale: DEFAULT_SCALE,
       screenDistance: -DEFAULT_POS.z,
       screenHeight: DEFAULT_POS.y,
-      dockWidth: 0.82,
+      dockWidth: 0.943,
       dockGap: DOCK_GAP,
       panelSideGap: PANEL_SIDE_GAP,
       panelFwdOffset: PANEL_FWD_OFFSET,
@@ -2781,7 +2784,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       const navTop = a.y - SHELL_MAIN_DROP - SHELL_MAIN_SIZE.h / 2 - SHELL_NAV_DROP - navH / 2;
       pos = { x: a.x, y: navTop + fit.h - full.h / 2, z: -SHELL_MAIN_RADIUS };
     } else {
-      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale * screenSpan(screenAspect).h / 2 - layoutTuning.dockGap, z: 0 });
+      const grow = (dockTargetSize(screenScale).h - screenScale * DOCK_LEGACY_WIDTH * 384 / 1024) / 2;
+      const off = rotateOffsetByScreenQuat({ x: 0, y: -screenScale * screenSpan(screenAspect).h / 2 - layoutTuning.dockGap - grow, z: 0 });
       pos = { x: screenPos.x + off.x, y: screenPos.y + off.y, z: screenPos.z + off.z };
     }
     // Room-fixed like the globe: the smoothed eye over the globe's axis, so

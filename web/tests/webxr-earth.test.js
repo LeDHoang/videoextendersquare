@@ -1325,8 +1325,10 @@ test('below-screen dock clears the curved screen with margin', () => {
   const renderer = loadRenderer();
   const pose = renderer.__test.computeDockPose({ x: 0, y: 1.6, z: 0 });
   // Dock center hangs below the 4.0 m default screen bottom edge
-  // (1.52 − 2.0 − 0.08 = −0.56) at the default 2.24 m station.
-  closeTo(pose.pos.y, -0.56);
+  // (1.52 − 2.0 − 0.08 = −0.56) at the default 2.24 m station, lowered by
+  // half the 15% height growth so the top edge stays where the legacy
+  // 0.82-wide dock had it: (1.4145 − 1.23) / 2.
+  closeTo(pose.pos.y, -0.56 - (1.4145 - 1.23) / 2);
   assert.equal(pose.pos.z, -2.24);
   // Dock center sits below the screen bottom edge (y = −0.48).
   assert.ok(pose.pos.y < -0.48);
@@ -1345,9 +1347,9 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   closeTo(dock.pos.x, 0);
   // The dock sits at the open shell's 2.2 m radius, its bottom edge on the
   // top of the nav strip under the Explore panel: eye 1.52 - 0.15 drop -
-  // 1.125 / 2 panel - 0.35 nav drop - half of the 0.16 * 3.28 / 1.5 m strip.
-  const navH = 0.16 * 3.28 / 1.5;
-  closeTo(dock.pos.y, 1.52 - 0.15 - 1.125 / 2 - 0.35 - navH / 2 + 1.23 / 2);
+  // 1.125 / 2 panel - 0.35 nav drop - half of the 0.16 * 3.772 / 1.5 m strip.
+  const navH = 0.16 * 3.772 / 1.5;
+  closeTo(dock.pos.y, 1.52 - 0.15 - 1.125 / 2 - 0.35 - navH / 2 + 1.4145 / 2);
   closeTo(dock.pos.z, -2.2);
   closeTo(dock.pitch, 0);
   const comments = api.getCommentsPanelLayout();
@@ -1361,7 +1363,8 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   api.setScreenState({ locked: false });
   const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
   closeTo(dock2.pos.x, 1);
-  closeTo(dock2.pos.y, 1.5 - 2.0 - 0.08);
+  // The 15%-larger dock keeps the legacy top edge and grows downward.
+  closeTo(dock2.pos.y, 1.5 - 2.0 - 0.08 - (1.4145 - 1.23) / 2);
   closeTo(dock2.pos.z, -3);
 });
 
@@ -2501,7 +2504,7 @@ test('screen scale and distance clamp to the PlayVR travel limits', () => {
   assert.equal(api.clampScreenDistance(0.5), 1.2);
   assert.equal(api.clampScreenDistance(2.24), 2.24);
   assert.equal(api.clampScreenDistance(9), 6.0);
-  assert.equal(api.dockTargetSize(4).w, 3.28);
+  closeTo(api.dockTargetSize(4).w, 3.772); // 15% over the legacy 3.28
 });
 
 test('head lock poses the live screen perpendicular and centered', () => {
@@ -3116,7 +3119,7 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
     screenScale: 4,
     screenDistance: 2.24,
     screenHeight: 1.52,
-    dockWidth: 0.82,
+    dockWidth: 0.943,
     dockGap: 0.08,
     panelSideGap: 0.445,
     panelFwdOffset: -0.34,
@@ -3134,7 +3137,7 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
   assert.ok(api.getCommentsPanelLayout().center.x < before.center.x, 'bigger screen + gap push the panel left');
 
   renderer.stopPreview();
-  assert.equal(renderer.getLayoutTuning().dockWidth, 0.82);
+  assert.equal(renderer.getLayoutTuning().dockWidth, 0.943);
   assert.equal(api.getScreenState().scale, 4);
 });
 
@@ -3142,8 +3145,8 @@ test('an XR session ignores preview layout tuning', async () => {
   const { renderer } = await enterLiveSession();
   assert.equal(renderer.isPresenting(), true, 'precondition: live session bound');
   renderer.setLayoutTuning({ dockWidth: 0.5 });
-  assert.equal(renderer.getLayoutTuning().dockWidth, 0.82);
-  assert.equal(renderer.__test.dockTargetSize(4).w, 3.28);
+  assert.equal(renderer.getLayoutTuning().dockWidth, 0.943);
+  closeTo(renderer.__test.dockTargetSize(4).w, 3.772);
 });
 
 test('domoverlay flag omits the overlay layer from session options', async () => {
@@ -7665,7 +7668,9 @@ test('wide and tall screens move the panels, dock, ground fade and lock distance
 
   shape(1);
   const sqPanel = api.getCommentsPanelLayout();
-  const sqDockY = api.getSceneInfo().dock.pos[1];
+  // Bottom edge, not centre: the full-size portrait dock grows up from its floor.
+  const dockBottom = () => { const d = api.getSceneInfo().dock; return d.pos[1] - 0.3 * d.scale[1] * Math.cos(d.rot[0]); };
+  const sqDockY = dockBottom();
   assert.ok(panelDist() > 2.24, 'a square screen leaves its panels where they were');
   assert.equal(api.groundGlobeState().screenFade, 1);
 
@@ -7679,7 +7684,7 @@ test('wide and tall screens move the panels, dock, ground fade and lock distance
   shape(9 / 16);
   assert.ok(finite(api.getCommentsPanelLayout()));
   assert.equal(api.getCommentsPanelLayout().w, sqPanel.w, 'panels size by the short side');
-  assert.ok(api.getSceneInfo().dock.pos[1] < sqDockY, 'the taller tag lowers the ground dock');
+  assert.ok(dockBottom() < sqDockY, 'the taller tag lowers the ground dock');
   // Hard lock, a 10° nod: the tall screen's bottom edge covers the globe, the video stays.
   renderer.setLayoutTuning({ lazyFollowEdge: 0 });
   look(10);
