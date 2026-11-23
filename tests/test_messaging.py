@@ -17,7 +17,8 @@ from server.social.message_crypto import (
     decrypt_payload,
     encrypt_payload,
 )
-from server.social.models import DirectMessage, MessageEvent, Post, Report, User
+from server.social.services import ensure_demo_user
+from server.social.models import DirectMessage, Follow, MessageEvent, Post, Report, User
 
 
 PASSWORD = "correct-horse-battery"
@@ -220,6 +221,45 @@ def test_followed_recipient_gets_active_conversation_and_batch_share_is_idempote
         assert fan_inbox["conversations"][0]["state"] == "active"
         with app.state.testing_session() as db:
             assert db.query(DirectMessage).count() == 1
+
+
+def test_reel_can_be_shared_to_system_and_demo_accounts(app):
+    with TestClient(app) as owner_client:
+        owner = register(owner_client, "reel_owner", "owner@example.com")
+        post_id = create_post(app, owner["id"])
+        with app.state.testing_session() as db:
+            archive = ensure_demo_user(db, "ECHO Archive")
+            demo = ensure_demo_user(db, "Neon Demo")
+            # The archive follows the owner, so its thread opens active; the demo thread stays a pending request.
+            db.add(Follow(follower_id=archive.id, followee_id=owner["id"]))
+            db.commit()
+            assert (archive.account_type, demo.account_type) == ("system", "demo")
+            usernames = [archive.username, demo.username]
+
+        shared = mutate(
+            owner_client,
+            "POST",
+            "/api/messages/share-reel",
+            {"post_id": post_id, "usernames": usernames, "client_id": "share-system-0001"},
+        )
+        assert shared.status_code == 200, shared.text
+        assert shared.json()["succeeded"] == 2, shared.json()["results"]
+
+        inbox = owner_client.get("/api/messages/bootstrap", params={"box": "inbox"}).json()
+        rows = {row["participant"]["username"]: row for row in inbox["conversations"]}
+        assert sorted(rows) == sorted(usernames)
+        assert rows[usernames[0]]["can_message"] is True
+
+        second = mutate(
+            owner_client,
+            "POST",
+            "/api/messages/share-reel",
+            {"post_id": create_post(app, owner["id"], "tests/second.mp4"), "usernames": usernames, "client_id": "share-system-0002"},
+        )
+        results = {row["username"]: row for row in second.json()["results"]}
+        assert results[usernames[0]]["ok"] is True
+        # Same request rule as real accounts: one share until the request is accepted.
+        assert results[usernames[1]]["code"] == "REQUEST_PENDING"
 
 
 def test_message_report_preserves_encrypted_evidence_after_delete(app, monkeypatch):

@@ -129,4 +129,21 @@ describe('ReelShareDialog copy link', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(screen.queryByText(/unavailable/)).not.toBeInTheDocument();
   });
+
+  it('lists every account type in recipient search, including the system archive, but never me', async () => {
+    mocks.api.get.mockImplementation((path) => Promise.resolve(path === '/api/search/suggestions'
+      ? { users: [
+        { id: 'sys', username: 'echo_archive', display_name: 'ECHO Archive', account_type: 'system' },
+        { id: 'demo', username: 'demo_neon', display_name: 'Neon Demo', account_type: 'demo' },
+        { id: 'real', username: 'alice', display_name: 'Alice', account_type: 'real' },
+        { id: 'me', username: 'me', display_name: 'Me', account_type: 'real', is_me: true },
+      ] }
+      : { canonical_url: LINK, title: 'Neon Collection', share_text: 'Watch this', playable_count: 3 }));
+    await openDialog();
+    fireEvent.change(screen.getByLabelText('Search people to share with'), { target: { value: 'e' } });
+    expect(await screen.findByText('@echo_archive')).toBeInTheDocument();
+    expect(screen.getByText('@demo_neon')).toBeInTheDocument();
+    expect(screen.getByText('@alice')).toBeInTheDocument();
+    expect(screen.queryByText('@me')).not.toBeInTheDocument();
+  });
 });
