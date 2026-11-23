@@ -13,6 +13,9 @@ export default function ReelShareDialog() {
   const navigate = useNavigate();
   const location = useLocation();
   const linkRef = useRef(null);
+  // Bumped on every open/target change so a send still in flight from an
+  // earlier open cannot write its results into the fresh dialog.
+  const openGeneration = useRef(0);
   const target = messaging.shareTarget;
   // Require an explicit pack kind — reel payloads in pack playback context may
   // carry a pack_id without being a pack share.
@@ -32,11 +35,16 @@ export default function ReelShareDialog() {
   useEffect(() => {
     if (!targetId) return undefined;
     let alive = true;
+    openGeneration.current += 1;
     setMetadata(null);
     setQrUrl('');
     setStatus('');
+    setQuery('');
+    setResults([]);
     setSelected([]);
+    setNote('');
     setDelivery([]);
+    setSending(false);
     setBatchId(clientId('share'));
     const metadataPath = kind === 'pack'
       ? `/api/packs/${encodeURIComponent(targetId)}/share`
@@ -118,6 +126,7 @@ export default function ReelShareDialog() {
       return;
     }
     if (!usernames.length) return;
+    const generation = openGeneration.current;
     setSending(true);
     setStatus('');
     try {
@@ -128,6 +137,10 @@ export default function ReelShareDialog() {
         note,
         client_id: batchId,
       });
+      if (generation !== openGeneration.current) {
+        await messaging.refreshAll();
+        return;
+      }
       setDelivery((current) => {
         const retained = current.filter((row) => !usernames.includes(row.username));
         return [...retained, ...(response.results || [])];
@@ -136,9 +149,9 @@ export default function ReelShareDialog() {
       if (!response.failed) setBatchId(clientId('share'));
       await messaging.refreshAll();
     } catch (error) {
-      setStatus(error.message || `Could not share this ${kind === 'pack' ? 'Reel Pack' : 'reel'}.`);
+      if (generation === openGeneration.current) setStatus(error.message || `Could not share this ${kind === 'pack' ? 'Reel Pack' : 'reel'}.`);
     } finally {
-      setSending(false);
+      if (generation === openGeneration.current) setSending(false);
     }
   };
 
