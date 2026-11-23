@@ -84,15 +84,18 @@
     { label: 'AUDIO', action: 'mute',  x: 620, y: 100, w: 156, h: 36 },
 
     // Header comment pill → toggles the VR comments panel
-    { label: 'COMMENTS', action: 'comments', x: 664, y: 8, w: 72, h: 32 },
+    { label: 'COMMENTS', action: 'comments', x: 624, y: 8, w: 72, h: 32 },
+
+    // Header help pill → shows/hides the controller guide panel (hidden by default)
+    { label: 'GUIDE', action: 'guide', x: 704, y: 8, w: 32, h: 32 },
 
     // Pack queue toggle (packs only). Earth and the main feed live on the
     // shell nav bar under the dock.
-    { label: 'QUEUE', action: 'earth', x: 584, y: 8, w: 72, h: 32 },
+    { label: 'QUEUE', action: 'earth', x: 544, y: 8, w: 72, h: 32 },
 
     // Spatial viewing toggle (a 2D post's colour+depth version). Sits after
     // the title, clear of the pack index pill and 3D chip in both modes.
-    { label: '3D', action: 'spatial', x: 360, y: 8, w: 72, h: 32 },
+    { label: '3D', action: 'spatial', x: 320, y: 8, w: 72, h: 32 },
 
     // Header exit button
     { label: 'EXIT',  action: 'exit',  x: 744, y: 8,   w: 32,  h: 32 },
@@ -125,7 +128,7 @@
   ];
 
   // Dock header chip shown while a stereo reel is drawn per eye.
-  const STEREO_CHIP = { x: 592, y: 8, w: 64, h: 32 };
+  const STEREO_CHIP = { x: 552, y: 8, w: 64, h: 32 };
 
   function formatTime(s) {
     if (!s || isNaN(s)) return '0:00';
@@ -366,6 +369,11 @@
     exit: [
       ['M6 6L18 18M18 6L6 18', 's', 'i', 1.8],
     ],
+    // web/src/components/icons/svg/help.svg: chamfered question mark, accent dot.
+    help: [
+      ['M7.5 9V6.5L9.5 4.5H14.5L16.5 6.5V9.5L12 13V15.5', 's', 'i', 1.8],
+      ['M10.75 18.25H13.25V20.75H10.75Z', 'f', 'a'],
+    ],
     // VR shell nav bar: back.svg, industrial-reels.svg, compass.svg, message.svg, credits.svg.
     back: [
       ['M10.5 5.5L4 12L10.5 18.5', 's', 'i', 1.8],
@@ -515,6 +523,7 @@
   function isControlVisible(action, source, itemState, isPackExp, sceneMode) {
     if (isEarthAction(action)) return sceneMode === 'earth';
     if (action === 'earth') return !!isPackExp;
+    if (action === 'guide') return sceneMode !== 'earth';
     if (isPackAction(action)) return !!isPackExp;
     if (action === 'collect') return !isPackExp && sceneMode !== 'earth';
     if (action === 'spatial') return source.kind !== 'static-card' && sceneMode !== 'earth';
@@ -761,6 +770,7 @@
       notificationUntil = 0,
       stereo = 'mono',
       spatial = null,
+      guideVisible = false,
       callbacks = {},
     } = options;
 
@@ -824,7 +834,7 @@
     let dispName = packMode && packContext
       ? (packContext.title || 'UNTITLED PACK')
       : dockItemTitle(item);
-    if (dispName.length > 26) dispName = dispName.slice(0, 24) + '…';
+    if (dispName.length > 21) dispName = dispName.slice(0, 20) + '…';
     ctx.fillStyle = T.ink2;
     ctx.font = `13.2px ${TOKENS.font.mono}`;
     ctx.fillText(dispName, 144, 24);
@@ -853,6 +863,20 @@
     ctx.font = `600 13.2px ${TOKENS.font.mono}`;
     ctx.textAlign = 'center';
     ctx.fillText(String(comments.length || 0), commentBtn.x + 50, 24);
+
+    // Help pill: shows/hides the controller guide; an accent edge while it is open.
+    const guideBtnIdx = CTRL_BUTTONS.findIndex((b) => b.action === 'guide');
+    const guideBtn = CTRL_BUTTONS[guideBtnIdx];
+    if (isControlVisible('guide', source, itemState, packMode, sceneMode)) {
+      const guideHover = hoveredButton === guideBtnIdx;
+      headerPill(guideBtn, guideHover);
+      if (guideVisible) {
+        ctx.strokeStyle = T.accent;
+        roundRectPath(ctx, guideBtn.x, guideBtn.y, guideBtn.w, guideBtn.h, TOKENS.radiusPx);
+        ctx.stroke();
+      }
+      drawIcon(ctx, 'help', guideBtn.x + guideBtn.w / 2, 24, 16, (guideHover || guideVisible) ? T.ink : T.ink2);
+    }
 
     // Packs only: index pill and queue toggle. The reels feed is an endless
     // scroll, and Earth / all locations live on the nav bar's tabs.
@@ -906,7 +930,7 @@
     };
     for (let i = 0; i < CTRL_BUTTONS.length; i++) {
       const btn = CTRL_BUTTONS[i];
-      if (btn.action === 'comments' || btn.action === 'earth' || btn.action === 'exit' || btn.action === 'seek' || btn.action === 'spatial') continue;
+      if (btn.action === 'comments' || btn.action === 'guide' || btn.action === 'earth' || btn.action === 'exit' || btn.action === 'seek' || btn.action === 'spatial') continue;
       if (!isControlVisible(btn.action, source, itemState, packMode, sceneMode)) continue;
 
       const isHover = (hoveredButton === i);

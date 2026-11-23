@@ -37,7 +37,7 @@ test('dock header falls back to filename, then path basename, and truncates long
   assert.equal(dockTitle(api, { item: { filename: 'clip.mp4' } }), 'clip.mp4');
   assert.equal(dockTitle(api, { item: { path: 'uploads/city/shot.png' } }), 'shot.png');
   assert.equal(dockTitle(api, { item: {} }), 'UNTITLED REEL');
-  assert.equal(dockTitle(api, { item: { title: 'A very long reel title that overflows the dock' } }), 'A very long reel title t…');
+  assert.equal(dockTitle(api, { item: { title: 'A very long reel title that overflows the dock' } }), 'A very long reel tit…');
   assert.equal(dockTitle(api, {}), '');
   assert.equal(dockTitle(api, { packMode: true, packContext: { title: 'City pack' }, item: { title: 'Reel' } }), 'City pack');
 });

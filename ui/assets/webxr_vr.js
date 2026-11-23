@@ -110,8 +110,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   const CONTROLS_AUTO_HIDE_MS = 5000;
   // Side-panel layout (upstream factors): side gap from the screen edge and
   // the slight forward (viewer-side) offset, in screen-local meters.
-  const PANEL_SIDE_GAP = 0.445;
-  const PANEL_FWD_OFFSET = -0.34;
+  const PANEL_SIDE_GAP = 1;
+  const PANEL_FWD_OFFSET = 0.3;
   const CPANEL_SCALE_FACTOR = 0.432;
   const GUIDE_SCALE_FACTOR = 0.314;
   // The guide is narrower than the comments panel, so at the shared side gap
@@ -484,6 +484,8 @@ window.WebXRVR = window.WebXRVR || (function () {
   let cPanelDragStartScroll = 0;
   let cPanelDragMoved = false;
   let commentsPanelVisible = false;
+  // Controller guide panel: hidden until the dock's help pill opens it.
+  let guidePanelVisible = false;
   // XR gamepad edge-trigger bookkeeping (upstream processInput state)
   let prevBtnState = { rightA: false, rightB: false };
   let flickedX = false;
@@ -8477,7 +8479,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         itemState.liked, itemState.saved, itemState.following, itemState.available,
         item ? (item.title || item.filename || item.path || item.rel_path || '') : '',
         comments.length, hoveredButton, pressedButton, isCurved, curvatureMode,
-        lockToViewer, autoNext, sceneMode, packMode, playlist.length, idx,
+        lockToViewer, autoNext, sceneMode, packMode, playlist.length, idx, guidePanelVisible,
         packContext ? (packContext.title || '') + '/' + !!packContext.queueOpen : '',
         stereo, earth ? JSON.stringify(earth) : '',
         spatial ? spatial.on + '/' + spatial.available : '',
@@ -8518,6 +8520,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           notificationUntil,
           stereo,
           spatial,
+          guideVisible: guidePanelVisible,
           callbacks,
         });
         if (controlsTexture) {
@@ -10332,6 +10335,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     previewCanvas = null;
     controlsVisible = true;
     commentsPanelVisible = false;
+    guidePanelVisible = false;
     previewCameraMode = 'headset';
     stereoMode = false;
     previewYaw = 0;
@@ -10590,7 +10594,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     }
     if (controlsMesh) controlsMesh.visible = controlsVisible;
     if (commentsMesh) commentsMesh.visible = (!isEarth && commentsPanelVisible);
-    if (guideMesh) guideMesh.visible = (!isEarth && controlsVisible && debugFlags.guide);
+    if (guideMesh) guideMesh.visible = (!isEarth && controlsVisible && guidePanelVisible && debugFlags.guide);
     applyWorldMode();
     const pointerActive = !!(xrSession || previewRunning);
     if (laserLine) laserLine.visible = pointerActive;
@@ -12196,6 +12200,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     lockToViewer = !isPackExperience();
     controlsVisible = false;
     commentsPanelVisible = false;
+    guidePanelVisible = false;
     cPanelScrollY = 0;
     cPanelMaxScroll = 0;
     cPanelTab = 'all';
@@ -12852,6 +12857,10 @@ window.WebXRVR = window.WebXRVR || (function () {
         else if (videoElement) videoElement.muted = !videoElement.muted;
         break;
       case 'comments': toggleCommentsPanel(); break;
+      case 'guide':
+        guidePanelVisible = !guidePanelVisible;
+        applySceneVisibility();
+        break;
       case 'spatial': if (callbacks.onToggleSpatial) callbacks.onToggleSpatial(); break;
       case 'earth':
         if (isPackExperience() && callbacks.onTogglePackQueue) callbacks.onTogglePackQueue();

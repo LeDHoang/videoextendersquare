@@ -1356,9 +1356,9 @@ test('locked mode keeps UI room-fixed at the default screen spot', () => {
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT of default spot: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT of default spot: ${guide.center.x}`);
-  closeTo(guide.center.x, (2 + guide.w / 2 + 0.445) * 1.15);
-  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
-  closeTo(comments.center.z, -2.58);
+  closeTo(guide.center.x, (2 + guide.w / 2 + 1) * 1.15);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 1));
+  closeTo(comments.center.z, -1.94);
   // Unlocked at the moved pose: UI follows the screen instead.
   api.setScreenState({ locked: false });
   const dock2 = api.computeDockPose({ x: 1, y: 1.6, z: -2 });
@@ -2800,8 +2800,8 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const guide = api.getGuidePanelLayout();
   assert.ok(comments.center.x < 0, `comments LEFT: ${comments.center.x}`);
   assert.ok(guide.center.x > 0, `guide RIGHT: ${guide.center.x}`);
-  closeTo(comments.center.x, -(2 + comments.w / 2 + 0.445));
-  closeTo(guide.center.x, (2 + guide.w / 2 + 0.445) * 1.15);
+  closeTo(comments.center.x, -(2 + comments.w / 2 + 1));
+  closeTo(guide.center.x, (2 + guide.w / 2 + 1) * 1.15);
   // Legacy-exact: locked mode anchors both to the room spot tracking the
   // default screen (NOT the live screenDistance).
   api.setScreenState({ locked: true, distance: 3.0 });
@@ -2809,8 +2809,8 @@ test('comments panel sits LEFT and guide sits RIGHT of the player', () => {
   const lockedGuide = api.getGuidePanelLayout();
   assert.ok(lockedComments.center.x < 0);
   assert.ok(lockedGuide.center.x > 0);
-  closeTo(lockedComments.center.z, -2.58);
-  closeTo(lockedGuide.center.z, -2.58);
+  closeTo(lockedComments.center.z, -1.94);
+  closeTo(lockedGuide.center.z, -1.94);
 });
 
 test('comment panel actions drive the time-sync toggle, scroll, like, seek, follow, and close', () => {
@@ -3189,8 +3189,8 @@ test('layout tuning starts at the shipped constants and stopPreview resets it', 
     screenHeight: 1.52,
     dockWidth: 0.943,
     dockGap: 0.08,
-    panelSideGap: 0.445,
-    panelFwdOffset: -0.34,
+    panelSideGap: 1,
+    panelFwdOffset: 0.3,
     commentsScale: 0.432,
     guideScale: 0.314,
     longEdgeMaxDeg: 60,
