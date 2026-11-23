@@ -1977,12 +1977,11 @@ function worldOf(api, local) {
 }
 const unit = (v) => { const l = Math.hypot(v.x, v.y, v.z); return { x: v.x / l, y: v.y / l, z: v.z / l }; };
 
-test('grab-rotate keeps the grabbed point under the pointer (true globe drag, no hold, no axis lock)', () => {
+test('grab-rotate keeps the grabbed point under the pointer on a single-axis sweep (true globe drag, no hold)', () => {
   const { renderer, api } = topdownHarness();
   api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
   api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
-  // Diagonal sweep: both axes move at once (the old axis lock forbade this).
-  const stops = [{ x: 0.12, y: 0.06, z: 1 }, { x: 0.3, y: 0.16, z: 0.95 }, { x: 0.46, y: 0.24, z: 0.85 }, { x: 0.55, y: 0.3, z: 0.78 }]
+  const stops = [{ x: 0.12, y: 0, z: 1 }, { x: 0.3, y: 0, z: 0.95 }, { x: 0.46, y: 0, z: 0.85 }, { x: 0.55, y: 0, z: 0.78 }]
     .map(unit);
   let grabbed = null;
   stops.forEach((world, i) => {
@@ -1995,9 +1994,76 @@ test('grab-rotate keeps the grabbed point under the pointer (true globe drag, no
   const want = stops[stops.length - 1];
   const err = Math.acos(Math.max(-1, Math.min(1, where.x * want.x + where.y * want.y + where.z * want.z)));
   assert.ok(err < 0.02, `grab point drifted ${err} rad from the pointer`);
+  assert.ok(Math.abs(api.getEarthState().yaw) > 0.1);
+});
+
+// Diagonal sweep in the full-globe view: the drag locks to whichever axis
+// dominated when it engaged, and the other stays put for the whole drag.
+function diagonalSweep(api, from, step) {
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: pointerLocal(api, unit(from)) });
+  let grabbed = null;
+  for (let i = 1; i <= 8; i++) {
+    const local = pointerLocal(api, unit({ x: from.x + step.x * i, y: from.y + step.y * i, z: from.z }));
+    if (i === 1) grabbed = local;
+    api.updateEarthDrag({ hit: true, local });
+  }
+  return grabbed;
+}
+
+test('a mostly-horizontal diagonal drag on the full globe turns yaw only', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  diagonalSweep(api, { x: 0, y: 0, z: 1 }, { x: 0.07, y: 0.04, z: 0 });
   const state = api.getEarthState();
-  assert.ok(Math.abs(state.yaw) > 0.1 && Math.abs(state.pitch) > 0.05, 'diagonal drag moved both axes');
-  assert.ok(Math.abs(state.pitch) <= 1.2);
+  assert.ok(Math.abs(state.yaw) > 0.1, 'yaw follows the drag');
+  closeTo(state.pitch, 0, 1e-9);
+});
+
+test('a mostly-vertical diagonal drag on the full globe tilts only: the grabbed point moves straight up', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthPose(0.5, 0, { x: 0, y: 1.12, z: -1.3 });
+  const grabbed = diagonalSweep(api, { x: 0, y: 0, z: 1 }, { x: 0.03, y: 0.07, z: 0 });
+  const where = unit(worldOf(api, grabbed));
+  assert.ok(where.y > 0.3, `grabbed point rose (${where.y})`);
+  closeTo(where.x, unit({ x: 0.03, y: 0.07, z: 1 }).x, 1e-6); // no sideways travel
+});
+
+test('a vertical drag pressed high on the globe locks to pitch', () => {
+  const { renderer, api } = topdownHarness();
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  diagonalSweep(api, { x: 0, y: 0.7, z: 0.7 }, { x: 0.005, y: -0.06, z: 0 });
+  const state = api.getEarthState();
+  closeTo(state.yaw, 0, 1e-9);
+  assert.ok(Math.abs(state.pitch) > 0.1, 'pitch follows the drag');
+});
+
+test('each drag picks its own axis, and a flick coasts on that axis only', () => {
+  let clock = 0;
+  const { renderer, api } = topdownHarness({ now: () => clock });
+  renderer.setReducedMotion(false);
+  api.setEarthPose(0, 0, { x: 0, y: 1.12, z: -1.3 });
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: { x: 0, y: 0, z: 1 } });
+  for (let i = 1; i <= 6; i++) {
+    clock += 16;
+    api.updateEarthDrag({ hit: true, local: pointerLocal(api, unit({ x: i * 0.09, y: i * 0.03, z: 1 })) });
+  }
+  clock += 8; // released while still moving
+  api.endEarthDrag('mouse', { hit: false, zoneIndex: -1, local: null });
+  assert.ok(Math.abs(api.earthFlingState().yaw) > 0.05, 'yaw fling captured');
+  assert.equal(api.earthFlingState().pitch, 0, 'no pitch momentum from a yaw drag');
+  // Next drag goes vertical: it locks to pitch even though the last one was yaw.
+  const pitch0 = api.getEarthState().pitch;
+  api.beginEarthDrag('mouse', { hit: true, zoneIndex: -1, local: pointerLocal(api, { x: 0, y: 0, z: 1 }) });
+  let grabbed = null;
+  for (let i = 1; i <= 6; i++) {
+    clock += 16;
+    const local = pointerLocal(api, unit({ x: 0.01 * i, y: i * 0.08, z: 1 }));
+    if (i === 1) grabbed = local;
+    api.updateEarthDrag({ hit: true, local });
+  }
+  const where = unit(worldOf(api, grabbed));
+  closeTo(where.x, unit({ x: 0.01, y: 0.08, z: 1 }).x, 1e-6); // tilts straight up, no sideways turn
+  assert.ok(Math.abs(api.getEarthState().pitch - pitch0) > 0.1);
 });
 
 test('a drag engages the moment the pointer leaves tap tolerance, without jumping', () => {
