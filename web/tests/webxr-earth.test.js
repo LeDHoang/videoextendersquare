@@ -7768,7 +7768,11 @@ test('wide and tall screens move the panels, dock, ground fade and lock distance
   assert.ok(finite(api.getCommentsPanelLayout()) && finite(api.getGuidePanelLayout()));
   assert.ok(panelDist() < 2.24, `a wide screen pulls its side panel nearer than the screen: ${panelDist()}`);
   renderer.setLayoutTuning({ screenDistance: 1.2 });
+  // The dome is centred on the eye, so nothing on it comes nearer than the lock.
+  assert.equal(api.lockDistance(), 1.2, 'an eye-centred dome needs no extra lock');
+  renderer.setCurvatureMode('sq_curve');
   assert.ok(api.lockDistance() > 1.2, 'the lock clears the deeper bulge of a wide curved screen');
+  renderer.setCurvatureMode('dome');
   renderer.setLayoutTuning({ screenDistance: 2.24 });
 
   shape(9 / 16);
