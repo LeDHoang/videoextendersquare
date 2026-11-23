@@ -1638,8 +1638,8 @@
     // Up to 3 stacked comments on the middle-left area of the 1:1 square canvas,
     // moved up as far as a caption needs.
     const maxShow = Math.min(3, active.length);
-    const itemHeight = 60;
-    const gap = 11;
+    const itemHeight = 34;
+    const gap = 6;
     const totalH = maxShow * itemHeight + (maxShow - 1) * gap;
     const startY = Math.min((OVERLAY_H / 2) - (totalH / 2), captionTop - 24 - totalH);
 
@@ -1675,16 +1675,16 @@
 
       // Prepare display text early so the hover pill can be sized and drawn
       // FIRST (behind) so it never covers the accent bar, avatar or name.
-      ctx.font = `500 14px ${TOKENS.font.sans}`;
+      ctx.font = `500 12px ${TOKENS.font.sans}`;
       let dispText = c.text;
       if (dispText.length > 46) {
         dispText = dispText.slice(0, 44) + '…';
       }
       const textW = ctx.measureText(dispText).width;
-      const regionW = Math.max(260, textW + 90);
+      const regionW = Math.max(220, textW + 74);
       const regionX = x - 12;
-      const regionY = y - 6;
-      const regionH = itemHeight + 12;
+      const regionY = y;
+      const regionH = itemHeight;
 
       // Scrim plate, drawn behind all pill content; hover adds an accent edge.
       ctx.fillStyle = TOKENS.rgba.mediaScrim;
@@ -1697,35 +1697,35 @@
       }
 
       ctx.fillStyle = authorColor;
-      ctx.fillRect(x, y + 8, barW, itemHeight - 16);
+      ctx.fillRect(x, y + 6, barW, itemHeight - 12);
 
-      const avatarX = contentX + 25;
-      const nameX = contentX + 50;
-      const textX = contentX + 50;
-      const nameY = y + 11;
-      const timeY = y + 14;
-      const textY = y + 32;
+      const avatarX = contentX + 16;
+      const nameX = contentX + 36;
+      const textX = contentX + 36;
+      const nameY = y + 3;
+      const timeY = y + 5;
+      const textY = y + 18;
 
       // Avatar Icon / Emoji (Middle-Left, like .twitch-avatar)
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       if (c.author_avatar) {
         ctx.fillStyle = TOKENS.hex.onMedia;
-        ctx.font = `22px ${TOKENS.font.sans}`;
+        ctx.font = `16px ${TOKENS.font.sans}`;
         ctx.fillText(c.author_avatar, avatarX, y + itemHeight / 2);
       } else {
         // Disc in the author's colour, onSpot initials
         ctx.fillStyle = authorColor;
         ctx.beginPath();
-        ctx.arc(avatarX, y + itemHeight / 2, 19, 0, Math.PI * 2);
+        ctx.arc(avatarX, y + itemHeight / 2, 13, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = TOKENS.hex.onSpot;
-        ctx.font = `600 13px ${TOKENS.font.mono}`;
+        ctx.font = `600 10px ${TOKENS.font.mono}`;
         ctx.fillText(getInitials(c.author_name || 'Anonymous'), avatarX, y + itemHeight / 2 + 1);
       }
 
       // Author Name — bold colored like .twitch-author
-      ctx.font = `700 13px ${TOKENS.font.sans}`;
+      ctx.font = `700 11px ${TOKENS.font.sans}`;
       ctx.fillStyle = TOKENS.hex.onMedia;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
@@ -1734,13 +1734,13 @@
 
       // Timestamp tag — muted monospace like .twitch-tag
       if (hasTime) {
-        ctx.font = `600 11px ${TOKENS.font.mono}`;
+        ctx.font = `600 9px ${TOKENS.font.mono}`;
         ctx.fillStyle = TOKENS.hex.onMedia;
         ctx.fillText(timeStr, nameX + nameW + 8, timeY);
       }
 
       // Comment Text — light sans like .twitch-text
-      ctx.font = `500 14px ${TOKENS.font.sans}`;
+      ctx.font = `500 12px ${TOKENS.font.sans}`;
       ctx.fillStyle = TOKENS.hex.onMedia;
       ctx.textBaseline = 'top';
       ctx.fillText(dispText, textX, textY);
