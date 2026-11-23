@@ -328,7 +328,6 @@ def serialize_conversation(
             conversation.state != "declined"
             and not (conversation.state == "pending" and conversation.requester_id == member.user_id and last_message)
             and other_user.status == "active"
-            and other_user.account_type not in {"demo", "system"}
             and not blocked
         ),
         "unread_count": unread_for_member(db, member),
@@ -414,7 +413,7 @@ def target_user(db: Session, username: str, sender: User) -> User:
         User.username_norm == username.strip().casefold(),
         User.status == "active",
     ).first()
-    if not target or target.account_type in {"demo", "system"}:
+    if not target:
         fail(404, "USER_NOT_FOUND", "Profile not found.")
     if target.id == sender.id:
         fail(422, "SELF_MESSAGE", "You cannot message yourself.")
@@ -478,7 +477,8 @@ def send_into_conversation(
 ) -> tuple[DirectMessage, bool]:
     conversation, member, other_member, other_user = member_context(db, conversation.id, sender.id)
     require_messaging_user(sender)
-    require_messaging_user(other_user)
+    if other_user.status != "active":
+        fail(403, "MESSAGING_UNAVAILABLE", "This account cannot use direct messaging.")
     if users_blocked(db, sender.id, other_user.id):
         fail(403, "MESSAGING_BLOCKED", "Messaging is unavailable between these accounts.")
     if conversation.state == "declined":

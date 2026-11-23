@@ -60,7 +60,7 @@ export default function ReelShareDialog() {
     const timer = setTimeout(() => {
       api.get('/api/search/suggestions', { q: query, limit: 10 })
         .then((value) => {
-          if (alive) setResults((value.users || []).filter((person) => !person.is_me && person.account_type === 'real'));
+          if (alive) setResults((value.users || []).filter((person) => !person.is_me));
         })
         .catch(() => alive && setResults([]));
     }, 180);
