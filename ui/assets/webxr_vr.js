@@ -49,6 +49,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Non-square screens: the long edge stays within this angle of the eye
   // (default size and distance) by bending the long axis less.
   const LONG_EDGE_MAX_DEG = 60;
+  // DOME: the sphere is centred on the eye (radius = eye distance) and the
+  // short edge keeps the flat screen's angle from the eye. Past this
+  // half-angle (large screens / near distances) the bend stops growing and
+  // the centre moves behind the eye instead (corners reach √2× this).
+  const DOME_MAX_HALF_DEG = 50;
   // Locked mode follows lazily: the screen holds still while the gaze stays
   // within this fraction of its angular half-extent and drags only past it.
   // 0 is the old hard lock (the screen copies the head pose every frame).
@@ -77,6 +82,11 @@ window.WebXRVR = window.WebXRVR || (function () {
   // How much further the applied screen's edges bulge toward the eye than
   // the square screen's (local z, short-side 2.4 units).
   let screenBulgeExtra = 0;
+  // Eye distance the dome is built for, in screen-local units (local scale
+  // = screenScale / 2.4). Starts at the default size and distance.
+  let domeEyeLocal = 2.24 / (4.0 / 2.4);
+  let domeEyeWorld = 2.24;
+  let domePosRef = null;
   let isCurved = true;
   let stereoMode = false;
   let lockToViewer = false;
@@ -2911,10 +2921,26 @@ window.WebXRVR = window.WebXRVR || (function () {
     );
   }
 
+  // Rebuilds the dome when the eye distance in local units changes: locked
+  // uses the set distance, unlocked the head distance taken when the screen
+  // is placed (a new screenPos), so leaning never reshapes it.
+  function refreshDomeEye() {
+    if (!lockToViewer && screenPos !== domePosRef) {
+      const head = (xrSession || previewCameraMode === 'headset') ? getHeadPosition() : { x: 0, y: 1.6, z: 0 };
+      domeEyeWorld = Math.hypot(screenPos.x - head.x, screenPos.y - head.y, screenPos.z - head.z);
+      domePosRef = screenPos;
+    }
+    const D = (lockToViewer ? screenDistance : domeEyeWorld) / (screenScale / 2.4);
+    if (!(D > 0.05) || Math.abs(D - domeEyeLocal) <= domeEyeLocal * 1e-3) return;
+    domeEyeLocal = D;
+    if (curvatureMode === 1) rebuildScreenGeometries(1, screenAspect);
+  }
+
   // Commits the screen transform to the screen + glow + overlay meshes
   // (called every frame after lock/grab/scale/distance updates).
   function commitScreenTransform() {
     if (!screenMesh || !THREE) return;
+    refreshDomeEye();
     ensureScreenQuat();
     // Uniform scale (upstream: the dome scales as R_world = R·screenScale —
     // scaling x/y only would leave the curvature depth baked at the 2.4 m
@@ -3068,15 +3094,14 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Long-axis bend angle so the long edge stays within longEdgeMaxDeg of
   // the eye at the default size and distance. A screen whose edge is already
   // inside the limit keeps ARC_ANGLE (1:1 and 4:3 are untouched).
-  function longAxisArc(long) {
-    const alpha = ARC_ANGLE;
+  // arc is radius × angle at the short edge (1 for SQ CURVE); D is the eye
+  // distance in screen-local units (local scale = screenScale / 2.4).
+  function longAxisArc(long, alpha = ARC_ANGLE, arc = 1, D = -DEFAULT_POS.z / (DEFAULT_SCALE / 2.4)) {
     if (long <= 1) return alpha;
     const maxRad = (Number(layoutTuning.longEdgeMaxDeg) || LONG_EDGE_MAX_DEG) * Math.PI / 180;
-    // Eye distance in screen-local units (local scale = screenScale / 2.4).
-    const D = -DEFAULT_POS.z / (DEFAULT_SCALE / 2.4);
     const edgeAngle = (al) => {
       const th = long * al;
-      return Math.atan2(Math.sin(th) / al, D - (1 - Math.cos(th)) / al);
+      return Math.atan2(arc * Math.sin(th) / al, D - arc * (1 - Math.cos(th)) / al);
     };
     if (edgeAngle(alpha) <= maxRad) return alpha;
     let lo = 1e-4, hi = alpha;
@@ -3085,6 +3110,18 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (edgeAngle(mid) > maxRad) hi = mid; else lo = mid;
     }
     return lo;
+  }
+
+  // DOME sphere for an eye D local units in front of the screen centre:
+  // radius D (centre at the eye) with the short edge at the flat screen's
+  // angle atan(1.2 / D); past DOME_MAX_HALF_DEG the angle holds and the
+  // radius grows so the edge still sits at that angle from the eye.
+  function domeSphere(D) {
+    const theta = Math.atan(1.2 / D);
+    const cap = DOME_MAX_HALF_DEG * Math.PI / 180;
+    if (theta <= cap) return { R: D, alpha: theta };
+    const t = Math.tan(theta);
+    return { R: D * t / (Math.sin(cap) + t * (1 - Math.cos(cap))), alpha: cap };
   }
 
   // base is the short side of a 1:1 screen; curved modes keep today's arc
@@ -3103,10 +3140,13 @@ window.WebXRVR = window.WebXRVR || (function () {
     const pos = geo.attributes.position;
     const halfW = base / 2;
     const halfH = base / 2;
-    const R = SPHERE_RADIUS;
-    const alpha = ARC_ANGLE;
+    const dome = mode === 1 ? domeSphere(domeEyeLocal) : null;
+    const R = dome ? dome.R : SPHERE_RADIUS;
+    const alpha = dome ? dome.alpha : ARC_ANGLE;
     const landscape = span.w >= span.h;
-    const alphaL = longAxisArc(Math.max(span.w, span.h));
+    const alphaL = dome
+      ? longAxisArc(Math.max(span.w, span.h), alpha, R * alpha, domeEyeLocal)
+      : longAxisArc(Math.max(span.w, span.h));
     const alphaX = landscape ? alphaL : alpha;
     const alphaY = landscape ? alpha : alphaL;
     const RX = alphaX === alpha ? R : R * alpha / alphaX;
@@ -3118,7 +3158,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       let nx = x, ny = y, nz = 0;
 
       if (mode === 1) {
-        // DOME: Concave spherical radial cap
+        // DOME: Concave spherical radial cap, centred on the eye (domeSphere)
         const r = Math.sqrt(x * x + y * y);
         if (r > 0.0001) {
           // Long-axis directions bend less (alphaL), blended by direction.
@@ -10425,7 +10465,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       if (screenMesh.geometry) screenMesh.geometry.dispose();
       screenMesh.geometry = createScreenGeometry(curvatureMode, screenAspect);
       screenBulgeExtra = 0;
-      if (screenAspect !== 1) {
+      // No point of the dome comes nearer than its eye distance: no push.
+      if (screenAspect !== 1 && curvatureMode !== 1) {
         const square = createScreenGeometry(curvatureMode, 1);
         screenBulgeExtra = Math.max(0, maxLocalZ(screenMesh.geometry) - maxLocalZ(square));
         square.dispose();
@@ -13156,6 +13197,9 @@ window.WebXRVR = window.WebXRVR || (function () {
 
     __test: {
       setVRTheme,
+      domeSphere,
+      // Eye distance (screen-local units) the dome is built for; set returns the old one.
+      domeEye(D) { const old = domeEyeLocal; if (D !== undefined) domeEyeLocal = D; return old; },
       earthGradeColors,
       makeEarthTileUniforms,
       buildEarthBase: (image) => buildHolographicEarthBase(image),

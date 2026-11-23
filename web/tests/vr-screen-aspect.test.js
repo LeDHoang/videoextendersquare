@@ -72,11 +72,12 @@ function hashGeometry(geo) {
 
 // Hashed from the square-only createScreenGeometry (format-all 9ac3b1d), before the aspect work:
 // positions, uvs, normals and indices of the 2.4 m screen (48x48) and the 1.34x glow (24x24).
+// Dome (1) is re-hashed for the eye-centred sphere at the default size and distance.
 const SQUARE_HASHES = {
   screen0: '01f879539377aff1d0847e448673a7968cd70245564ebc3c219ed0d822f138a2',
   glow0: 'bd0d6efb5a2485458998d5427aee0e1a5cf3c9ab573360e642b6fab9af9696ae',
-  screen1: 'd771f1866e049a12c6a2f79aae9059b3b2e7794d57c80a5223010c5556b055c2',
-  glow1: '13a6e86a9ebe177fcb11aa48f1c959fb792947dfc76de2938b9323221a5860d4',
+  screen1: 'd6532ac06ae892b11340c42486a0b57a56e8d5b602e602b2a3724e646556c24e',
+  glow1: 'f234090a4c877a401f3883f00979f853144d2b4494b7714bba5791b3bba67894',
   screen2: '16562467561d1cce8080adf2fe8ed4d1166eb4f7707a6ded40b8c1d2db0d9008',
   glow2: 'd41d1fb97a40bb9ff2017334602975edf2f1537345e2c0c47756d777c9e361d7',
 };
@@ -131,14 +132,16 @@ test('curved screens keep the arc per short-side unit and clamp the long edge', 
   const api = loadEngine().__test;
   const D = 2.24 / (4 / 2.4);
   for (const mode of [1, 2]) {
+    // Short-side arc: SQ CURVE keeps 2; the dome is D × the flat edge angle each side.
+    const arc = mode === 1 ? 2 * D * Math.atan(1.2 / D) : 2;
     const sq = api.createScreenGeometry(mode, 1);
-    closeTo(centreLine(sq, 'x'), 2, 2e-3, `mode ${mode} 1:1 arc`);
+    closeTo(centreLine(sq, 'x'), arc, 2e-3, `mode ${mode} 1:1 arc`);
     const wide = api.createScreenGeometry(mode, 16 / 9);
-    closeTo(centreLine(wide, 'x'), 2 * 16 / 9, 2e-3, `mode ${mode} 16:9 long arc`);
-    closeTo(centreLine(wide, 'y'), 2, 2e-3, `mode ${mode} 16:9 short arc`);
+    closeTo(centreLine(wide, 'x'), arc * 16 / 9, 2e-3, `mode ${mode} 16:9 long arc`);
+    closeTo(centreLine(wide, 'y'), arc, 2e-3, `mode ${mode} 16:9 short arc`);
     const ultra = api.createScreenGeometry(mode, 21 / 9);
-    closeTo(centreLine(ultra, 'x'), 2 * 16 / 9, 2e-3, `mode ${mode} 21:9 long arc`);
-    closeTo(centreLine(ultra, 'y'), 2 * (16 / 9) / (21 / 9), 2e-3, `mode ${mode} 21:9 short arc`);
+    closeTo(centreLine(ultra, 'x'), arc * 16 / 9, 2e-3, `mode ${mode} 21:9 long arc`);
+    closeTo(centreLine(ultra, 'y'), arc * (16 / 9) / (21 / 9), 2e-3, `mode ${mode} 21:9 short arc`);
     // Long edge midpoint seen from the eye at the default size and distance.
     const pos = wide.attributes.position;
     const edge = 24 * 49 + 48;
@@ -148,6 +151,64 @@ test('curved screens keep the arc per short-side unit and clamp the long edge', 
     const sqDeg = Math.atan2(sqPos.getX(edge), D - sqPos.getZ(edge)) * 180 / Math.PI;
     assert.ok(sqDeg < 43 && sqDeg > 41, `mode ${mode} 1:1 edge unchanged at ${sqDeg} deg`);
   }
+});
+
+test('the dome is a sphere centred on the eye, at the flat screen\'s edge angle', () => {
+  const api = loadEngine().__test;
+  const def = api.domeEye();
+  closeTo(def, 2.24 / (4 / 2.4), 1e-9, 'default eye distance');
+  // Eye distances (local units) from 6 m at scale 1 down to the cap's edge.
+  for (const D of [14.4, 2.24 / (4 / 2.4), 1.1, 1.2 / Math.tan(50 * Math.PI / 180) + 1e-6]) {
+    api.domeEye(D);
+    const geo = api.createScreenGeometry(1, 1);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const r = Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i) - D);
+      closeTo(r, D, 1e-5, `D ${D} vertex ${i} distance from the eye`);
+    }
+    const edge = 24 * 49 + 48;
+    const deg = Math.atan2(pos.getX(edge), D - pos.getZ(edge));
+    closeTo(deg, Math.atan(1.2 / D), 1e-6, `D ${D} edge angle`);
+    // UVs are the 48x48 plane's (SQ CURVE leaves them untouched): no seam or remap.
+    const plane = api.createScreenGeometry(2, 1).attributes.uv.array;
+    assert.deepEqual([...geo.attributes.uv.array], [...plane], `D ${D} uv`);
+  }
+  api.domeEye(def);
+});
+
+test('past the cap the dome holds 50 degrees and the edge keeps the flat angle', () => {
+  const api = loadEngine().__test;
+  const def = api.domeEye();
+  // Scale 10 at 1.2 m and scale 8 at 2.24 m.
+  for (const D of [1.2 / (10 / 2.4), 2.24 / (8 / 2.4)]) {
+    const sph = api.domeSphere(D);
+    closeTo(sph.alpha, 50 * Math.PI / 180, 1e-12, `D ${D} alpha`);
+    assert.ok(sph.R > D, `D ${D} centre moves behind the eye`);
+    api.domeEye(D);
+    const pos = api.createScreenGeometry(1, 1).attributes.position;
+    const edge = 24 * 49 + 48;
+    closeTo(Math.atan2(pos.getX(edge), D - pos.getZ(edge)), Math.atan(1.2 / D), 1e-6, `D ${D} edge angle`);
+  }
+  api.domeEye(def);
+});
+
+test('no dome vertex bends past a quarter turn at any size or distance', () => {
+  const api = loadEngine().__test;
+  const def = api.domeEye();
+  for (const D of [1.2 / (10 / 2.4), 1.2 / (4 / 2.4), 2.24 / (8 / 2.4), 6 / (1 / 2.4)]) {
+    api.domeEye(D);
+    for (const aspect of [1, 16 / 9, 9 / 16, 21 / 9]) {
+      const pos = api.createScreenGeometry(1, aspect).attributes.position;
+      for (let row = 0; row < 49; row++) {
+        for (let k = 1; k < 49; k++) {
+          assert.ok(pos.getX(row * 49 + k) > pos.getX(row * 49 + k - 1), `D ${D} aspect ${aspect} row ${row}`);
+          // Grid rows run top to bottom.
+          assert.ok(pos.getY(k * 49 + row) < pos.getY((k - 1) * 49 + row), `D ${D} aspect ${aspect} col ${row}`);
+        }
+      }
+    }
+  }
+  api.domeEye(def);
 });
 
 test('a 9:16 screen is the 16:9 screen with x and y swapped', () => {
