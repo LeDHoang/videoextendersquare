@@ -2721,6 +2721,9 @@
     let earthEntryPlayback = null;
     let idx = isPackMode ? packState.index : 0;
     let isAutoNext = true;
+    // Ends of the current reel counted by the VR play-twice rule (see reels-auto-next).
+    let autoPlaysDone = 0;
+    let autoLoopRestart = false;
     let isMuted = true;
     let activeTab = 'all';
     let isSyncTimeActive = true;
@@ -6220,6 +6223,7 @@
       // A post that failed in 3D gets a fresh try when the user leaves it.
       if (videoData[idx] && idx !== index) clearStereoFailure(videoData[idx]);
       idx = index;
+      autoPlaysDone = 0;
       pruneBlobCache(idx);
 
       const item = videoData[idx];
@@ -7166,11 +7170,46 @@
       window.__sxReelsCleanup = null;
     };
 
+    // <reels-auto-next>
+    // In VR (headset or desktop preview) AUTO plays a reel twice before it
+    // moves on, so the next reel gets a whole extra play to load. 2D and Reel
+    // Packs (authored pacing) still advance after one play; image posts keep
+    // their dwell timer. Plays are counted on 'ended' only, so pause/resume
+    // never counts; loadVideo and a manual seek back to the start reset it.
+    function autoNextVrActive() {
+      try {
+        if (typeof WebXRVR === 'undefined') return false;
+        if (WebXRVR.isPresenting && WebXRVR.isPresenting()) return true;
+        const preview = WebXRVR.getPreviewState && WebXRVR.getPreviewState();
+        return !!(preview && preview.running);
+      } catch (e) { return false; }
+    }
+    function autoAdvancePlays() {
+      return !isPackMode && autoNextVrActive() ? 2 : 1;
+    }
+    // True when this end replays the reel instead of advancing.
+    function replayBeforeAutoNext() {
+      autoPlaysDone += 1;
+      if (autoPlaysDone >= autoAdvancePlays()) return false;
+      // The preloader keeps warming the next reel: nothing here clears it.
+      autoLoopRestart = true;
+      video.currentTime = 0;
+      video.play().catch(() => {});
+      return true;
+    }
+    video.addEventListener('seeking', () => {
+      if (autoLoopRestart) { autoLoopRestart = false; return; }
+      if ((video.currentTime || 0) < 0.5) autoPlaysDone = 0;
+    });
+    // </reels-auto-next>
+
     // Video Ended -> Auto-advance or Loop
     const replaySent = new Set();
     video.addEventListener('ended', () => {
+      // The replay is not tracked: the first end already counted the view.
       finishViewTracking('complete');
       if (isAutoNext) {
+        if (replayBeforeAutoNext()) return;
         nextVideo('autoplay');
       } else {
         video.currentTime = 0;
