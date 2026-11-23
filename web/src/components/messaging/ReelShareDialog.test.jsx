@@ -130,3 +130,86 @@ describe('ReelShareDialog copy link', () => {
     expect(screen.queryByText(/unavailable/)).not.toBeInTheDocument();
   });
 });
+
+describe('ReelShareDialog starts clean for each share', () => {
+  const PEOPLE = { users: [{ id: 'u1', username: 'alice', display_name: 'Alice', account_type: 'real' }] };
+
+  beforeEach(() => {
+    Object.values(mocks.api).forEach((fn) => fn.mockReset());
+    mocks.messaging.refreshAll.mockReset();
+    mocks.api.get.mockImplementation((path) => Promise.resolve(path === '/api/search/suggestions'
+      ? PEOPLE
+      : { canonical_url: `https://echo.test${path}`, title: 'Reel' }));
+  });
+
+  afterEach(() => cleanup());
+
+  const tree = () => <MemoryRouter><ReelShareDialog /></MemoryRouter>;
+
+  async function fillDialog() {
+    await screen.findByDisplayValue('https://echo.test/api/posts/p1/share');
+    fireEvent.change(screen.getByLabelText('Search people to share with'), { target: { value: 'ali' } });
+    fireEvent.click(await screen.findByRole('button', { name: /@alice/ }));
+    fireEvent.change(screen.getByLabelText('Optional note'), { target: { value: 'look at this' } });
+    expect(screen.getByRole('button', { name: 'SEND TO 1' })).toBeEnabled();
+  }
+
+  function expectClean() {
+    expect(screen.getByLabelText('Search people to share with')).toHaveValue('');
+    expect(screen.queryByRole('button', { name: /@alice/ })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Optional note')).toHaveValue('');
+    expect(screen.getByText('0/10')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SEND TO 0' })).toBeDisabled();
+    expect(screen.queryByText(/DELIVERED/)).not.toBeInTheDocument();
+    expect(document.querySelector('.sx-share-status')).toBeNull();
+  }
+
+  it('resets search, results, recipients, note, delivery and status when the target changes', async () => {
+    mocks.messaging.shareTarget = { kind: 'reel', id: 'p1' };
+    const { rerender } = render(tree());
+    await fillDialog();
+    mocks.api.post.mockResolvedValue({ succeeded: 1, failed: 0, results: [{ username: 'alice', ok: true }] });
+    fireEvent.click(screen.getByRole('button', { name: 'SEND TO 1' }));
+    expect(await screen.findByText('1 delivered.')).toBeInTheDocument();
+
+    mocks.messaging.shareTarget = { kind: 'reel', id: 'p2' };
+    rerender(tree());
+    await screen.findByDisplayValue('https://echo.test/api/posts/p2/share');
+    expectClean();
+    expect(screen.queryByText('1 delivered.')).not.toBeInTheDocument();
+  });
+
+  it('starts clean when the same target is closed and reopened (dialog stays mounted)', async () => {
+    mocks.messaging.shareTarget = { kind: 'reel', id: 'p1' };
+    const { rerender } = render(tree());
+    await fillDialog();
+
+    mocks.messaging.shareTarget = null;
+    rerender(tree());
+    mocks.messaging.shareTarget = { kind: 'reel', id: 'p1' };
+    rerender(tree());
+    await screen.findByDisplayValue('https://echo.test/api/posts/p1/share');
+    expectClean();
+  });
+
+  it('lets a send from an earlier open finish without leaking into the next one', async () => {
+    let finish;
+    mocks.api.post.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    mocks.messaging.shareTarget = { kind: 'reel', id: 'p1' };
+    const { rerender } = render(tree());
+    await fillDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'SEND TO 1' }));
+    expect(screen.getByRole('button', { name: 'SENDING…' })).toBeDisabled();
+
+    mocks.messaging.shareTarget = { kind: 'reel', id: 'p2' };
+    rerender(tree());
+    await screen.findByDisplayValue('https://echo.test/api/posts/p2/share');
+    expect(screen.getByRole('button', { name: 'SEND TO 0' })).toBeInTheDocument();
+
+    finish({ succeeded: 1, failed: 0, results: [{ username: 'alice', ok: true }] });
+    await vi.waitFor(() => expect(mocks.messaging.refreshAll).toHaveBeenCalled());
+    expect(mocks.api.post).toHaveBeenCalledWith('/api/messages/share-content', expect.objectContaining({ target_id: 'p1', note: 'look at this', usernames: ['alice'] }));
+    expectClean();
+    expect(screen.queryByText('1 delivered.')).not.toBeInTheDocument();
+  });
+});
