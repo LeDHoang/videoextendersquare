@@ -206,6 +206,28 @@ Same method as the 5 s comparison. Scripts `scripts/qa/views15.sh` and `metrics_
 - The two clips have different shots, so the warp errors are not directly comparable. The lower A15 figure does not prove A got steadier.
 - B15 numbers are left out. The black area makes them look better than they are (black is perfectly steady).
 
+## fal hosted endpoint (2026-11-24)
+
+Same input, LoRA and 1088² half-equirect canvas as A, run through fal `fal-ai/ltx-2.3-22b/distilled/reference-video-to-video/lora` instead of our ComfyUI graph. Each fal output got the same feather composite and the same five 90° headset views (front, left, right, up, down) as A. Metrics, contact sheets and scripts are in `docs/outpaint-fal-2026-11-24/`. The mp4s (~47 MB) stay in `runpod-abc-2026-11-24/fal/` (not committed).
+
+Runs:
+- 5 s (121 frames) and 15 s (361 frames), each with `use_multiscale` on (MS) and off (no-MS).
+- A15same is A15 re-rendered through the same scripts, so all 15 s rows are comparable.
+
+| Metric (mean of five views) | A 5 s | fal no-MS 5 s | fal MS 5 s | A15same | fal no-MS 15 s | fal MS 15 s |
+|---|---|---|---|---|---|---|
+| Seam ΔE | 2.10 | 2.52 | 3.65 | 3.38 | 3.86 | 4.02 |
+| Generated-region sharpness | 225 | 232 | 87 | 225 | 264 | 60 |
+| Raw-vs-source PSNR (dB) | 25.2 | 25.7 | 15.0 | 21.9 | 25.5 | 17.2 |
+| Source-area PSNR vs reference (dB) | 22.99 | 23.78 | 14.20 | 21.18 | 24.88 | 16.44 |
+
+- **Multiscale breaks reference adherence.** With MS on, the source area drops ~9 dB and the model replaces the scene. MS must stay off.
+- **fal without MS is close to A on the numbers.** Seam ΔE is a little worse (+0.4–0.5), sharpness and source fidelity are equal or slightly better. fal no-MS 15 s source-area PSNR by quarter: 22.10 / 21.12 / 26.36 / 29.88 dB.
+- **Visually A is still more coherent.** fal no-MS 15 s keeps the source Tron figures, but adds a smoke-like blob beside the source and a busier dotted floor. A15 has cleaner curved light tracks.
+- **No yellow cast.** Mean LAB b\* (positive = yellow): reference source −3.95; A15 generated −3.81, source −3.95; fal no-MS 15 s generated −3.30, source −3.64. The "yellow" look in the MS runs comes from the replaced content, not a colour shift.
+- **Model version gap not provable.** fal does not say which LTX 2.3 build it serves. Confirmed differences from our graph: no NAG, default sigmas instead of our ManualSigmas, no tone-matched source composite, and the MS option.
+- **Cost.** About $0.20 per 5 s and $0.60 per 15 s clip. This round spent about $1.40.
+
 ## 360° estimates
 
 | Case | Canvas, frames | Tokens | VRAM | System RAM |
