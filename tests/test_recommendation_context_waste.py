@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -74,3 +75,41 @@ def test_post_without_stats_row_scores_like_today(db):
     ctx = context(db)
     assert "p2" not in ctx.stats
     assert stats_quality(ctx.stats.get("p2"), 0, 0) == stats_quality(None, 0, 0)
+
+
+def new_session(db, actor):
+    return service._new_session(db, actor=actor, surface="for_you", seed_post_id=None,
+                                filters={}, algorithm_version=service.REELS_ALGORITHM_VERSION)
+
+
+def tables(db):
+    return " ".join(db.queries)
+
+
+def test_fresh_session_reads_no_impressions_or_events_and_matches_full(db):
+    actor = actor_identity(None, "anon")
+    session = new_session(db, actor)
+    db.flush()
+    full = service._pipeline_context(db, actor=actor, session=session, surface="for_you",
+        seed_post_id=None, allowed_post_ids=None, manual_order=None)
+    db.queries.clear()
+    lean = service._pipeline_context(db, actor=actor, session=session, surface="for_you",
+        seed_post_id=None, allowed_post_ids=None, manual_order=None, fresh_session=True)
+    assert dataclasses.replace(lean, now=full.now) == full
+    assert "FROM recommendation_impressions" not in tables(db)
+    # Only the watched read remains: the actor is not fresh in this task.
+    assert len([sql for sql in db.queries if "FROM engagement_events" in sql]) == 1
+    assert "FROM posts" not in tables(db)  # event_posts skipped
+
+
+def test_restarted_session_is_fresh(db, monkeypatch):
+    # get_reel_page passes fresh_session=True for no cursor and for a restart, False for a resumed cursor.
+    seen = []
+    real = service._materialize_reel_page
+    monkeypatch.setattr(service, "_materialize_reel_page",
+                        lambda *a, **k: seen.append(k["fresh_session"]) or real(*a, **k))
+    actor = actor_identity(None, "anon")
+    page = service.get_reel_page(db, actor=actor, filters={"a": 1}, limit=2)
+    service.get_reel_page(db, actor=actor, filters={"a": 1}, limit=2, cursor=page.next_cursor)
+    service.get_reel_page(db, actor=actor, filters={"a": 2}, limit=2, cursor=page.next_cursor)
+    assert seen == [True, False, True]

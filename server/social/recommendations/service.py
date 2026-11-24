@@ -596,9 +596,11 @@ def _pipeline_context(
     pool_only: bool = False,
     capped: bool = True,
     extra_post_ids: frozenset[str] = frozenset(),
+    fresh_session: bool = False,
 ) -> PipelineContext:
+    # A session created in this request has no impressions and no events yet.
     delivered = set()
-    if session is not None:
+    if session is not None and not fresh_session:
         delivered = {
             row[0]
             for row in db.query(RecommendationImpression.post_id)
@@ -648,36 +650,40 @@ def _pipeline_context(
     # Disliked reels among the candidates; the top-24 rows above hold only the strongest.
     # Fewer than 24 rows means they are all of the actor's rows, so there is nothing more
     # to read (a first-time visitor has none).
-    if len(item_rows) == top_items:
+    if len(item_rows) == top_items and post_ids:
         item_affinity.update(
             (row.post_id, _score(row))
             for row in db.query(ActorItemAffinity).filter(
                 ActorItemAffinity.actor_key == actor.actor_key,
                 ActorItemAffinity.score < 0,
-                ActorItemAffinity.post_id.in_(post_ids) if post_ids else False,
+                ActorItemAffinity.post_id.in_(post_ids),
             )
         )
     owner_ids = {item.owner_id for item in items.values()}
     tag_ids = {tag_id for item in items.values() for tag_id in item.tag_ids}
 
-    creator_affinity = {
-        row.creator_id: _score(row)
-        for row in db.query(ActorCreatorAffinity)
-        .filter(
-            ActorCreatorAffinity.actor_key == actor.actor_key,
-            ActorCreatorAffinity.creator_id.in_(owner_ids) if owner_ids else False,
-        )
-        .all()
-    }
-    tag_affinity = {
-        row.tag_id: _score(row)
-        for row in db.query(ActorTagAffinity)
-        .filter(
-            ActorTagAffinity.actor_key == actor.actor_key,
-            ActorTagAffinity.tag_id.in_(tag_ids) if tag_ids else False,
-        )
-        .all()
-    }
+    creator_affinity = {}
+    if owner_ids:
+        creator_affinity = {
+            row.creator_id: _score(row)
+            for row in db.query(ActorCreatorAffinity)
+            .filter(
+                ActorCreatorAffinity.actor_key == actor.actor_key,
+                ActorCreatorAffinity.creator_id.in_(owner_ids),
+            )
+            .all()
+        }
+    tag_affinity = {}
+    if tag_ids:
+        tag_affinity = {
+            row.tag_id: _score(row)
+            for row in db.query(ActorTagAffinity)
+            .filter(
+                ActorTagAffinity.actor_key == actor.actor_key,
+                ActorTagAffinity.tag_id.in_(tag_ids),
+            )
+            .all()
+        }
     related: dict[str, tuple[float, tuple[str, ...]]] = {}
     # History seeds count half on Related, where the opened reel is the main seed.
     affinity_weight = 0.5 if surface == "related" else 1.0
@@ -754,7 +760,7 @@ def _pipeline_context(
         if actor.user_id
         else EngagementEvent.anonymous_id == actor.anonymous_id
     )
-    session_events = [] if session is None else (
+    session_events = [] if session is None or fresh_session else (
         db.query(EngagementEvent)
         .filter(
             or_(
@@ -774,13 +780,15 @@ def _pipeline_context(
         .all()
     )
     event_post_ids = {event.post_id for event in session_events if event.post_id}
-    event_posts = {
-        post.id: post
-        for post in db.query(Post)
-        .options(selectinload(Post.tags))
-        .filter(Post.id.in_(event_post_ids) if event_post_ids else False)
-        .all()
-    }
+    event_posts = {}
+    if event_post_ids:
+        event_posts = {
+            post.id: post
+            for post in db.query(Post)
+            .options(selectinload(Post.tags))
+            .filter(Post.id.in_(event_post_ids))
+            .all()
+        }
     for event in session_events:
         post = event_posts.get(event.post_id)
         if not post:
@@ -794,7 +802,7 @@ def _pipeline_context(
         owner_id
         for (owner_id,) in (
             []
-            if session is None
+            if session is None or fresh_session
             else db.query(Post.owner_id)
             .join(RecommendationImpression, RecommendationImpression.post_id == Post.id)
             .filter(RecommendationImpression.session_id == session.id)
@@ -1031,6 +1039,8 @@ def get_reel_page(
             started=started,
             pool_only=pool_only,
             extra_post_ids=extra_post_ids,
+            # No cursor, or a restart, means _resolve_session built this session just now.
+            fresh_session=not cursor or restarted,
         )
     except IntegrityError:
         db.rollback()
@@ -1105,6 +1115,7 @@ def _materialize_reel_page(
     started: float,
     pool_only: bool = False,
     extra_post_ids: frozenset[str] = frozenset(),
+    fresh_session: bool = False,
 ) -> RecommendationPage:
     context = _pipeline_context(
         db,
@@ -1118,6 +1129,7 @@ def _materialize_reel_page(
         pool_only=pool_only,
         capped=not pool_only,
         extra_post_ids=extra_post_ids,
+        fresh_session=fresh_session,
     )
     hits = gather_source_hits(context)
     ranked = rank_candidates(context, hits)
