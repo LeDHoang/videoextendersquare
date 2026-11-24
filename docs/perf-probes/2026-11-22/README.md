@@ -159,7 +159,22 @@ r4 ran on 2026-11-24 on `20bfb10`, which adds the `perf/pipeline-context-waste` 
 
 - **p95 at 10 connections, 11-12 against r4.** On the writer, the feed went from 594 to 505 ms, the player from 656 to 725 ms and player-inline from 629 to 853 ms. Through the proxy, the player went from 412 to 474 ms and player-inline from 434 to 471 ms. So the feed is faster than on 11-12, and the player routes are still slower.
 - **The routes outside the pipeline have slipped since 11-22.** On 11-22 they were close to 11-12. They fell between r1 and r3, and r4 did not bring them back. On the writer, tags went from 81.2 (11-12) and 76.3 (11-22) to 59.4 rps, 73% of 11-12. reels went from 89.2 and 81.5 to 74.6 rps (84%). search/suggestions went from 33.2 and 31.7 to 28.0 rps (84%). creators went from 22.2 and 22.5 to 20.6 rps (93%). Through the proxy these routes are at 77 to 93% of 11-12. This is a second fall, apart from the original drop. Its cause is not known.
-- **Max concurrent players cannot be compared with 11-12.** `player_probe.py` first ran on 11-22. Cold opens are unchanged since then, at about 730 per minute.
+- **Cold opens cannot be compared with 11-12.** `player_probe.py` first ran on 11-22. Cold opens are unchanged since then, at about 730 per minute.
+
+**Concurrency against 11-12.** The loopback probe logs the rate and p95 at each step from 1 to 50 connections, on both runs (`2026-11-12/raw/loopback-*.log` and `raw-5c327ce/loopback-*-r4.log`). The table gives the highest step with a p95 of 1 s or less.
+
+| Route | Writer 11-12 | Writer r4 | Proxy 11-12 | Proxy r4 |
+|---|---|---|---|---|
+| `/api/reels/feed` | 15 | 15 | 25 | 25 |
+| `/api/reels/player` | 15 | **10** | 25 | **15** |
+| `/api/reels/player-inline` | 10 | 10 | 25 | **15** |
+| session | 15 | 15 | 25 | 25 |
+| session_spa | 15 | **10** | 25 | 25 |
+
+- **The feed is better than on 11-12.** Its rate is higher, and its p95 is lower at every step from 2 connections up. Through the proxy, the p95 at 50 connections is 1506 ms, against 1753 ms.
+- **Session starts through the proxy about match 11-12** on both rate and p95. On the writer they are 2 to 9% lower at each step.
+- **The player routes are the gap.** Through the proxy they pass a p95 of 1 s at 25 connections, against 50 on 11-12. At 50 connections the player-inline p95 is 2639 ms through the proxy and 3977 ms on the writer, against 1790 and 3056 ms.
+- **On every route the rate is flat from 5 to 10 connections up,** on both runs. Past that point more connections only add wait. Every step returned only 200.
 
 ## Results
 
