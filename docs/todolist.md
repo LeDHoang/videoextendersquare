@@ -69,6 +69,23 @@ Ranked by priority (2026-11-16). Registration has been open to everyone since 20
   - **Dock aim:** laser hover and trigger presses land on the right button in every dock (reels, pack, image, static card, Earth). This includes buttons near the edges: exit, LOCK and AUDIO, NORTH UP and the seek bar ends. Check both locked and unlocked modes, and in unlocked mode after grip-dragging the screen.
   - **Controller guide redesign:** the guide (now 440×1124) shows a header, the cropped controller photo at full panel width with readable callouts and no visible box edge, and a control table with all six controls. The table text is readable from the normal seat without leaning in. The taller panel does not clip or overlap the screen edge in locked or unlocked mode, and B still shows and hides it with the dock.
 
+**Feedback to triage (2026-11-23):**
+
+Ordered by estimated time, shortest first. The estimates exclude on-Quest checks.
+
+- [ ] (~5 min) SEND IN ECHO: search can't find the echo archive account. Cause found: `ReelShareDialog.jsx` keeps only `account_type === 'real'` users, and `echo_archive` is a `system` account (`server/social/services.py`). Decide whether it should be a recipient.
+- [ ] (~15 min) SEND IN ECHO: check that the dialog resets when SHARE is clicked on a different reel. Code read: on a new target, recipients, status and delivery reset, but the search query, its results and the note carry over.
+- [ ] (~30 min) VR: move the controller guide panel 15% further right, for more symmetry with the comment panel. Verify in the immersive preview.
+- [ ] (~30–45 min) Explore page: load more reels on its own when the user scrolls near the bottom (infinite scroll), instead of needing a click on the load-more button.
+- [ ] (~30–60 min) VR: the pop-up comment in a reel is too big. Reduce the font size and remove the top and bottom padding.
+- [ ] (~45–60 min) VR: scale up the main VR panel by 15%.
+- [ ] (~1 h) VR: buy time for loading. Play the loop twice before auto-next.
+- [ ] (~1 h, after a decision) VR: reconsider the automatic scale-down of the reel control panel's dock.
+- [ ] (~1–2 h) Earth mode, full Earth view: drag-to-rotate should rotate in only one direction at a time (vertical or horizontal). A single-axis lock per drag already shipped (`227c919`), so this is likely a bug where the lock doesn't apply in this view.
+- [ ] (~1–2 h) VR Explore: clicking EXPLORE from Earth view doesn't switch to reel mode. Today you have to go to reel mode, then EXPLORE, then click.
+- [ ] (~half day) VR: maybe condense the comment panels and put them to the left of the reel control panel?
+- [ ] (~half day or more) VR dome mode: curve more, following the curvature of the eye? Needs comfort testing on the Quest.
+
 **Before paid features:**
 
 - [ ] Stripe CLI live webhook walkthrough (duplicate, delayed-success, partial/full refund, dispute, both orders) before enabling `SX_STRIPE_ENABLED` in production.

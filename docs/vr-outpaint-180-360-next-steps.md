@@ -1,6 +1,6 @@
 # VR outpaint (180° / 360°): next steps for the outpainting pipeline
 
-Date: 2026-11-24. Status: research note. One test run on 2026-11-24 measured the example workflow and options A, B and C (see "Measured on a 96 GB card"). The other memory and time figures are still estimates from model file sizes and token counts.
+Date: 2026-11-24. Status: research note. One test run on 2026-11-24 measured the example workflow and options A, B and C (see "Measured on a 96 GB card" and "Quality comparison"). A second run the same day made full 15 s clips with A and B (see "15 s runs"). The other memory and time figures are still estimates from model file sizes and token counts.
 
 ## Repos reviewed
 
@@ -79,12 +79,132 @@ Seconds of compute per second of input video:
 | B | ~35 | ~19 |
 
 Caveats:
-- VRAM and RAM are upper bounds. On a 96 GB card ComfyUI keeps every model resident and offloads nothing. A 48 GB card would offload and still run, but slower.
+- VRAM and RAM are upper bounds. On a 96 GB card ComfyUI keeps every model resident and offloads nothing. A 15 s A run capped at 48 GB sampled at the same speed (see "15 s runs").
 - The RAM peak includes memory-mapped model files.
 - The load column is paid again on every cold start. A warm worker with the models loaded skips most of it, so the per-second cost falls toward the sampling column.
 - C and B have nearly the same pixel count, but C samples about 1.8× slower per step. The likely cause is the seam tools, which are on in C and off in B. This was not isolated.
 - A 15 s single pass costs more than 3× a 5 s run, because attention cost grows faster than the token count. 3 × 5 s chunks cost about 3×.
-- Quality has not been judged yet. The outputs need review in a Quest 3.
+- Quality was compared on a flat screen only (see "Quality comparison"). The outputs still need review in a Quest 3.
+
+## Quality comparison (5 s tron, 2026-11-24)
+
+### Where the footage lands
+
+GeoCalib estimates the source focal length, and that estimate overrides `hfov_deg` 90. On the tron clip the footage covers only about **48.5° × 28.4°**, not 90°. The model invents everything else, about 132° of the 180° width.
+
+| Option | px/° | Footage patch on the canvas |
+|---|---|---|
+| A 1088² 180° | ~6.0 | ~293 × ~172 px |
+| B 1536² 180° | ~8.5 | ~414 × ~242 px |
+| C 2176×1088 360°, front crop | ~6.0 | ~293 × ~172 px |
+| Example workflow 2560×1280 360° | ~7.1 | ~345 × ~202 px |
+
+A and C put the footage on the same pixels. They differ only in how the model fills the rest: A sees a square 180° canvas, C sees the full 2:1 360° canvas it was trained on.
+
+### File sizes (5.04 s, h264 crf 19, 24 fps)
+
+| File | Size | Bitrate |
+|---|---|---|
+| Source 5 s cut (1280×720) | 1.28 MB | |
+| A composite | 1.88 MB | 2.98 Mb/s |
+| A raw | 1.54 MB | |
+| B composite | 2.88 MB | 4.57 Mb/s |
+| B raw | 2.32 MB | |
+| C front 180° crop | 1.55 MB | |
+| C composite (full 360°) | 3.14 MB | |
+| C raw (full 360°) | 2.50 MB | |
+| Example composite | 2.61 MB | |
+| Example raw | 1.99 MB | |
+
+A 15 s clip is roughly 3× these sizes.
+
+### Metrics
+
+Method:
+- Each output was reprojected to five 90° perspective views (front, left, right, up, down) at 960×960.
+- Footage and generated regions were split with geometric masks from the projection, not from pixel differences.
+- Sharpness is the variance of the Laplacian. Higher is sharper.
+- Warp error is the mean absolute error after warping frame t onto frame t+1 with optical flow. Lower is steadier.
+- Seam ΔE is the CIEDE2000 colour step across the footage border.
+- Scripts and outputs are in `runpod-abc-2026-11-24/compare/` (not committed). `metrics_geo.json` holds the numbers.
+
+Generated region, mean of the five views:
+
+| Option | Sharpness | Warp error |
+|---|---|---|
+| A | 355 | 2.87 |
+| B | 596 | 2.63 |
+| C | 242 | 2.28 |
+| Example workflow | 217 | 1.69 |
+
+- Seam ΔE is 1.3–3.4 for A, B and C. The example workflow reaches 5.1 in the up view.
+- Raw-vs-source PSNR is 27–33 dB for every option.
+- Footage-region warp error is 5.6–8.1 for every option. That is the source motion, not a defect.
+
+### What the frames show
+
+- **A:** the horizon bends like a fisheye. The invented areas have blocky smear.
+- **B:** the sharpest option, with a level horizon. It adds yellow streaks, and the down view has curved tracks.
+- **C:** soft and blotchy, with some doubled structures.
+- **Example workflow:** the most natural and the steadiest, but also the softest.
+
+### Verdict
+
+- B is the best of the three 180° options on a flat screen.
+- C is steadier than B but softer, and costs about the same.
+- A is the weakest.
+- Not checked yet: viewing in a Quest 3, and a learned image-quality model.
+
+## 15 s runs (2026-11-24)
+
+Setup:
+- Same card, image and settings as "Measured on a 96 GB card".
+- Input: 15 s tron clip, 361 frames at 24 fps (`-ss 20`, scaled to 1280×720).
+- A fresh ComfyUI process per run.
+- A15cap48 is A15 with a second process holding 48.2 GB of the card, so ComfyUI had about 48 GB left. This stands in for a 48 GB card.
+
+| Run | Canvas | Total time | Sampling | VRAM peak | RAM peak (VmHWM) | Cost at $2.69/h |
+|---|---|---|---|---|---|---|
+| A15 | 1088×1088 | 282 s | 175 s (21.9 s/step) | 67.6 GB | 85.4 GB | ~$0.21 |
+| A15cap48 | 1088×1088 | 304 s | 175 s (21.9 s/step) | ~48.1 GB (all it was given) | 86.0 GB | ~$0.23 |
+| B15 | 1536×1536 | 727 s | 562 s (70.4 s/step) | 86.6 GB | 119.3 GB (cgroup 123.6 GB) | ~$0.54 |
+
+- **A fits a 48 GB card at the same sampling speed.** ComfyUI's dynamic VRAM loading filled the ~48 GB it had. Only loading took longer (+22 s). The capped output is not bit-identical to the uncapped one (PSNR ~28 dB), but it is the same scene.
+- **B15 is about 2.6× slower than A15.** B has ~2× the tokens, and attention cost grows faster than the token count. 15 s vs 5 s: A went from 4.5 to 21.9 s/step (4.9×), B from 12.1 to 70.4 s/step (5.8×).
+- **B15 needs a 192 GB RAM host.** Its 123.6 GB cgroup peak is too close to a 128 GB host.
+
+Files (15.04 s, h264 crf 19):
+
+| File | Size |
+|---|---|
+| A15 composite | 3.87 MB |
+| A15 raw | 3.01 MB |
+| B15 composite | 4.77 MB |
+| B15 raw | 3.51 MB |
+
+### B15 output is broken
+
+- From about 2 s on, the left ~30% of the B15 canvas and most of the sky decode to pure black (pixel value 0). A hard vertical edge separates it from the generated scene.
+- The first frames are fine. The black area stays for the rest of the clip.
+- B at 5 s (same settings, 121 frames) and A15 do not show this.
+- The composite hides part of it, because the tone match lifts the black to dark grey, but the edge stays visible.
+- Cause not isolated. Candidates: the 1536² × 361-frame token count (~212k) is far outside what the IC-LoRA saw in training, or a decode problem at that size. A rerun with another seed, or B as 3 × 5 s chunks, would tell them apart.
+
+### A15 quality
+
+Same method as the 5 s comparison. Scripts `scripts/qa/views15.sh` and `metrics_geo15.py`, outputs in `runpod-abc-2026-11-24/15s/compare/` (not committed). Contact sheets at frames 60, 180 and 300.
+
+| Metric (mean of five views) | A15 | A 5 s |
+|---|---|---|
+| Generated-region sharpness | 383 | 355 |
+| Generated-region warp error | 1.36 | 2.87 |
+| Seam ΔE | 3.0 (1.6–4.2) | 1.5–3.4 |
+| Raw-vs-source PSNR | 29–33 dB | 27–32 dB |
+
+- At frames 60, 180 and 300, A15 shows no black areas, the stadium and track stay consistent, and the close-up at frame 300 is clean. The full clip was not watched frame by frame.
+- The fisheye-bent horizon from A at 5 s is still there.
+- The two clips have different shots, so the warp errors are not directly comparable. The lower A15 figure does not prove A got steadier.
+- B15 numbers are left out. The black area makes them look better than they are (black is perfectly steady).
 
 ## 360° estimates
 
@@ -97,7 +217,7 @@ Caveats:
 
 - On a 24 GB card, use fp8 Gemma plus offload, or GGUF.
 - The example workflow has no chunk handover. Joining the chunks would be our own work.
-- Detail is limited. At 2176 px wide, a 90° shot spans only about 544 px. Keeping a full 1920 px source needs a canvas about 7680 px wide.
+- Detail is limited. At 2176 px wide, a 90° shot would span only about 544 px. The measured tron footage spans only ~48° (~293 px), because GeoCalib sets the focal length. Keeping a full 1920 px source needs a canvas about 7680 px wide.
 
 ## 180° options (15 s, "1080p" target)
 
@@ -105,9 +225,9 @@ The IC-LoRA was trained only on full 2:1 360° video (1920×960, 121 frames, 24 
 
 | Option | Canvas | Detail | Footage spans | Tokens | VRAM | RAM |
 |---|---|---|---|---|---|---|
-| **A** 180° direct, small | 1088×1088 | ~6 px/° | 544 px | ~106k | ~32–35 GB | 96 GB |
-| **B** 180° direct, large | 1536×1536 | ~8.5 px/° | 768 px | ~212k | ~41–45 GB | 128 GB |
-| **C** 360° then crop front half | 2176×1088 → 1088×1088 | ~6 px/° | 544 px | ~213k | ~41–45 GB | 128 GB |
+| **A** 180° direct, small | 1088×1088 | ~6 px/° | ~293 px (measured, ~48°) | ~106k | 48 GB card works (measured) | ~86 GB peak (measured), 128 GB host |
+| **B** 180° direct, large | 1536×1536 | ~8.5 px/° | ~414 px (measured, ~48°) | ~212k | 86.6 GB peak on 96 GB (measured); 15 s output broken | ~124 GB peak (measured), 192 GB host |
+| **C** 360° then crop front half | 2176×1088 → 1088×1088 | ~6 px/° | ~293 px (measured, ~48°) | ~213k | ~41–45 GB | 128 GB |
 
 ### Option A and option B (180° direct)
 
@@ -136,7 +256,7 @@ The IC-LoRA was trained only on full 2:1 360° video (1920×960, 121 frames, 24 
 | | Square extend (today) | 180° direct |
 |---|---|---|
 | Output | 1080×1080 flat MP4 | 1088×1088 equirect MP4, VR180 mono |
-| Real footage share of pixels | ~56% | ~18% (curved patch ~544 × ~360 px) |
+| Real footage share of pixels | ~56% | ~4% on the tron clip (curved patch ~293 × ~172 px) |
 | Model invents | Top/bottom bands (sides for 9:16) | Everything out to 90° each way, including ceiling and floor |
 | Geometry | Normal perspective | Lines bow, top and bottom rows stretch toward the poles; correct only on a hemisphere |
 | In the headset | Flat window, ~50° of view | Surrounds the viewer over 180°, footage in the middle ~90° |
@@ -156,7 +276,7 @@ input 16:9      output 1:1 flat        input 16:9      output 1:1 equirect
 
 1. Ask Burgstall Labs Oy for commercial licence terms for the IC-LoRA and both node packs. Without it, stop here.
 2. Done 2026-11-24: the example workflow and options A, B and C ran on a 96 GB card. See "Measured on a 96 GB card".
-3. Judge the A, B and C outputs in a Quest 3, not on a flat screen. Look for warped or repeated content in the invented regions of A and B, which are outside the IC-LoRA training distribution.
-4. Pick the option from that review. If A or B holds up, it is the cheapest path. If neither does, use C.
-5. Decide on 15 s handling: one pass (≥48 GB, 128 GB RAM) or 3 × 5 s chunks with our own handover.
+3. Judge the outputs in a Quest 3, not on a flat screen. The flat-screen comparison favours B among the 180° options (see "Quality comparison"). Look for warped or repeated content in the invented regions, and for the bent horizon in A.
+4. Pick the option from that review. B led at 5 s, but its 15 s single pass came out broken (see "15 s runs"). Rerun B15 with another seed before ruling it out. A15 works; C is the in-distribution fallback.
+5. Decide on 15 s handling. A in one pass runs on a 48 GB card with a 128 GB RAM host. B in one pass needs a 192 GB RAM host and failed once. The other route is 3 × 5 s chunks with our own handover.
 6. Scope the player work: equirect hemisphere rendering in the WebXR reel player, and a flag on the reel record for the projection type.
