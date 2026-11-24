@@ -234,6 +234,23 @@ The fixed tree returns bodies of the same size as `852ca88`. The rest of the pla
 
 Limits: this is one thread on a laptop, with a synthetic seed and macOS fsync. It has no concurrency and no pool contention, so it shows where the time goes, not the prod rates.
 
+### Less waste in `_pipeline_context`
+
+Branch `perf/pipeline-context-waste` against `6c3720e`. Same harness, run on local Postgres 16 (128 MB `shared_buffers`, `pg_stat_statements`), real rate limiter, 291 daily-stats rows. These are local numbers, not prod. The branch skips reads whose answer is already known for a first-time visitor (new cookie, new session), and caches `PostRecommendationStats` for 30 s.
+
+| Measure, per player-inline request | `6c3720e` | Branch |
+|---|---|---|
+| SQL statements | 21 | 11 |
+| `_pipeline_context`, cProfile | 16.05 ms | 0.31 ms |
+| `_materialize_reel_page`, cProfile | 48.82 ms | 32.12 ms |
+| `get_reel_page`, cProfile | 56.43 ms | 41.02 ms |
+| Wall time, p10 / p25, timed requests pooled | 43.7 / 46.9 ms | 38.1 / 41.8 ms |
+| Wall time, median of each run | 45.5–74.4 ms | 41.5–67.0 ms |
+
+The ten statements gone are the three actor-affinity reads, two `engagement_events` reads, the event-posts read (it ran with `WHERE false`), the exposures join, the dismissals read, the delivered-ids read, and the `post_recommendation_stats` read. The statements left are the writes (session, request, impressions, rate limit, latency), the advisory lock, the dismissals purge in `_new_session`, and the media-path and session lookups.
+
+cProfile inflates ORM-heavy code, so the ms rows overstate the gain. The wall-time rows come from 5 runs of `6c3720e` and 4 of the branch (60 timed requests each), taken in turns. The laptop had a load average of 11–13 at the time, so run medians swung by 30 ms and do not separate the two trees. The low percentiles, which load disturbs least, are about 5 ms lower on the branch. Treat that as an estimate.
+
 ## Not covered
 
 - Signed-in flows and writes: uploads, publish, likes, comments, DMs, billing. Every probe was anonymous and read-only.
