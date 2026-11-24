@@ -149,6 +149,21 @@ def test_fresh_actor_reads_no_actor_rows_and_matches_full(db):
     assert [table for table in AFFINITY if table in tables(db)] == []
 
 
+def test_both_flags_with_a_real_session_read_nothing_and_match_full(db):
+    actor = actor_identity(None, "brand-new-too")
+    session = new_session(db, actor)
+    db.flush()
+    full = service._pipeline_context(db, actor=actor, session=session, surface="for_you",
+        seed_post_id=None, allowed_post_ids=None, manual_order=None)
+    db.queries.clear()
+    lean = service._pipeline_context(db, actor=actor, session=session, surface="for_you",
+        seed_post_id=None, allowed_post_ids=None, manual_order=None,
+        fresh_session=True, fresh_actor=True)
+    assert dataclasses.replace(lean, now=full.now) == full
+    skipped = AFFINITY + ("FROM recommendation_impressions", "FROM posts")
+    assert [table for table in skipped if table in tables(db)] == []
+
+
 def test_creator_affinity_from_a_follow_survives_without_the_flag(db):
     # A follow writes a creator-affinity row and no item rows (events.py).
     actor = actor_identity(None, "anon")
