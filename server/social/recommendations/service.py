@@ -12,6 +12,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
@@ -547,6 +548,41 @@ def _recent_stats(db: Session) -> dict[str, dict[str, float]]:
     return totals_by_post
 
 
+class PostStats(NamedTuple):
+    impressions: int
+    qualified_views: int
+    completions: int
+    skips: int
+    fast_skips: int
+    likes: int
+    saves: int
+    shares: int
+    negative_feedback: int
+    total_watch_ms: int
+
+
+# Lifetime counters for every post, keyed by post. Like _recent_stats they are the
+# same for every viewer, so one read serves all requests for RECENT_STATS_TTL_S.
+_post_stats_cache: dict = {"entry": (0.0, {})}
+
+
+def _post_stats(db: Session) -> dict[str, PostStats]:
+    now = time.monotonic()
+    at, stats_by_post = _post_stats_cache["entry"]
+    if at and now - at < RECENT_STATS_TTL_S:
+        return stats_by_post
+    # Plain columns, not entities, so the cache holds no session-bound rows.
+    stats_by_post = {
+        post_id: PostStats(*(int(value or 0) for value in values))
+        for post_id, *values in db.query(
+            PostRecommendationStats.post_id,
+            *(getattr(PostRecommendationStats, column) for column in PostStats._fields),
+        )
+    }
+    _post_stats_cache["entry"] = (now, stats_by_post)
+    return stats_by_post
+
+
 def _pipeline_context(
     db: Session,
     *,
@@ -696,12 +732,10 @@ def _pipeline_context(
             if score > related.get(post_id, (0.0, ()))[0]:
                 related[post_id] = (score, seeds)
 
-    stats = {
-        row.post_id: row
-        for row in db.query(PostRecommendationStats)
-        .filter(PostRecommendationStats.post_id.in_(post_ids) if post_ids else False)
-        .all()
-    }
+    stats = {}
+    if post_ids:
+        all_stats = _post_stats(db)
+        stats = {post_id: all_stats[post_id] for post_id in post_ids if post_id in all_stats}
     recent_by_post = _recent_stats(db) if post_ids else {}
     recent_stats = {post_id: recent_by_post[post_id] for post_id in post_ids if post_id in recent_by_post}
     following_ids = set()
