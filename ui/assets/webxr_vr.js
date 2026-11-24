@@ -2060,7 +2060,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     const dt = groundLastT < 0 ? 0 : Math.max(0, Math.min(250, now - groundLastT));
     groundLastT = now;
     const mesh = groundGlobe.mesh;
-    mesh.visible = sceneMode !== 'earth';
+    mesh.visible = sceneMode !== 'earth' && !(sphereMesh && sphereMesh.visible);
     if (!mesh.visible) {
       if (groundTag) groundTag.mesh.visible = false;
       return;
@@ -7840,6 +7840,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
     }
     if (screenMesh && screenMesh.material) screenMesh.material.visible = !split;
+    syncSphereMaps(split);
   }
 
   // Record the layout of the frame now in `base` and rebind the screen.
@@ -7869,6 +7870,107 @@ window.WebXRVR = window.WebXRVR || (function () {
   function setSourceAspect(aspect) {
     const a = Number(aspect);
     sourceAspectHint = Number.isFinite(a) && a > 0 ? a : 0;
+  }
+
+  // ─── 180°/360° sphere ───────────────────────────────────────────────
+  // An equirect post plays on an inward sphere (360) or hemisphere (180)
+  // centred on the head instead of the flat screen. It reuses the screen's
+  // texture (mono) or the per-eye textures (stereo, layers 1/2). The sphere
+  // keeps the yaw the head had when the post started (or on XR entry and
+  // recenter); it does not follow the head-locked screen.
+  const SPHERE_RADIUS_M = 25;
+  let sourceProjection = 'flat';
+  let sphereMesh = null;
+  let sphereEyeL = null;
+  let sphereEyeR = null;
+  let sphereGeoFor = '';
+  let sphereYawPending = true;
+
+  function normalizeProjection(p) {
+    return p === 'equirect180' || p === 'equirect360' ? p : 'flat';
+  }
+
+  function setSourceProjection(p) {
+    sourceProjection = normalizeProjection(p);
+    sphereYawPending = true;
+    if (scene) applySceneVisibility();
+    emitPreviewState();
+  }
+
+  function sphereActive() {
+    return sourceProjection !== 'flat' && sceneMode === 'reels' && getVisualSource().kind !== 'static-card';
+  }
+
+  // u = 0.5 lands straight ahead (-Z) and u grows to the right (+X); the X
+  // flip turns the sphere inside out so FrontSide faces the viewer unmirrored.
+  function sphereGeometry(projection) {
+    const half = projection === 'equirect180';
+    const geo = new THREE.SphereGeometry(SPHERE_RADIUS_M, half ? 64 : 128, 64,
+      half ? Math.PI : Math.PI / 2, half ? Math.PI : Math.PI * 2);
+    geo.scale(-1, 1, 1);
+    return geo;
+  }
+
+  function ensureSphereMeshes() {
+    if (!THREE || !scene) return;
+    if (!sphereMesh) {
+      const make = () => {
+        const m = new THREE.Mesh(sphereGeometry(sourceProjection),
+          new THREE.MeshBasicMaterial({ side: THREE.FrontSide }));
+        m.renderOrder = -5;
+        m.frustumCulled = false;
+        m.raycast = () => {};
+        return m;
+      };
+      sphereMesh = make();
+      sphereEyeL = make();
+      sphereEyeR = make();
+      sphereEyeL.geometry.dispose();
+      sphereEyeR.geometry.dispose();
+      sphereEyeL.geometry = sphereEyeR.geometry = sphereMesh.geometry;
+      sphereEyeL.layers.set(1);
+      sphereEyeR.layers.set(2);
+      sphereMesh.add(sphereEyeL, sphereEyeR);
+      sphereMesh.visible = false;
+      scene.add(sphereMesh);
+      sphereGeoFor = sourceProjection;
+    }
+    if (sphereGeoFor !== sourceProjection && sourceProjection !== 'flat') {
+      const old = sphereMesh.geometry;
+      sphereMesh.geometry = sphereEyeL.geometry = sphereEyeR.geometry = sphereGeometry(sourceProjection);
+      old.dispose();
+      sphereGeoFor = sourceProjection;
+    }
+  }
+
+  function setSphereMap(mesh, map) {
+    if (mesh.material.map !== map) { mesh.material.map = map || null; mesh.material.needsUpdate = true; }
+  }
+
+  // Same rule as the flat screen: per-eye maps while a stereo frame splits.
+  function syncSphereMaps(split) {
+    if (!sphereMesh) return;
+    const eyes = !!(split && textureStereo !== 'mono' && eyeTextures);
+    setSphereMap(sphereMesh, screenMesh && screenMesh.material ? screenMesh.material.map : null);
+    sphereMesh.material.visible = !eyes;
+    sphereEyeL.visible = eyes;
+    sphereEyeR.visible = eyes;
+    if (eyes) {
+      setSphereMap(sphereEyeL, eyeTextures.L);
+      setSphereMap(sphereEyeR, eyeTextures.R);
+    }
+  }
+
+  // Translation follows the head every frame; yaw is set once per post,
+  // XR entry or recenter.
+  function updateSpherePose() {
+    if (!sphereMesh || !sphereMesh.visible) return;
+    const h = getHeadPosition();
+    sphereMesh.position.set(h.x, h.y, h.z);
+    if (sphereYawPending) {
+      sphereMesh.rotation.set(0, headYaw(), 0);
+      sphereYawPending = false;
+    }
   }
 
   function intrinsicSize(el) {
@@ -8031,7 +8133,7 @@ window.WebXRVR = window.WebXRVR || (function () {
   // Quest's tiled GPU then drops the screen from some tiles of that eye (the
   // world shows through in flickering blocks), so upload before any draw.
   function uploadScreenMapsBeforeDraw() {
-    for (const mesh of [screenMesh, eyeMeshL, eyeMeshR]) {
+    for (const mesh of [screenMesh, eyeMeshL, eyeMeshR, sphereMesh, sphereEyeL, sphereEyeR]) {
       const map = mesh && mesh.visible && mesh.material.visible && mesh.material.map;
       if (map) renderer.initTexture(map);
     }
@@ -8974,7 +9076,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     if (!open) return;
     // The open shell replaces the reel screen, every reel-side panel and the
     // Earth location card / preview (they would float over the shell).
-    [screenMesh, eyeMeshL, eyeMeshR, ambilightMesh, overlayMesh, controlsMesh, commentsMesh, guideMesh,
+    [screenMesh, eyeMeshL, eyeMeshR, sphereMesh, ambilightMesh, overlayMesh, controlsMesh, commentsMesh, guideMesh,
       earthLabelMesh, earthPreviewMesh]
       .forEach((m) => { if (m) m.visible = false; });
   }
@@ -9191,6 +9293,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       stereo: stereoMode,
       sourceStereo,
       textureStereo,
+      projection: sourceProjection,
       reducedMotion,
       curvatureMode: getCurvatureMode(),
       lockToViewer,
@@ -9219,7 +9322,10 @@ window.WebXRVR = window.WebXRVR || (function () {
     const halfW = cssW / 2;
     // A stereo source shows each eye's half like the headset does: the eye
     // meshes (layers 1/2) replace the left-eye screen for the pair.
-    const perEye = !!(textureStereo !== 'mono' && eyeTextures && screenMesh && screenMesh.visible);
+    const sphereShown = !!(sphereMesh && sphereMesh.visible);
+    const perEye = !!(textureStereo !== 'mono' && eyeTextures &&
+      ((screenMesh && screenMesh.visible) || sphereShown));
+    if (perEye && sphereShown) syncSphereMaps(true);
     if (perEye) {
       ensureEyeMeshes();
       eyeMeshL.material.map = eyeTextures.L;
@@ -9304,6 +9410,7 @@ window.WebXRVR = window.WebXRVR || (function () {
     commitScreenTransform();
     layoutControlsDock();
     updatePreviewLaser();
+    updateSpherePose();
 
     if (renderer && scene && camera) {
       if (stereoMode && previewCanvas) {
@@ -10584,12 +10691,18 @@ window.WebXRVR = window.WebXRVR || (function () {
       earthHudSlide.preview = null;
       earthHudLastT = -1;
     }
-    if (screenMesh) screenMesh.visible = !isEarth;
+    // A 180/360 post replaces the flat screen (and its glow, overlay and
+    // ground globe) with the sphere.
+    const sphere = !isEarth && sphereActive();
+    if (sphere) ensureSphereMeshes();
+    if (groundGlobe && sphere) groundGlobe.mesh.visible = false;
+    if (sphereMesh) sphereMesh.visible = sphere;
+    if (screenMesh) screenMesh.visible = !isEarth && !sphere;
     applyStereoVisibility();
-    if (ambilightMesh) ambilightMesh.visible = !isEarth && debugFlags.glow && readVRTheme() === 'dark';
+    if (ambilightMesh) ambilightMesh.visible = !isEarth && !sphere && debugFlags.glow && readVRTheme() === 'dark';
     if (overlayMesh) {
       const source = getVisualSource();
-      overlayMesh.visible = !isEarth && !commentsPanelVisible && overlayHasPopups &&
+      overlayMesh.visible = !isEarth && !sphere && !commentsPanelVisible && overlayHasPopups &&
         source.kind === 'video' && debugFlags.overlay;
     }
     if (controlsMesh) controlsMesh.visible = controlsVisible;
@@ -12406,6 +12519,9 @@ window.WebXRVR = window.WebXRVR || (function () {
       }
 
       xrRefSpace = renderer.xr.getReferenceSpace();
+      // A 180/360 sphere faces the head on entry and after a system recenter.
+      sphereYawPending = true;
+      try { if (xrRefSpace) xrRefSpace.addEventListener('reset', () => { sphereYawPending = true; }); } catch (e) {}
       setupVRControllers();
       setupVideoFrameTracking();
       // Explicit entry mode (default reels): never inherit a stale mode
@@ -12464,6 +12580,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         updateShellDrag();
         commitScreenTransform();
         layoutControlsDock();
+        updateSpherePose();
         refreshOverlayTexture(time);
         // Transport controls: 10Hz re-render is smooth in VR and avoids a
         // full canvas re-raster on every XR frame (upstream stride).
@@ -12631,6 +12748,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     orbitControls = null;
     raycaster = null;
     screenMesh = null;
+    if (sphereMesh) { try { sphereMesh.geometry.dispose(); } catch (e) {} }
+    sphereMesh = sphereEyeL = sphereEyeR = null;
+    sphereGeoFor = '';
     ambilightMesh = null;
     overlayMesh = null;
     guideMesh = null;
@@ -13233,6 +13353,9 @@ window.WebXRVR = window.WebXRVR || (function () {
     // committed frame of the next source.
     setSourceAspect,
     getScreenAspect() { return screenAspect; },
+    // Projection of the loaded visual: 'flat' | 'equirect180' | 'equirect360'.
+    setSourceProjection,
+    getSourceProjection() { return sourceProjection; },
     // Depth multiplier of a colour+depth ('sbsd') source; 0 is flat.
     setDepthStrength(value) { depthWarpStrength = Math.max(0, Math.min(4, Number(value) || 0)); },
 
@@ -13245,6 +13368,7 @@ window.WebXRVR = window.WebXRVR || (function () {
       makeEarthTileUniforms,
       buildEarthBase: (image) => buildHolographicEarthBase(image),
       eyeMeshes: () => ({ L: eyeMeshL, R: eyeMeshR }),
+      sphereGeometry,
       earthAtmosphere() {
         const m = earthAtmosphereMesh && earthAtmosphereMesh.material;
         return m ? { color: m.color.getHexString(), blending: m.blending } : null;
@@ -13500,6 +13624,28 @@ window.WebXRVR = window.WebXRVR || (function () {
           eyesAreVideo: !!(eyeTextures && eyeTextures.L.isVideoTexture && eyeTextures.R.isVideoTexture),
           left: eye(eyeMeshL, eyeTextures && eyeTextures.L),
           right: eye(eyeMeshR, eyeTextures && eyeTextures.R),
+        };
+      },
+      // 180/360 sphere: what draws and what each part samples.
+      getSphereState() {
+        const part = (mesh) => mesh ? {
+          visible: !!mesh.visible,
+          materialVisible: !!mesh.material.visible,
+          layers: mesh.layers.mask,
+          mapIsScreen: !!(screenMesh && mesh.material.map && mesh.material.map === screenMesh.material.map),
+          mapIsLeftEye: !!(eyeTextures && mesh.material.map === eyeTextures.L),
+          mapIsRightEye: !!(eyeTextures && mesh.material.map === eyeTextures.R),
+        } : null;
+        return {
+          projection: sourceProjection,
+          geometryFor: sphereGeoFor,
+          position: sphereMesh ? [sphereMesh.position.x, sphereMesh.position.y, sphereMesh.position.z] : null,
+          yaw: sphereMesh ? sphereMesh.rotation.y : null,
+          screenVisible: !!(screenMesh && screenMesh.visible),
+          groundGlobeVisible: !!(groundGlobe && groundGlobe.mesh.visible),
+          mono: part(sphereMesh),
+          left: part(sphereEyeL),
+          right: part(sphereEyeR),
         };
       },
       // Run the renderer's real upload check on both eye maps (what a draw

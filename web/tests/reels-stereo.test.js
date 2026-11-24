@@ -52,9 +52,11 @@ function loadStereo(items, { presenting = false, hevc = false } = {}) {
     presenting,
     previewSplit: false,
     layouts: [],
+    projections: [],
     isPresenting() { return this.presenting; },
     getPreviewState() { return { running: this.previewSplit, stereo: this.previewSplit }; },
     setSourceStereo(layout) { this.layouts.push(layout); },
+    setSourceProjection(projection) { this.projections.push(projection); },
   };
   const calls = { preload: 0, notify: 0, slides: [], viewTracking: 0, flashes: [], timers: [] };
   const context = {
@@ -113,6 +115,15 @@ test('mono posts always load their url', () => {
   // Older payloads without the field are mono too.
   assert.equal(playbackFor({ url: '/media/b.mp4' }, {}).layout, 'mono');
   engine.presenting = false;
+});
+
+test('every entry tells the VR engine its projection, flat when the post has none', () => {
+  const { applyEntryStereo, playbackFor, engine } = loadStereo([]);
+  const sphere = { url: '/media/a.mp4', stereo_layout: 'mono', projection: 'equirect180' };
+  applyEntryStereo(playbackFor(sphere, sphere), sphere);
+  const old = { url: '/media/b.mp4' };
+  applyEntryStereo(playbackFor(old, old), old);
+  assert.deepEqual(engine.projections, ['equirect180', 'flat']);
 });
 
 test('3D posts load the 2D rendition in 2D and the stereo file only in VR', () => {

@@ -3096,6 +3096,10 @@
       if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceAspect) {
         WebXRVR.setSourceAspect(item && item.aspect);
       }
+      // Every entry sets it, so a 180/360 post never leaves a flat one on the sphere.
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceProjection) {
+        WebXRVR.setSourceProjection((item && item.projection) || 'flat');
+      }
     }
     // </reels-stereo>
 
