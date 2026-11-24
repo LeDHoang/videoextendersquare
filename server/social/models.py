@@ -149,6 +149,10 @@ class Post(Base):
     # Stereo posts keep the original at media_path (the VR source) and a
     # left-eye <stem>-mono sibling for every 2D surface.
     stereo_layout = Column(String(16), nullable=False, default="mono", server_default="mono")
+    # Projection of the original video: "flat", "equirect180" (half
+    # equirectangular, a VR180 hemisphere) or "equirect360" (full sphere).
+    # The VR player maps non-flat videos onto a sphere around the viewer.
+    projection = Column(String(16), nullable=False, default="flat", server_default="flat")
     # Every stored file of the post (cover, slides and their derived
     # siblings): {output-relative path: {"bytes", and for a video original
     # and its -preview.mp4 "codec", "width", "height"}}. Request-time code

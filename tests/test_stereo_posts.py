@@ -570,3 +570,61 @@ def test_stereo_media_filter_keeps_only_3d_reels(client, tmp_path):
     assert kept_paths == {stereo_meta["path"], "testpipeline-3d/loose.png"}
     assert wide_meta["path"] in {item["rel_path"] for item in everything}
     assert len(everything) > len(kept)
+
+
+def _plain_video(path: Path, size: str) -> None:
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=gray:s={size}:d=1:r=10",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)],
+        check=True,
+    )
+
+
+@needs_ffmpeg
+def test_projection_is_stored_and_reaches_the_feed(client, tmp_path):
+    user = _register(client, "sphere_vid")
+    pano = tmp_path / "pano.mp4"
+    _plain_video(pano, "256x128")
+    flat = tmp_path / "flat.mp4"
+    _plain_video(flat, "128x128")
+    video_router.STAGED_UPLOADS["pano"] = (str(pano), time.time(), f"user:{user['id']}")
+    video_router.STAGED_UPLOADS["flat"] = (str(flat), time.time(), f"user:{user['id']}")
+
+    response = _publish(client, {"kind": "video", "title": "Pano", "stage_id": "pano", "projection": "equirect360"})
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["projection"] == "equirect360"
+    response = _publish(client, {"kind": "video", "title": "Flat", "stage_id": "flat"})
+    assert response.status_code == 200, response.text
+    assert response.json()["meta"]["projection"] == "flat"
+    with client.testing_session() as db:
+        assert {post.title: post.projection for post in db.query(Post)} == {"Pano": "equirect360", "Flat": "flat"}
+
+    payload = reels._build_payload(list(media.scan_output_media("output")), "h264")
+    assert {item["title"]: item["projection"] for item in payload} == {"Pano": "equirect360", "Flat": "flat"}
+
+
+def test_projection_is_for_videos_only(client, tmp_path):
+    user = _register(client, "sphere_img")
+    stage = _stage_image(tmp_path, user, "still", Image.new("RGB", (128, 64), LEFT))
+    response = _publish(client, {"kind": "image", "title": "Still", "stage_id": stage, "projection": "equirect360"})
+    assert response.status_code == 422
+    assert "videos" in response.text
+    response = _publish(client, {"kind": "image", "title": "Still", "stage_id": stage, "projection": "fisheye"})
+    assert response.status_code == 422
+    with client.testing_session() as db:
+        assert db.query(Post).count() == 0
+
+
+@needs_ffmpeg
+def test_360_top_bottom_stereo_takes_a_square_frame(client, tmp_path):
+    user = _register(client, "sphere_tb")
+    source = tmp_path / "tb360.mp4"
+    _plain_video(source, "256x256")
+    video_router.STAGED_UPLOADS["tb"] = (str(source), time.time(), f"user:{user['id']}")
+
+    body = {"kind": "video", "title": "TB 360", "stage_id": "tb", "stereo_layout": "tb"}
+    assert _publish(client, body).status_code == 422
+    response = _publish(client, {**body, "projection": "equirect360"})
+    assert response.status_code == 200, response.text
+    meta = response.json()["meta"]
+    assert (meta["stereo_layout"], meta["projection"]) == ("tb", "equirect360")
