@@ -62,3 +62,8 @@ ComfyUI
 
 # Brainstorming session mockups
 .superpowers/
+
+# Local-only Instagram scrape/seed tooling + dataset notes (one-off task artifacts)
+/scripts/dev/experiment_fetch_hashtag_reels.py
+/scripts/dev/experiment_seed_insta_reels.py
+/docs/insta-gta6-dataset.md
