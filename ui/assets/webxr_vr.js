@@ -8567,6 +8567,8 @@ window.WebXRVR = window.WebXRVR || (function () {
       const earth = sceneMode === 'earth' ? earthDockStatus() : null;
       const autoNext = getAutoNext();
       const stereo = textureStereo !== 'mono' && eyeTextures ? textureStereo : 'mono';
+      // The 180° / 360° chip names what is on screen: a sphere, not a still card.
+      const projection = sphereActive() ? sourceProjection : 'flat';
       const spatial = spatialDockState();
       const item = playlist[idx] || null;
       const duration = Number(source.duration) || 0;
@@ -8583,7 +8585,7 @@ window.WebXRVR = window.WebXRVR || (function () {
         comments.length, hoveredButton, pressedButton, isCurved, curvatureMode,
         lockToViewer, autoNext, sceneMode, packMode, playlist.length, idx, guidePanelVisible,
         packContext ? (packContext.title || '') + '/' + !!packContext.queueOpen : '',
-        stereo, earth ? JSON.stringify(earth) : '',
+        stereo, projection, earth ? JSON.stringify(earth) : '',
         spatial ? spatial.on + '/' + spatial.available : '',
         notificationText && notificationUntil > nowMs() ? notificationText : '',
       ].join('|');
@@ -8621,6 +8623,7 @@ window.WebXRVR = window.WebXRVR || (function () {
           notificationText,
           notificationUntil,
           stereo,
+          projection,
           spatial,
           guideVisible: guidePanelVisible,
           callbacks,

@@ -78,6 +78,12 @@ export function projectionOf(item) {
   return item.projectionPick || item.meta?.projection?.projection || 'flat';
 }
 
+// A 180° or 360° video keeps its panorama only in its own shape: it posts as it
+// is, or upscaled under Original. Extend, a depth version or MAKE 3D would break it.
+export const isSpherical = (item) => projectionOf(item) !== 'flat';
+// The shape `item` must already have to post as it is (see postSource), with its kind's options.
+export const asIsTargetOf = (item, cfg) => (isSpherical(item) ? (cfg.noUpscale ? null : false) : cfg.asIsShapeFor(item.meta));
+
 // What a post of this item points at, or null while it still needs to be made.
 // `target` is the shape a live upload must already have to post as it is
 // (null: any shape; false: none, an upscale is picked).

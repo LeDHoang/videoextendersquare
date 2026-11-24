@@ -12,7 +12,7 @@ import StudioStage from './StudioStage.jsx';
 import { ModeChoice, QualityChoice, Step } from './OptionsPanel.jsx';
 import { MODES } from './useExtendConfig.js';
 import PostForm from './PostForm.jsx';
-import { PROJECTIONS, metaStereoCandidate, postSource, projectionOf, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
+import { PROJECTIONS, asIsTargetOf, isSpherical, metaStereoCandidate, postSource, projectionOf, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
 import { onRovingKeyDown } from '../ui/roving.js';
 
 // A result made elsewhere has no upload here; its stage is the square master.
@@ -158,7 +158,7 @@ export default function MediaDialog({
   const cover = items[0];
   const group = items.length > 1;
   const meta = cover.meta || MASTER_META;
-  const shelf = shelfOf(cover, cfg.asIsShapeFor(meta));
+  const shelf = shelfOf(cover, asIsTargetOf({ ...cover, meta }, cfg));
   const stereo = stereoOf(cover);
   const working = !group && shelf === 'working';
   const render = cover.render;
@@ -181,7 +181,7 @@ export default function MediaDialog({
     && (metaStereoCandidate(cover.meta) || stereoFrame(cover.meta?.width, cover.meta?.height)?.manual);
   const title = group ? `${items.length} images, one post` : cover.name;
   // An upload that already has its shape can be posted as it is, or extended / upscaled first.
-  const asIsChoice = !group && !posted && !render && !stereo && !!cover.meta && !!postSource(cover, cfg.asIsShapeFor(meta)) && (onRedo || onRedoBack);
+  const asIsChoice = !group && !posted && !render && !stereo && !!cover.meta && !!postSource(cover, asIsTargetOf(cover, cfg)) && (onRedo || onRedoBack);
   // Original / Extend shows over the options, and over the post form of such an upload.
   // Posting as it is is Original with no upscale, whatever the options hold.
   const modeChoice = asIsChoice || (makeMode && !group);
@@ -236,7 +236,7 @@ export default function MediaDialog({
           />
           <div className="sx-media-side">
             {stereoChoice ? <StereoChoice item={cover} onChange={onStereo} /> : null}
-            {modeChoice ? <ModeChoice value={shownMode} onChange={pickMode} isVideo={cover.kind === 'video'} /> : null}
+            {modeChoice ? <ModeChoice value={shownMode} onChange={pickMode} isVideo={cover.kind === 'video'} originalOnly={isSpherical(cover)} /> : null}
             {asIsChoice && !makeMode ? (
               <Step title="Quality">
                 <QualityChoice engines={cfg.engines} value="" onChange={(engine) => onPick(shownMode, engine)} />

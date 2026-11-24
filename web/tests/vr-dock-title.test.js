@@ -78,13 +78,17 @@ test('dock header shows a 3D chip only while the reel is drawn per eye', () => {
       get(target, property) { return target[property] ?? (() => {}); },
     });
     api.renderControlsCanvas(ctx, options);
-    const found = labels.find(({ text }) => /^3D /.test(String(text)));
+    const found = labels.find(({ text }) => /^(3D |180° ?|360° ?)/.test(String(text)));
     return found ? found.text : null;
   };
   assert.equal(chip({ item: { title: 'Tron' }, stereo: 'sbs' }), '3D SBS');
   assert.equal(chip({ item: { title: 'Tron' }, stereo: 'tb' }), '3D TB');
   assert.equal(chip({ item: { title: 'Tron' }, stereo: 'mono' }), null);
   assert.equal(chip({ item: { title: 'Tron' } }), null);
+  // A 180/360 reel on the sphere names its projection, with 3D when drawn per eye.
+  assert.equal(chip({ item: { title: 'Pano' }, projection: 'equirect360' }), '360°');
+  assert.equal(chip({ item: { title: 'Pano' }, projection: 'equirect180', stereo: 'sbs' }), '180° 3D');
+  assert.equal(chip({ item: { title: 'Pano' }, projection: 'flat', stereo: 'tb' }), '3D TB');
 });
 
 test('webxr passes the on-screen stereo layout (not the stored one) to the dock', () => {
@@ -92,4 +96,7 @@ test('webxr passes the on-screen stereo layout (not the stored one) to the dock'
   assert.ok(call, 'renderControlsCanvas call present');
   assert.match(webxrSource, /\bconst stereo = textureStereo !== 'mono' && eyeTextures \? textureStereo : 'mono';/);
   assert.match(call[1], /\bstereo,/);
+  // Only a reel actually on the sphere gets the 180°/360° chip.
+  assert.match(webxrSource, /\bconst projection = sphereActive\(\) \? sourceProjection : 'flat';/);
+  assert.match(call[1], /\bprojection,/);
 });

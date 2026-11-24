@@ -21,7 +21,7 @@ import MediaTile from '../components/upload/MediaTile.jsx';
 import MediaDialog from '../components/upload/MediaDialog.jsx';
 import OptionsPanel from '../components/upload/OptionsPanel.jsx';
 import {
-  ACCEPT, groupProblem, kindOf, postSource, publishBody, shelfOf, sortItems, spatialOf, spatialSource, stagedItem, stereoOf,
+  ACCEPT, asIsTargetOf, groupProblem, isSpherical, kindOf, postSource, publishBody, shelfOf, sortItems, spatialOf, spatialSource, stagedItem, stereoOf,
 } from '../components/upload/mediaItems.js';
 
 // Upload: the person's media, grouped by what each file needs next. Files that
@@ -76,7 +76,7 @@ export default function UploadPage() {
   }, []);
 
   // The shape a file must already have to post as it is, with its kind's options.
-  const asIs = (item) => cfgs[item.kind].asIsShapeFor(item.meta);
+  const asIs = (item) => asIsTargetOf(item, cfgs[item.kind]);
   const shelf = (item) => shelfOf(item, asIs(item));
   const byShelf = { needs: [], working: [], ready: [], posted: [] };
   for (const item of sortItems(items, 'added')) byShelf[shelf(item)].push(item);
@@ -87,7 +87,12 @@ export default function UploadPage() {
   const makeMode = !!cover && !group && !cover.posted && cover.live && shelf(cover) !== 'working' && (shelf(cover) === 'needs' || !!open.redo);
 
   // What the Make button acts on: the open file, else the checked files of the first shelf.
-  const targets = makeMode ? [cover] : byShelf.needs.filter((item) => item.checked && item.live);
+  // A 180°/360° video is only ever upscaled in its own shape, so Extend leaves it out.
+  const targets = makeMode ? [cover] : byShelf.needs.filter((item) => item.checked && item.live && (!isSpherical(item) || cfgs[item.kind].upscaleOnly));
+  const sphereCover = makeMode && isSpherical(cover);
+  useEffect(() => {
+    if (sphereCover && !cfgs.video.upscaleOnly) cfgs.video.setMode(MODES[1]);
+  }, [sphereCover, cfgs.video.upscaleOnly]); // eslint-disable-line react-hooks/exhaustive-deps
   const fundingOf = (kind) => ({
     kind, items: targets.filter((item) => item.kind === kind).map((item) => item.meta), config: cfgs[kind], user, wallet, catalog, falKey,
   });
@@ -254,7 +259,7 @@ export default function UploadPage() {
 
   // ── Depth version (spatial 3D) of the open post: only a 2D post gets one ──
   const posting = !!cover && !makeMode && !cover.posted && openItems.every((item) => postSource(item, asIs(item)));
-  const spatialShown = posting && !!features.spatial_default && openItems.every((item) => !stereoOf(item) && !item.convert);
+  const spatialShown = posting && !!features.spatial_default && openItems.every((item) => !stereoOf(item) && !item.convert && !isSpherical(item));
   // Made only once asked for: the ADD DEPTH button marks every file of the open post.
   const spatialWanted = openItems.some((item) => item.depth);
   const spatialSlots = spatialShown && spatialWanted ? openItems : [];
@@ -551,7 +556,7 @@ export default function UploadPage() {
           onRedo={!group && cover.live && !cover.posted && shelf(cover) === 'ready' && !stereoOf(cover) && !converting ? () => setOpen({ ...open, redo: true }) : undefined}
           onRedoBack={open.redo && shelf(cover) === 'ready' ? () => setOpen({ ...open, redo: false }) : undefined}
           onPick={pickFor(cover.kind)}
-          canConvert={!!features.stereo_convert && !group && !stereoOf(cover)}
+          canConvert={!!features.stereo_convert && !group && !stereoOf(cover) && !isSpherical(cover)}
           convertBusy={convertBusy || blocked.length > 0}
           convertError={convertError}
           onConvert={startConvert}
