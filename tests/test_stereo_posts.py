@@ -394,9 +394,9 @@ def test_rotated_video_probes_and_validates_as_shown(tmp_path, rotation):
     assert get_video_dimensions_and_duration(str(video))[:2] == (128, 256)
     assert get_video_dimensions_and_duration(str(video), display=True)[:2] == (256, 128)
 
-    uploads._check_stereo_sources(SimpleNamespace(stereo_layout="sbs"), [str(video)])
+    uploads._check_stereo_sources(SimpleNamespace(stereo_layout="sbs", projection="flat"), [str(video)])
     with pytest.raises(HTTPException) as err:
-        uploads._check_stereo_sources(SimpleNamespace(stereo_layout="tb"), [str(video)])
+        uploads._check_stereo_sources(SimpleNamespace(stereo_layout="tb", projection="flat"), [str(video)])
     assert err.value.status_code == 422
 
     # ffmpeg decodes rotated, so the left-eye crop of the shown frame is square.
