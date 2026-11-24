@@ -208,7 +208,7 @@ Same method as the 5 s comparison. Scripts `scripts/qa/views15.sh` and `metrics_
 
 ## fal hosted endpoint (2026-11-24)
 
-Same input, LoRA and 1088² half-equirect canvas as A, run through fal `fal-ai/ltx-2.3-22b/distilled/reference-video-to-video/lora` instead of our ComfyUI graph. Each fal output got the same feather composite and the same five 90° headset views (front, left, right, up, down) as A. Metrics, contact sheets and scripts are in `docs/outpaint-fal-2026-11-24/`. The mp4s (~47 MB) stay in `runpod-abc-2026-11-24/fal/` (not committed).
+Same input, LoRA and 1088² half-equirect canvas as A, run through fal `fal-ai/ltx-2.3-22b/distilled/reference-video-to-video/lora` instead of our ComfyUI graph. Each fal output got the same feather composite and the same five 90° headset views (front, left, right, up, down) as A. Metrics and contact sheets are in `docs/outpaint-fal-2026-11-24/` (local, not committed). Scripts are in `scripts/vr-outpaint/fal/`. The mp4s (~47 MB) stay in `runpod-abc-2026-11-24/fal/` (not committed).
 
 Runs:
 - 5 s (121 frames) and 15 s (361 frames), each with `use_multiscale` on (MS) and off (no-MS).
@@ -222,11 +222,115 @@ Runs:
 | Source-area PSNR vs reference (dB) | 22.99 | 23.78 | 14.20 | 21.18 | 24.88 | 16.44 |
 
 - **Multiscale breaks reference adherence.** With MS on, the source area drops ~9 dB and the model replaces the scene. MS must stay off.
-- **fal without MS is close to A on the numbers.** Seam ΔE is a little worse (+0.4–0.5), sharpness and source fidelity are equal or slightly better. fal no-MS 15 s source-area PSNR by quarter: 22.10 / 21.12 / 26.36 / 29.88 dB.
+- **fal without MS is close to A on the numbers, but not in the headset.** Seam ΔE is a little worse (+0.4–0.5), sharpness and source fidelity are equal or slightly better. fal no-MS 15 s source-area PSNR by quarter: 22.10 / 21.12 / 26.36 / 29.88 dB. Viewed on the Quest, every fal output looks far from A and B, so these metrics do not capture the gap.
 - **Visually A is still more coherent.** fal no-MS 15 s keeps the source Tron figures, but adds a smoke-like blob beside the source and a busier dotted floor. A15 has cleaner curved light tracks.
 - **No yellow cast.** Mean LAB b\* (positive = yellow): reference source −3.95; A15 generated −3.81, source −3.95; fal no-MS 15 s generated −3.30, source −3.64. The "yellow" look in the MS runs comes from the replaced content, not a colour shift.
 - **Model version gap not provable.** fal does not say which LTX 2.3 build it serves. Confirmed differences from our graph: no NAG, default sigmas instead of our ManualSigmas, no tone-matched source composite, and the MS option.
 - **Cost.** About $0.20 per 5 s and $0.60 per 15 s clip. This round spent about $1.40.
+
+## LTX-2.5 and a 4K pass for method A (2026-11-24)
+
+Method A (180°, 5 s, first 121 frames of the tron clip) on one RTX PRO 6000 96 GB, $2.69/h. Scripts, logs and outputs are in `runpod-abc-2026-11-24/ltx25/` (not committed; its `README.md` and `resources.md` have the full tables).
+
+| run | what | native size | wall | GPU busy | VRAM peak | RAM peak (RSS) | cost |
+|---|---|---|---|---|---|---|---|
+| a23 | LTX-2.3 + `360vroutpaint` IC-LoRA, then ×2 refine | 1088² / 2176² | 7.2 min | 1.4 min | 60.4 GB | 103.5 GB | $0.32 |
+| b25 | LTX-2.5 + the same 2.3 LoRA, then ×2 refine. Stage 2 is "c" | 1088² / 2176² | 10.5 min | 2.0 min | 73.0 GB | 118.1 GB | $0.47 |
+| b25L0 | b stage 1 with the LoRA at 0 (control) | 1088² | 2.4 min | 0.9 min | 73.0 GB | 83.8 GB | $0.11 |
+| d | c taken to 3840²: LTX-2.5 TiledFusion (1280² tiles, 50 % overlap, 8 steps) + `refine-details` IC-LoRA | 3840² | 38.4 min | 26.6 min | 52.1 GB | 138.1 GB | $1.72 |
+
+d runs on top of b, so a d clip costs about 49 min and $2.19 end to end. d needs about 175 GB container RAM, so pick a pod with ≥ 192 GB RAM.
+
+Findings:
+- **The 2.3 LoRA works on LTX-2.5.** With it off, the outpaint area stays black. With it on, 2.5 gives cleaner stadium content than 2.3 and less outpaint flicker (0.354 vs 0.608 mean frame diff).
+- **Headset ranking (Quest 3): d comp > d raw > c comp.** On a flat screen, d looked like a modest gain (detail +16 % in the source, +65 % in the outpaint versus c). In the headset it is clearly the best result. d also adds faint grain and blue sparkle dots in dark areas.
+- **Stage 2 raw regenerates the source.** Stage 2 re-noises the whole canvas to σ 0.725 and samples 2 steps with the stage-1 guides cropped off, so nothing anchors the source area. The model re-imagines it, which shows as hallucinated people in the group. The comp output pastes the real source back over that area, so it hides the problem. d's raw stays faithful because the refine-details IC-LoRA takes c comp (`b25_s2comp`) as its reference video.
+
+  | output | source-area PSNR of raw vs real source |
+  |---|---|
+  | a23 stage 1 | 26.34 dB |
+  | b25 stage 1 | 24.90 dB |
+  | a23 stage 2 | 19.48 dB |
+  | b25 stage 2 (c) | 19.32 dB |
+  | d | 26.35 dB |
+
+  Mean of frames 0, 60 and 120. The mask covers the lit source pixels only (3.9 % of the frame; the tron footage is mostly black).
+
+### Options between c and d (not measured yet)
+
+Most of d's cost is 25 tiles × 8 steps on the GPU (about 8 s per tile-step), plus about 12 min of CPU work at 3840² (composite, resize, encode). Estimates below scale those two figures. None of these options has been run.
+
+| option | change from d | est. GPU | est. wall incl. b | est. cost | risk |
+|---|---|---|---|---|---|
+| d-lite | Start TiledFusion from the VAE-encoded c instead of noise: re-noise to σ 0.725, 2–3 steps, keep the refine-details guide | 7–10 min | 29–33 min | $1.30–1.50 | Less added detail; TiledFusion's support for a non-empty start latent is unchecked |
+| d at 2880² | Same graph at a smaller target, 16 tiles | ~17 min | ~35 min | ~$1.55 | Less resolution than d |
+| d with 25 % overlap | 16 tiles instead of 25 | ~17 min | ~40 min | ~$1.80 | Tile seams, more flicker |
+| refine-details at 2176² | Replace stage 2's plain re-noise with the refine-details IC-LoRA guided by the 2176² composite, no tiling | 1–4 min | 12–15 min | $0.55–0.70 | Output stays 2176²; VRAM at 2176² with the reference tokens is unchecked |
+| faster CPU steps | Composite in larger chunks or on the GPU; faster encode | 0 | saves ~5 min on any 3840² run | saves ~$0.20 | None on quality |
+
+d-lite and refine-details at 2176² look like the best bets. The second one also fixes the stage-2 raw problem at the root.
+
+### Where b's 10.5 min goes
+
+From the 1 s GPU log of the b25 run (`runpod-abc-2026-11-24/ltx25/logs/b25.vram.csv`):
+
+| time in run | what | length | GPU busy |
+|---|---|---|---|
+| 0–90 s | load Gemma-4, VAE and LTX-2.5 bf16 from disk, text encode | 90 s | no |
+| 91–139 s | stage 1 sampling (8 steps, 42 s) and decode | 48 s | yes |
+| 139–299 s | CPU: stage-1 composite, two 1088² mp4 encodes, lanczos ×2, re-composite at 2176² | 160 s | no |
+| 306–405 s | VAE encode 2176², stage 2 sampling (2 steps, 24 s), tiled decode | 100 s | yes |
+| 405–630 s | CPU: 2176² composite (chunk=1) and two 2176² mp4 encodes | 225 s | no |
+
+Sampling is 66 s of 630 s. CPU post-processing is 385 s (61 %), and loading is 90 s. d shows the same pattern: 223 s of loading and ~6 min of CPU work at 3840² after the last decode.
+
+### A faster c (estimates, not measured)
+
+Same graph and same output, so quality should match c exactly:
+
+| change | saves |
+|---|---|
+| Composite on the GPU, or in large chunks, instead of CPU chunk=1 | most of 385 s |
+| Save only `s2comp`; drop `s1raw`, `s1comp` and `s2raw` (3 of 4 encodes) | part of 385 s |
+| NVENC instead of libx264 for the last encode | part of 385 s |
+| Keep one warm worker so the models stay loaded between clips | 90 s per clip after the first |
+
+Expected: ~4.5–5 min for the first clip and ~3–3.5 min for each later clip, against 10.5 min now. The floor is the ~150 s of GPU work.
+
+### refine-details at 2176² against c
+
+| | c (b25 s2 comp) | refine-details at 2176² (expected) |
+|---|---|---|
+| stage-2 sampling | 2 steps × 12.2 s = 24 s | 3–8 steps × ~25–45 s = 1.5–6 min. Reference tokens double the sequence; d ran ~7.4 s per step on a 1280² tile with the reference |
+| wall, current pipeline | 10.5 min | ~12–16 min |
+| wall, with the faster pipeline above | ~3–3.5 min warm | ~5–9 min warm |
+| source area, raw | regenerated; people hallucinated (19.3 dB) | stays on the source, like d raw (26.35 dB) |
+| outpaint detail | baseline | sharper edges and LED shapes, but capped at 2176² pixels, so below d |
+| risks | none new | d's faint grain, blue sparkle in dark areas and higher outpaint flicker may carry over |
+
+Expected headset ranking: d comp > refine-details 2176² comp ≥ c comp. The raw output would become usable on its own; the comp output gains less, because comp already hides the stage-2 source error.
+
+### Serving a 15 s reel (estimates, not measured)
+
+Assumptions:
+- A 15 s reel runs as 3 chunks of 5 s (121 frames each).
+- One warm worker keeps the models loaded, so loading is not paid per reel.
+- Price: one RTX PRO 6000 at $2.69/h.
+- Chunk overlap for temporal continuity is not included; add ~10–20 %. Continuity across chunks is untested.
+
+Memory: "measured" values come from `runpod-abc-2026-11-24/ltx25/resources.md`; the rest are estimates. The min GPU and min pod RAM leave ~10–20 % headroom over the peak. Container RAM ran ~30–40 GB above process RSS (page cache), which is why the min pod RAM sits well above the process peak. fp8 halves the 2.5 weights (~44 GB to ~22 GB), which lowers both VRAM and RAM.
+
+"fast" = composite on the GPU, save only the comp output, NVENC encode. "fast+" = fast, plus fp8 weights for 2.5 and larger VAE tiles (untested on quality).
+
+| option | quality | per 5 s chunk | wall per input second | 15 s reel, 1 GPU | cost per 15 s reel | 15 s reel, 3 GPUs in parallel | VRAM peak (min GPU) | RAM: process peak (min pod RAM) |
+|---|---|---|---|---|---|---|---|---|
+| d comp, current | best | ~44 min | ~525 s | ~2.2 h | ~$5.90 | ~44 min | 73 GB measured (80 GB) | 138 GB measured (192 GB) |
+| d comp, fast | best | ~30 min | ~360 s | ~90 min | ~$4.00 | ~30 min | ~73 GB (80 GB) | ~125–138 GB (160 GB) |
+| refine-details 2176² comp, current | ≥ c | 10.5–14.5 min | 125–175 s | 32–44 min | $1.40–1.95 | 11–15 min | ~75–90 GB, unchecked (96 GB) | ~120 GB (160 GB) |
+| refine-details 2176² comp, fast | ≥ c | 5–9 min | 60–110 s | 15–27 min | $0.70–1.20 | 5–9 min | ~75–90 GB, unchecked (96 GB) | ~105–120 GB (128–160 GB) |
+| c comp (b25 s2 comp), current | c | 9 min | ~108 s | ~27 min | ~$1.20 | ~9 min | 73 GB measured (80 GB) | 118 GB measured (160 GB) |
+| **c comp, fast** | **c, same graph** | **~3 min** | **~35–40 s** | **~9–10 min** | **~$0.40–0.45** | **~3 min** | **~73 GB (80 GB)** | **~105–118 GB (128–160 GB)** |
+| c comp, fast+ | c if fp8 holds | 1.5–2 min | 18–24 s | 4.5–6 min | $0.20–0.27 | 1.5–2 min | ~50–55 GB (64 GB) | ~85–95 GB (128 GB) |
 
 ## 360° estimates
 
@@ -302,3 +406,4 @@ input 16:9      output 1:1 flat        input 16:9      output 1:1 equirect
 4. Pick the option from that review. B led at 5 s, but its 15 s single pass came out broken (see "15 s runs"). Rerun B15 with another seed before ruling it out. A15 works; C is the in-distribution fallback.
 5. Decide on 15 s handling. A in one pass runs on a 48 GB card with a 128 GB RAM host. B in one pass needs a 192 GB RAM host and failed once. The other route is 3 × 5 s chunks with our own handover.
 6. Scope the player work: equirect hemisphere rendering in the WebXR reel player, and a flag on the reel record for the projection type.
+7. For 4K, run d-lite and refine-details at 2176² on the same 5 s clip and judge them against d and c in the Quest (see "Options between c and d").
