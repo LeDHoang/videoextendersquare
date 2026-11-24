@@ -100,3 +100,31 @@ test('webxr passes the on-screen stereo layout (not the stored one) to the dock'
   assert.match(webxrSource, /\bconst projection = sphereActive\(\) \? sourceProjection : 'flat';/);
   assert.match(call[1], /\bprojection,/);
 });
+
+test('dock greys out the screen shape pill while a 180/360 reel is on the sphere', () => {
+  const api = loadCanvas();
+  const curveIndex = api.CTRL_BUTTONS.findIndex((btn) => btn.action === 'curve');
+  // Ink of the DOME caption and the pill's resting fill.
+  const draw = (options) => {
+    let ink = null;
+    const fills = [];
+    const ctx = new Proxy({
+      fillText(text) { if (text === 'DOME') ink = this.fillStyle; },
+      fill() { fills.push(this.fillStyle); },
+      measureText(text) { return { width: String(text).length * 8 }; },
+    }, {
+      get(target, property) { return target[property] ?? (() => {}); },
+      set(target, property, value) { target[property] = value; return true; },
+    });
+    api.renderControlsCanvas(ctx, { item: { title: 'Pano' }, curvatureMode: 1, ...options });
+    return { ink, fills };
+  };
+  const flat = draw({});
+  const sphere = draw({ projection: 'equirect360' });
+  assert.notEqual(sphere.ink, flat.ink);
+  // Hover and press leave the muted pill as it rests.
+  const hovered = draw({ projection: 'equirect180', hoveredButton: curveIndex, pressedButton: curveIndex });
+  assert.equal(hovered.ink, sphere.ink);
+  assert.deepEqual(hovered.fills, sphere.fills);
+  assert.notEqual(draw({ hoveredButton: curveIndex }).ink, flat.ink);
+});

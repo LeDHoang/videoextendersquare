@@ -6316,6 +6316,21 @@ test('a 180 post plays on the sphere instead of the flat screen, and a flat post
   renderer.stopPreview();
 });
 
+test('the screen shape button does nothing while a 180/360 post is on the sphere', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('eq-shape', 'mono', 2048, 1024));
+  renderer.setSourceProjection('equirect360');
+  frame();
+  const before = renderer.getCurvatureMode();
+  api.executeControl('curve');
+  assert.equal(renderer.getCurvatureMode(), before);
+  // A flat post gets the button back.
+  renderer.setSourceProjection('flat');
+  frame();
+  api.executeControl('curve');
+  assert.notEqual(renderer.getCurvatureMode(), before);
+  renderer.stopPreview();
+});
+
 test('the sphere faces the head when the post starts, then stays put as the head turns', () => {
   const { renderer, api, frame } = stereoHarness(stereoVideo('eq-yaw', 'mono', 2048, 1024));
   api.setPreviewLook(0.6, 0);

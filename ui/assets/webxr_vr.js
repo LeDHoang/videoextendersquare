@@ -12963,7 +12963,10 @@ window.WebXRVR = window.WebXRVR || (function () {
       case 'rew':  callbacks.onSeek && callbacks.onSeek(-5); break;
       case 'fwd':  callbacks.onSeek && callbacks.onSeek(5); break;
       case 'mode': callbacks.onToggleMode && callbacks.onToggleMode(); break;
-      case 'curve': setCurvatureMode((curvatureMode + 1) % 3); break;
+      case 'curve':
+        // The sphere has no screen to reshape; the dock greys the pill out.
+        if (!sphereActive()) setCurvatureMode((curvatureMode + 1) % 3);
+        break;
       case 'lock':
         if (!debugFlags.lock) {
           showNotification('LOCK DISABLED (?lock=0)');

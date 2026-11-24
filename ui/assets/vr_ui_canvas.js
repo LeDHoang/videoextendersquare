@@ -949,7 +949,10 @@
       // Side pills: icon, then the live state label.
       if (btn.action === 'mode' || btn.action === 'curve' || btn.action === 'lock' || btn.action === 'mute') {
         const lit = btn.action === 'lock' && lockToViewer;
-        const ink = bodyButton(btn, isHover, isPressed, lit);
+        // A 180° / 360° sphere ignores the screen shape: the pill rests muted.
+        const shapeOff = btn.action === 'curve' && projection !== 'flat';
+        const bodyInk = bodyButton(btn, isHover && !shapeOff, isPressed && !shapeOff, lit);
+        const ink = shapeOff ? T.inkMuted : bodyInk;
         let label, icon = null, glyph = null;
         if (btn.action === 'mode') {
           label = packMode ? 'AUTHORED' : (autoNext ? 'AUTO' : 'LOOP');
@@ -964,7 +967,7 @@
           label = isMuted ? 'UNMUTE' : 'MUTE'; // fix28: the action, not the state
           icon = isMuted ? 'sound-mute' : 'sound-audio';
         }
-        if (icon) drawIcon(ctx, icon, btn.x + 24, cy, 20, ink);
+        if (icon) drawIcon(ctx, icon, btn.x + 24, cy, 20, ink, shapeOff ? T.inkMuted : undefined);
         else drawGlyph(ctx, glyph, btn.x + 24, cy, 15, ink);
         ctx.fillStyle = ink;
         ctx.font = `600 13px ${TOKENS.font.mono}`;
