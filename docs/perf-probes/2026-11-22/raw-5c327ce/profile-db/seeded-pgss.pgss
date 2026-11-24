@@ -1,0 +1,15 @@
+95|280.8|2.956|50920|1937|12341413|INSERT INTO recommendation_impressions (id, request_id, session_id, post_id, creator_id, position, primary_sou
+95|136.3|1.435|2227|352|2490577|INSERT INTO recommendation_sessions (id, actor_key, user_id, anonymous_id, surface, seed_post_id, filter_hash,
+95|86.1|0.907|1428|113|1701996|INSERT INTO recommendation_requests (id, session_id, page_index, requested_count, returned_count, candidate_co
+207|68.4|0.330|3449|0|226967|INSERT INTO posts (id, owner_id, media_path, media_type, title, caption, location, source, status, visibility,
+95|34.5|0.363|180|105|0|SELECT recommendation_requests.id AS recommendation_requests_id, recommendation_requests.session_id AS recomme
+95|17.6|0.185|1706|4|0|SELECT anon_1.posts_media_path AS anon_1_posts_media_path FROM (SELECT posts.media_path AS posts_media_path FR
+95|16.4|0.172|201|179|0|SELECT recommendation_impressions.post_id AS recommendation_impressions_post_id FROM recommendation_impression
+207|15.8|0.076|2042|0|53947|UPDATE users SET post_count=$1::INTEGER, updated_at=$2::TIMESTAMP WITH TIME ZONE WHERE users.id = $3::VARCHAR
+95|13.1|0.138|665|0|0|SELECT posts.media_path AS posts_media_path, posts.id AS posts_id FROM posts WHERE posts.media_path IN ($1::VA
+95|9.6|0.101|618|0|57595|INSERT INTO rate_limit_events (id, key_hash, created_at) SELECT $1::VARCHAR AS anon_1, $2::VARCHAR AS anon_2, 
+291|8.5|0.029|2525|2|89895|INSERT INTO post_recommendation_daily_stats (post_id, day, impressions, qualified_views, completions, likes, s
+95|5.5|0.058|1331|1|7505|UPDATE recommendation_requests SET latency_ms=$1::INTEGER WHERE recommendation_requests.id = $2::VARCHAR
+207|4.8|0.023|208|0|0|SELECT posts.id AS posts_id, posts.owner_id AS posts_owner_id, posts.media_path AS posts_media_path, posts.med
+95|3.5|0.037|475|0|0|SELECT posts.owner_id AS posts_owner_id FROM posts JOIN recommendation_impressions ON recommendation_impressio
+207|3.1|0.015|385|0|0|SELECT post_tags.post_id AS post_tags_post_id, post_tags.tag_id AS post_tags_tag_id, post_tags.created_at AS p

@@ -1,0 +1,2170 @@
+--- player start 11:34:08
+11:34:08 load 0.33 0.46 0.42
+11:34:08 echo-app-read-1 88.83% 286.9MiB / 2GiB
+11:34:08 echo-app-1 0.51% 140.9MiB / 6GiB
+11:34:08 echo-cloudflared-1 0.20% 32.72MiB / 7.575GiB
+11:34:08 echo-proxy-1 1.31% 44.39MiB / 7.575GiB
+11:34:08 echo-postgres-1 9.07% 349.9MiB / 7.575GiB
+11:34:19 load 0.52 0.50 0.43
+11:34:19 echo-app-read-1 90.88% 288.2MiB / 2GiB
+11:34:19 echo-app-1 0.50% 140.9MiB / 6GiB
+11:34:19 echo-cloudflared-1 0.28% 32.72MiB / 7.575GiB
+11:34:19 echo-proxy-1 1.13% 44.59MiB / 7.575GiB
+11:34:19 echo-postgres-1 8.99% 351MiB / 7.575GiB
+11:34:29 load 0.59 0.51 0.44
+11:34:29 echo-app-read-1 0.68% 288.4MiB / 2GiB
+11:34:29 echo-app-1 100.33% 321.3MiB / 6GiB
+11:34:29 echo-cloudflared-1 0.34% 32.72MiB / 7.575GiB
+11:34:29 echo-proxy-1 0.03% 45.13MiB / 7.575GiB
+11:34:29 echo-postgres-1 3.55% 351MiB / 7.575GiB
+11:34:39 load 0.81 0.56 0.45
+11:34:39 echo-app-read-1 180.50% 297.6MiB / 2GiB
+11:34:39 echo-app-1 0.53% 140.9MiB / 6GiB
+11:34:39 echo-cloudflared-1 0.28% 32.72MiB / 7.575GiB
+11:34:39 echo-proxy-1 2.07% 45.14MiB / 7.575GiB
+11:34:39 echo-postgres-1 21.52% 351.9MiB / 7.575GiB
+11:34:49 load 1.00 0.61 0.47
+11:34:49 echo-app-read-1 180.85% 297.9MiB / 2GiB
+11:34:49 echo-app-1 0.97% 140.9MiB / 6GiB
+11:34:49 echo-cloudflared-1 0.22% 32.72MiB / 7.575GiB
+11:34:49 echo-proxy-1 2.92% 45.14MiB / 7.575GiB
+11:34:49 echo-postgres-1 14.97% 352.2MiB / 7.575GiB
+11:34:59 load 1.23 0.67 0.49
+11:34:59 echo-app-read-1 187.53% 305.8MiB / 2GiB
+11:34:59 echo-app-1 0.49% 140.9MiB / 6GiB
+11:34:59 echo-cloudflared-1 0.25% 32.72MiB / 7.575GiB
+11:34:59 echo-proxy-1 2.11% 45.17MiB / 7.575GiB
+11:34:59 echo-postgres-1 17.30% 361.5MiB / 7.575GiB
+11:35:09 load 1.43 0.74 0.51
+11:35:09 echo-app-read-1 180.82% 306.4MiB / 2GiB
+11:35:09 echo-app-1 0.90% 140.9MiB / 6GiB
+11:35:09 echo-cloudflared-1 0.43% 32.72MiB / 7.575GiB
+11:35:09 echo-proxy-1 1.94% 45.25MiB / 7.575GiB
+11:35:09 echo-postgres-1 15.67% 361.7MiB / 7.575GiB
+11:35:19 load 1.65 0.81 0.54
+11:35:19 echo-app-read-1 186.41% 306.8MiB / 2GiB
+11:35:19 echo-app-1 0.85% 140.9MiB / 6GiB
+11:35:19 echo-cloudflared-1 0.26% 32.72MiB / 7.575GiB
+11:35:19 echo-proxy-1 2.27% 45.38MiB / 7.575GiB
+11:35:19 echo-postgres-1 18.99% 365.6MiB / 7.575GiB
+11:35:30 load 1.79 0.87 0.56
+11:35:30 echo-app-read-1 188.98% 307.3MiB / 2GiB
+11:35:30 echo-app-1 1.04% 140.9MiB / 6GiB
+11:35:30 echo-cloudflared-1 0.32% 32.72MiB / 7.575GiB
+11:35:30 echo-proxy-1 2.40% 45.51MiB / 7.575GiB
+11:35:30 echo-postgres-1 18.03% 371.2MiB / 7.575GiB
+11:35:40 load 1.98 0.94 0.59
+11:35:40 echo-app-read-1 0.36% 311.4MiB / 2GiB
+11:35:40 echo-app-1 46.24% 253.2MiB / 6GiB
+11:35:40 echo-cloudflared-1 0.31% 32.72MiB / 7.575GiB
+11:35:40 echo-proxy-1 0.03% 45.47MiB / 7.575GiB
+11:35:40 echo-postgres-1 3.80% 371.4MiB / 7.575GiB
+11:35:50 load 2.21 1.02 0.62
+11:35:50 echo-app-read-1 187.31% 311.8MiB / 2GiB
+11:35:50 echo-app-1 0.50% 141MiB / 6GiB
+11:35:50 echo-cloudflared-1 0.24% 32.72MiB / 7.575GiB
+11:35:50 echo-proxy-1 3.03% 45.55MiB / 7.575GiB
+11:35:50 echo-postgres-1 15.91% 371.6MiB / 7.575GiB
+11:36:00 load 2.41 1.10 0.65
+11:36:00 echo-app-read-1 188.74% 315.9MiB / 2GiB
+11:36:00 echo-app-1 0.59% 141MiB / 6GiB
+11:36:00 echo-cloudflared-1 0.22% 32.72MiB / 7.575GiB
+11:36:00 echo-proxy-1 2.40% 45.6MiB / 7.575GiB
+11:36:00 echo-postgres-1 15.85% 371.7MiB / 7.575GiB
+11:36:10 load 2.64 1.20 0.69
+11:36:10 echo-app-read-1 186.93% 316.5MiB / 2GiB
+11:36:10 echo-app-1 6.67% 139.3MiB / 6GiB
+11:36:10 echo-cloudflared-1 0.31% 32.71MiB / 7.575GiB
+11:36:10 echo-proxy-1 2.55% 45.69MiB / 7.575GiB
+11:36:10 echo-postgres-1 15.69% 372.5MiB / 7.575GiB
+11:36:20 load 2.63 1.24 0.71
+11:36:20 echo-app-read-1 184.55% 316.9MiB / 2GiB
+11:36:20 echo-app-1 12.44% 139.3MiB / 6GiB
+11:36:20 echo-cloudflared-1 0.86% 32.72MiB / 7.575GiB
+11:36:20 echo-proxy-1 2.73% 45.69MiB / 7.575GiB
+11:36:20 echo-postgres-1 15.80% 372.5MiB / 7.575GiB
+11:36:30 load 2.68 1.30 0.73
+11:36:30 echo-app-read-1 184.82% 314.3MiB / 2GiB
+11:36:30 echo-app-1 0.50% 139.3MiB / 6GiB
+11:36:30 echo-cloudflared-1 0.28% 32.72MiB / 7.575GiB
+11:36:30 echo-proxy-1 3.00% 45.89MiB / 7.575GiB
+11:36:30 echo-postgres-1 16.61% 373.1MiB / 7.575GiB
+11:36:40 load 2.65 1.34 0.75
+11:36:40 echo-app-read-1 186.59% 314.9MiB / 2GiB
+11:36:40 echo-app-1 0.82% 139.3MiB / 6GiB
+11:36:40 echo-cloudflared-1 0.26% 32.72MiB / 7.575GiB
+11:36:40 echo-proxy-1 2.95% 46.6MiB / 7.575GiB
+11:36:40 echo-postgres-1 17.40% 373MiB / 7.575GiB
+11:36:51 load 2.55 1.36 0.77
+11:36:51 echo-app-read-1 190.09% 320.3MiB / 2GiB
+11:36:51 echo-app-1 20.69% 143.3MiB / 6GiB
+11:36:51 echo-cloudflared-1 0.56% 32.72MiB / 7.575GiB
+11:36:51 echo-proxy-1 2.27% 46.5MiB / 7.575GiB
+11:36:51 echo-postgres-1 17.27% 373.1MiB / 7.575GiB
+11:37:00 load 2.55 1.40 0.79
+11:37:00 echo-app-read-1 176.79% 317.8MiB / 2GiB
+11:37:00 echo-app-1 63.23% 139.2MiB / 6GiB
+11:37:00 echo-cloudflared-1 0.24% 32.72MiB / 7.575GiB
+11:37:00 echo-proxy-1 2.62% 46.84MiB / 7.575GiB
+11:37:00 echo-postgres-1 15.98% 372.9MiB / 7.575GiB
+11:37:10 load 2.62 1.45 0.81
+11:37:10 echo-app-read-1 177.81% 318.5MiB / 2GiB
+11:37:10 echo-app-1 1.47% 139.3MiB / 6GiB
+11:37:10 echo-cloudflared-1 0.40% 32.72MiB / 7.575GiB
+11:37:10 echo-proxy-1 2.57% 46.84MiB / 7.575GiB
+11:37:10 echo-postgres-1 18.02% 373.5MiB / 7.575GiB
+11:37:20 load 2.68 1.51 0.83
+11:37:20 echo-app-read-1 54.13% 319MiB / 2GiB
+11:37:20 echo-app-1 38.42% 139.6MiB / 6GiB
+11:37:20 echo-cloudflared-1 0.22% 32.72MiB / 7.575GiB
+11:37:20 echo-proxy-1 7.44% 46.36MiB / 7.575GiB
+11:37:20 echo-postgres-1 15.07% 374.2MiB / 7.575GiB
+11:37:30 load 2.42 1.49 0.84
+11:37:30 echo-app-read-1 59.35% 319.5MiB / 2GiB
+11:37:30 echo-app-1 34.22% 139.6MiB / 6GiB
+11:37:30 echo-cloudflared-1 0.22% 32.72MiB / 7.575GiB
+11:37:30 echo-proxy-1 7.41% 46.25MiB / 7.575GiB
+11:37:30 echo-postgres-1 15.85% 374.2MiB / 7.575GiB
+11:37:40 load 2.28 1.49 0.84
+11:37:40 echo-app-read-1 11.38% 319.4MiB / 2GiB
+11:37:40 echo-app-1 4.26% 139.6MiB / 6GiB
+11:37:40 echo-cloudflared-1 0.19% 32.72MiB / 7.575GiB
+11:37:40 echo-proxy-1 0.60% 46.2MiB / 7.575GiB
+11:37:40 echo-postgres-1 8.21% 374.2MiB / 7.575GiB
+11:37:51 load 2.09 1.47 0.84
+11:37:51 echo-app-read-1 106.60% 323.6MiB / 2GiB
+11:37:51 echo-app-1 61.06% 139.6MiB / 6GiB
+11:37:51 echo-cloudflared-1 0.24% 32.72MiB / 7.575GiB
+11:37:51 echo-proxy-1 14.31% 46.34MiB / 7.575GiB
+11:37:51 echo-postgres-1 22.19% 374.5MiB / 7.575GiB
+11:38:01 load 2.15 1.51 0.86
+11:38:01 echo-app-read-1 61.91% 320.4MiB / 2GiB
+11:38:01 echo-app-1 107.93% 199.7MiB / 6GiB
+11:38:01 echo-cloudflared-1 0.60% 32.72MiB / 7.575GiB
+11:38:01 echo-proxy-1 13.70% 46.31MiB / 7.575GiB
+11:38:01 echo-postgres-1 9.20% 375.2MiB / 7.575GiB
+11:38:11 load 2.68 1.64 0.91
+11:38:11 echo-app-read-1 120.99% 323.9MiB / 2GiB
+11:38:11 echo-app-1 162.82% 350MiB / 6GiB
+11:38:11 echo-cloudflared-1 0.22% 32.73MiB / 7.575GiB
+11:38:11 echo-proxy-1 16.30% 46.76MiB / 7.575GiB
+11:38:11 echo-postgres-1 16.48% 377.4MiB / 7.575GiB
+11:38:21 load 2.96 1.73 0.95
+11:38:21 echo-app-read-1 128.74% 327.4MiB / 2GiB
+11:38:21 echo-app-1 86.31% 141.1MiB / 6GiB
+11:38:21 echo-cloudflared-1 0.25% 32.78MiB / 7.575GiB
+11:38:21 echo-proxy-1 18.16% 46.66MiB / 7.575GiB
+11:38:21 echo-postgres-1 22.94% 378.9MiB / 7.575GiB
+11:38:31 load 3.09 1.83 1.00
+11:38:31 echo-app-read-1 144.09% 330.7MiB / 2GiB
+11:38:31 echo-app-1 89.93% 143.2MiB / 6GiB
+11:38:31 echo-cloudflared-1 0.33% 32.78MiB / 7.575GiB
+11:38:31 echo-proxy-1 18.63% 47.01MiB / 7.575GiB
+11:38:31 echo-postgres-1 18.50% 381.1MiB / 7.575GiB
+11:38:41 load 3.54 1.97 1.05
+11:38:41 echo-app-read-1 135.21% 331.2MiB / 2GiB
+11:38:41 echo-app-1 91.86% 143.6MiB / 6GiB
+11:38:41 echo-cloudflared-1 0.39% 32.78MiB / 7.575GiB
+11:38:41 echo-proxy-1 17.66% 47.32MiB / 7.575GiB
+11:38:41 echo-postgres-1 19.87% 381.6MiB / 7.575GiB
+11:38:52 load 3.96 2.11 1.11
+11:38:52 echo-app-read-1 64.27% 331.1MiB / 2GiB
+11:38:52 echo-app-1 48.99% 145.7MiB / 6GiB
+11:38:52 echo-cloudflared-1 0.24% 32.78MiB / 7.575GiB
+11:38:52 echo-proxy-1 12.08% 47.43MiB / 7.575GiB
+11:38:52 echo-postgres-1 16.83% 381.1MiB / 7.575GiB
+11:39:02 load 4.59 2.31 1.18
+11:39:02 echo-app-read-1 143.28% 331.2MiB / 2GiB
+11:39:02 echo-app-1 81.22% 147.1MiB / 6GiB
+11:39:02 echo-cloudflared-1 0.69% 32.78MiB / 7.575GiB
+11:39:02 echo-proxy-1 16.99% 47.7MiB / 7.575GiB
+11:39:02 echo-postgres-1 19.33% 382.1MiB / 7.575GiB
+11:39:12 load 4.88 2.45 1.24
+11:39:12 echo-app-read-1 52.93% 331.3MiB / 2GiB
+11:39:12 echo-app-1 0.55% 148.6MiB / 6GiB
+11:39:12 echo-cloudflared-1 0.20% 32.78MiB / 7.575GiB
+11:39:12 echo-proxy-1 0.00% 47.66MiB / 7.575GiB
+11:39:12 echo-postgres-1 0.55% 382.3MiB / 7.575GiB
+11:39:22 load 5.06 2.56 1.29
+11:39:22 echo-app-read-1 112.05% 327.8MiB / 2GiB
+11:39:22 echo-app-1 166.63% 313.2MiB / 6GiB
+11:39:22 echo-cloudflared-1 0.39% 32.78MiB / 7.575GiB
+11:39:22 echo-proxy-1 16.02% 48.59MiB / 7.575GiB
+11:39:22 echo-postgres-1 15.22% 372.9MiB / 7.575GiB
+11:39:32 load 4.74 2.58 1.31
+11:39:32 echo-app-read-1 152.77% 328.1MiB / 2GiB
+11:39:32 echo-app-1 88.63% 152.4MiB / 6GiB
+11:39:32 echo-cloudflared-1 0.23% 32.78MiB / 7.575GiB
+11:39:32 echo-proxy-1 18.56% 49.28MiB / 7.575GiB
+11:39:32 echo-postgres-1 19.31% 376.5MiB / 7.575GiB
+11:39:42 load 4.32 2.56 1.32
+11:39:42 echo-app-read-1 96.85% 331.4MiB / 2GiB
+11:39:42 echo-app-1 91.06% 155.2MiB / 6GiB
+11:39:42 echo-cloudflared-1 0.67% 32.78MiB / 7.575GiB
+11:39:42 echo-proxy-1 18.11% 52.11MiB / 7.575GiB
+11:39:42 echo-postgres-1 17.71% 374.8MiB / 7.575GiB
+11:39:53 load 4.27 2.61 1.35
+11:39:53 echo-app-read-1 138.31% 331.7MiB / 2GiB
+11:39:53 echo-app-1 91.25% 161.2MiB / 6GiB
+11:39:53 echo-cloudflared-1 0.19% 32.78MiB / 7.575GiB
+11:39:53 echo-proxy-1 17.64% 52.99MiB / 7.575GiB
+11:39:53 echo-postgres-1 12.19% 382.6MiB / 7.575GiB
+11:40:03 load 4.16 2.64 1.37
+11:40:03 echo-app-read-1 1.12% 331.8MiB / 2GiB
+11:40:03 echo-app-1 14.82% 162.2MiB / 6GiB
+11:40:03 echo-cloudflared-1 0.22% 32.79MiB / 7.575GiB
+11:40:03 echo-proxy-1 0.00% 51.06MiB / 7.575GiB
+11:40:03 echo-postgres-1 0.54% 389.8MiB / 7.575GiB
+11:40:13 load 4.59 2.78 1.43
+11:40:13 echo-app-read-1 74.66% 334.5MiB / 2GiB
+11:40:13 echo-app-1 96.96% 165.6MiB / 6GiB
+11:40:13 echo-cloudflared-1 0.26% 32.8MiB / 7.575GiB
+11:40:13 echo-proxy-1 18.51% 54.74MiB / 7.575GiB
+11:40:13 echo-postgres-1 6.27% 387MiB / 7.575GiB
+11:40:23 load 4.72 2.87 1.47
+11:40:23 echo-app-read-1 149.19% 332.8MiB / 2GiB
+11:40:23 echo-app-1 100.42% 168.1MiB / 6GiB
+11:40:23 echo-cloudflared-1 0.22% 32.89MiB / 7.575GiB
+11:40:23 echo-proxy-1 17.33% 54.48MiB / 7.575GiB
+11:40:23 echo-postgres-1 20.70% 389MiB / 7.575GiB
+11:40:33 load 4.36 2.86 1.49
+11:40:33 echo-app-read-1 162.86% 333.4MiB / 2GiB
+11:40:33 echo-app-1 117.93% 325.9MiB / 6GiB
+11:40:33 echo-cloudflared-1 0.39% 32.89MiB / 7.575GiB
+11:40:33 echo-proxy-1 8.02% 58.52MiB / 7.575GiB
+11:40:33 echo-postgres-1 19.85% 385.2MiB / 7.575GiB
+11:40:43 load 4.23 2.88 1.51
+11:40:43 echo-app-read-1 148.67% 333.4MiB / 2GiB
+11:40:43 echo-app-1 92.92% 169.8MiB / 6GiB
+11:40:43 echo-cloudflared-1 0.36% 32.95MiB / 7.575GiB
+11:40:43 echo-proxy-1 17.76% 58.9MiB / 7.575GiB
+11:40:43 echo-postgres-1 16.93% 387.1MiB / 7.575GiB
+11:40:54 load 4.91 3.07 1.58
+11:40:54 echo-app-read-1 21.76% 333.5MiB / 2GiB
+11:40:54 echo-app-1 62.93% 172.3MiB / 6GiB
+11:40:54 echo-cloudflared-1 0.50% 32.98MiB / 7.575GiB
+11:40:54 echo-proxy-1 12.89% 54.38MiB / 7.575GiB
+11:40:54 echo-postgres-1 1.19% 386.5MiB / 7.575GiB
+11:41:04 load 4.56 3.05 1.59
+11:41:04 echo-app-read-1 158.10% 335.5MiB / 2GiB
+11:41:04 echo-app-1 41.64% 172.2MiB / 6GiB
+11:41:04 echo-cloudflared-1 0.40% 32.98MiB / 7.575GiB
+11:41:04 echo-proxy-1 10.91% 64.12MiB / 7.575GiB
+11:41:04 echo-postgres-1 19.28% 386.2MiB / 7.575GiB
+11:41:14 load 4.78 3.15 1.64
+11:41:14 echo-app-read-1 100.61% 336.1MiB / 2GiB
+11:41:14 echo-app-1 85.71% 174.9MiB / 6GiB
+11:41:14 echo-cloudflared-1 0.32% 32.99MiB / 7.575GiB
+11:41:14 echo-proxy-1 16.64% 66.46MiB / 7.575GiB
+11:41:14 echo-postgres-1 14.19% 389MiB / 7.575GiB
+--- player done, proxy loopback start 11:41:22
+11:41:24 load 4.74 3.19 1.67
+11:41:24 echo-app-read-1 0.38% 336.2MiB / 2GiB
+11:41:24 echo-app-1 0.65% 177.4MiB / 6GiB
+11:41:24 echo-cloudflared-1 0.25% 33.01MiB / 7.575GiB
+11:41:24 echo-proxy-1 0.00% 62.54MiB / 7.575GiB
+11:41:24 echo-postgres-1 0.44% 390.7MiB / 7.575GiB
+11:41:34 load 4.17 3.12 1.66
+11:41:34 echo-app-read-1 0.40% 336.2MiB / 2GiB
+11:41:34 echo-app-1 4.43% 175.2MiB / 6GiB
+11:41:34 echo-cloudflared-1 0.61% 33.02MiB / 7.575GiB
+11:41:34 echo-proxy-1 0.19% 62.51MiB / 7.575GiB
+11:41:34 echo-postgres-1 0.47% 390.7MiB / 7.575GiB
+11:41:44 load 3.53 3.02 1.65
+11:41:44 echo-app-read-1 87.72% 336.1MiB / 2GiB
+11:41:44 echo-app-1 0.53% 175.2MiB / 6GiB
+11:41:44 echo-cloudflared-1 0.33% 33.02MiB / 7.575GiB
+11:41:44 echo-proxy-1 1.18% 62.5MiB / 7.575GiB
+11:41:44 echo-postgres-1 12.27% 391.2MiB / 7.575GiB
+11:41:54 load 3.44 3.02 1.66
+11:41:54 echo-app-read-1 84.73% 336.1MiB / 2GiB
+11:41:54 echo-app-1 101.02% 384.1MiB / 6GiB
+11:41:54 echo-cloudflared-1 0.22% 33.03MiB / 7.575GiB
+11:41:54 echo-proxy-1 1.17% 62.48MiB / 7.575GiB
+11:41:54 echo-postgres-1 12.29% 393.1MiB / 7.575GiB
+11:42:04 load 3.14 2.97 1.66
+11:42:04 echo-app-read-1 159.58% 336.3MiB / 2GiB
+11:42:04 echo-app-1 1.03% 175.2MiB / 6GiB
+11:42:04 echo-cloudflared-1 0.23% 33.03MiB / 7.575GiB
+11:42:04 echo-proxy-1 2.13% 55.65MiB / 7.575GiB
+11:42:04 echo-postgres-1 27.13% 393MiB / 7.575GiB
+11:42:15 load 3.28 3.00 1.68
+11:42:15 echo-app-read-1 164.33% 336.1MiB / 2GiB
+11:42:15 echo-app-1 0.84% 176.7MiB / 6GiB
+11:42:15 echo-cloudflared-1 0.24% 33.04MiB / 7.575GiB
+11:42:15 echo-proxy-1 1.99% 50.06MiB / 7.575GiB
+11:42:15 echo-postgres-1 24.11% 393.8MiB / 7.575GiB
+11:42:25 load 3.09 2.97 1.69
+11:42:25 echo-app-read-1 76.11% 336.4MiB / 2GiB
+11:42:25 echo-app-1 28.24% 176.7MiB / 6GiB
+11:42:25 echo-cloudflared-1 0.22% 33.04MiB / 7.575GiB
+11:42:25 echo-proxy-1 0.81% 50.2MiB / 7.575GiB
+11:42:25 echo-postgres-1 10.17% 394.1MiB / 7.575GiB
+11:42:35 load 3.29 3.02 1.72
+11:42:35 echo-app-read-1 175.13% 336.2MiB / 2GiB
+11:42:35 echo-app-1 0.47% 176.7MiB / 6GiB
+11:42:35 echo-cloudflared-1 0.21% 33.04MiB / 7.575GiB
+11:42:35 echo-proxy-1 1.89% 50.57MiB / 7.575GiB
+11:42:35 echo-postgres-1 23.50% 394.2MiB / 7.575GiB
+11:42:45 load 3.25 3.02 1.73
+11:42:45 echo-app-read-1 77.38% 336.2MiB / 2GiB
+11:42:45 echo-app-1 0.58% 176.7MiB / 6GiB
+11:42:45 echo-cloudflared-1 0.25% 33.04MiB / 7.575GiB
+11:42:45 echo-proxy-1 1.02% 50.86MiB / 7.575GiB
+11:42:45 echo-postgres-1 10.70% 394.4MiB / 7.575GiB
+11:42:55 load 3.14 3.00 1.74
+11:42:55 echo-app-read-1 187.90% 336.3MiB / 2GiB
+11:42:55 echo-app-1 0.74% 176.8MiB / 6GiB
+11:42:55 echo-cloudflared-1 0.25% 33.04MiB / 7.575GiB
+11:42:55 echo-proxy-1 2.23% 51.12MiB / 7.575GiB
+11:42:55 echo-postgres-1 22.33% 394.8MiB / 7.575GiB
+11:43:05 load 3.65 3.12 1.79
+11:43:05 echo-app-read-1 144.51% 336.3MiB / 2GiB
+11:43:05 echo-app-1 99.40% 349.1MiB / 6GiB
+11:43:05 echo-cloudflared-1 0.43% 33.04MiB / 7.575GiB
+11:43:05 echo-proxy-1 1.95% 50.97MiB / 7.575GiB
+11:43:05 echo-postgres-1 19.92% 395MiB / 7.575GiB
+11:43:15 load 4.30 3.28 1.86
+11:43:15 echo-app-read-1 187.00% 336.2MiB / 2GiB
+11:43:15 echo-app-1 0.47% 177.5MiB / 6GiB
+11:43:15 echo-cloudflared-1 0.27% 33.04MiB / 7.575GiB
+11:43:15 echo-proxy-1 2.08% 50.93MiB / 7.575GiB
+11:43:15 echo-postgres-1 24.99% 395.8MiB / 7.575GiB
+11:43:26 load 4.33 3.32 1.89
+11:43:26 echo-app-read-1 180.20% 336.7MiB / 2GiB
+11:43:26 echo-app-1 4.95% 177.4MiB / 6GiB
+11:43:26 echo-cloudflared-1 0.64% 33.05MiB / 7.575GiB
+11:43:26 echo-proxy-1 2.55% 49.01MiB / 7.575GiB
+11:43:26 echo-postgres-1 23.45% 396.5MiB / 7.575GiB
+11:43:36 load 3.96 3.27 1.89
+11:43:36 echo-app-read-1 173.85% 336.2MiB / 2GiB
+11:43:36 echo-app-1 0.55% 177.4MiB / 6GiB
+11:43:36 echo-cloudflared-1 0.22% 33.06MiB / 7.575GiB
+11:43:36 echo-proxy-1 2.36% 49.09MiB / 7.575GiB
+11:43:36 echo-postgres-1 23.77% 397.2MiB / 7.575GiB
+11:43:46 load 3.73 3.25 1.90
+11:43:46 echo-app-read-1 184.68% 336.7MiB / 2GiB
+11:43:46 echo-app-1 1.41% 177.4MiB / 6GiB
+11:43:46 echo-cloudflared-1 0.20% 33.09MiB / 7.575GiB
+11:43:46 echo-proxy-1 2.40% 49.26MiB / 7.575GiB
+11:43:46 echo-postgres-1 24.23% 397.9MiB / 7.575GiB
+11:43:56 load 3.54 3.22 1.90
+11:43:56 echo-app-read-1 179.63% 336.8MiB / 2GiB
+11:43:56 echo-app-1 6.00% 177.5MiB / 6GiB
+11:43:56 echo-cloudflared-1 0.30% 33.09MiB / 7.575GiB
+11:43:56 echo-proxy-1 2.48% 50.23MiB / 7.575GiB
+11:43:56 echo-postgres-1 24.16% 398.8MiB / 7.575GiB
+11:44:06 load 3.38 3.20 1.91
+11:44:06 echo-app-read-1 171.57% 336.7MiB / 2GiB
+11:44:06 echo-app-1 7.98% 177.8MiB / 6GiB
+11:44:06 echo-cloudflared-1 0.32% 33.09MiB / 7.575GiB
+11:44:06 echo-proxy-1 2.49% 52MiB / 7.575GiB
+11:44:06 echo-postgres-1 24.88% 399.5MiB / 7.575GiB
+11:44:16 load 3.25 3.17 1.92
+11:44:16 echo-app-read-1 68.56% 336.9MiB / 2GiB
+11:44:16 echo-app-1 103.84% 353.7MiB / 6GiB
+11:44:16 echo-cloudflared-1 0.24% 33.09MiB / 7.575GiB
+11:44:16 echo-proxy-1 1.09% 51.81MiB / 7.575GiB
+11:44:16 echo-postgres-1 12.61% 401.1MiB / 7.575GiB
+11:44:26 load 3.20 3.17 1.93
+11:44:26 echo-app-read-1 84.14% 337.2MiB / 2GiB
+11:44:26 echo-app-1 0.54% 177.8MiB / 6GiB
+11:44:26 echo-cloudflared-1 0.26% 33.09MiB / 7.575GiB
+11:44:26 echo-proxy-1 1.55% 46.91MiB / 7.575GiB
+11:44:26 echo-postgres-1 14.16% 403MiB / 7.575GiB
+11:44:37 load 2.84 3.09 1.92
+11:44:37 echo-app-read-1 83.83% 337.5MiB / 2GiB
+11:44:37 echo-app-1 0.55% 177.8MiB / 6GiB
+11:44:37 echo-cloudflared-1 0.33% 33.09MiB / 7.575GiB
+11:44:37 echo-proxy-1 1.53% 45.99MiB / 7.575GiB
+11:44:37 echo-postgres-1 14.14% 403.1MiB / 7.575GiB
+11:44:47 load 2.56 3.02 1.91
+11:44:47 echo-app-read-1 160.05% 337.2MiB / 2GiB
+11:44:47 echo-app-1 6.23% 177.8MiB / 6GiB
+11:44:47 echo-cloudflared-1 0.56% 33.09MiB / 7.575GiB
+11:44:47 echo-proxy-1 2.87% 46.44MiB / 7.575GiB
+11:44:47 echo-postgres-1 25.61% 405.7MiB / 7.575GiB
+11:44:57 load 2.77 3.06 1.94
+11:44:57 echo-app-read-1 163.05% 337.2MiB / 2GiB
+11:44:57 echo-app-1 1.64% 177.8MiB / 6GiB
+11:44:57 echo-cloudflared-1 0.24% 33.09MiB / 7.575GiB
+11:44:57 echo-proxy-1 3.09% 46.16MiB / 7.575GiB
+11:44:57 echo-postgres-1 23.69% 406.2MiB / 7.575GiB
+11:45:07 load 3.12 3.12 1.97
+11:45:07 echo-app-read-1 160.24% 338MiB / 2GiB
+11:45:07 echo-app-1 6.22% 177.8MiB / 6GiB
+11:45:07 echo-cloudflared-1 0.50% 33.09MiB / 7.575GiB
+11:45:07 echo-proxy-1 3.51% 46.18MiB / 7.575GiB
+11:45:07 echo-postgres-1 24.31% 406.9MiB / 7.575GiB
+11:45:17 load 3.09 3.12 1.98
+11:45:17 echo-app-read-1 184.71% 339.4MiB / 2GiB
+11:45:17 echo-app-1 6.32% 177.8MiB / 6GiB
+11:45:17 echo-cloudflared-1 0.48% 33.09MiB / 7.575GiB
+11:45:17 echo-proxy-1 2.97% 46.19MiB / 7.575GiB
+11:45:17 echo-postgres-1 26.77% 407.4MiB / 7.575GiB
+11:45:27 load 3.24 3.15 2.00
+11:45:27 echo-app-read-1 165.59% 346.7MiB / 2GiB
+11:45:27 echo-app-1 99.51% 331.2MiB / 6GiB
+11:45:27 echo-cloudflared-1 0.25% 33.09MiB / 7.575GiB
+11:45:27 echo-proxy-1 2.54% 46.24MiB / 7.575GiB
+11:45:27 echo-postgres-1 26.38% 414.9MiB / 7.575GiB
+11:45:37 load 3.65 3.24 2.05
+11:45:37 echo-app-read-1 180.10% 347.6MiB / 2GiB
+11:45:37 echo-app-1 3.84% 177.8MiB / 6GiB
+11:45:37 echo-cloudflared-1 0.30% 33.09MiB / 7.575GiB
+11:45:37 echo-proxy-1 2.74% 46.29MiB / 7.575GiB
+11:45:37 echo-postgres-1 25.05% 437.7MiB / 7.575GiB
+11:45:48 load 3.24 3.17 2.04
+11:45:48 echo-app-read-1 45.64% 349.2MiB / 2GiB
+11:45:48 echo-app-1 0.49% 177.8MiB / 6GiB
+11:45:48 echo-cloudflared-1 0.22% 33.09MiB / 7.575GiB
+11:45:48 echo-proxy-1 2.95% 46.6MiB / 7.575GiB
+11:45:48 echo-postgres-1 31.50% 451MiB / 7.575GiB
+11:45:58 load 3.20 3.16 2.05
+11:45:58 echo-app-read-1 191.59% 357.2MiB / 2GiB
+11:45:58 echo-app-1 1.85% 177.8MiB / 6GiB
+11:45:58 echo-cloudflared-1 0.33% 33.09MiB / 7.575GiB
+11:45:58 echo-proxy-1 2.91% 47.02MiB / 7.575GiB
+11:45:58 echo-postgres-1 25.57% 451.2MiB / 7.575GiB
+11:46:08 load 3.24 3.17 2.06
+11:46:08 echo-app-read-1 1.41% 358.5MiB / 2GiB
+11:46:08 echo-app-1 0.55% 177.8MiB / 6GiB
+11:46:08 echo-cloudflared-1 0.27% 33.37MiB / 7.575GiB
+11:46:08 echo-proxy-1 0.00% 46.79MiB / 7.575GiB
+11:46:08 echo-postgres-1 35.02% 428.5MiB / 7.575GiB
+11:46:18 load 3.71 3.27 2.10
+11:46:18 echo-app-read-1 182.58% 370.6MiB / 2GiB
+11:46:18 echo-app-1 0.54% 177.8MiB / 6GiB
+11:46:18 echo-cloudflared-1 1.31% 33.18MiB / 7.575GiB
+11:46:18 echo-proxy-1 3.52% 46.92MiB / 7.575GiB
+11:46:18 echo-postgres-1 32.40% 475.3MiB / 7.575GiB
+11:46:28 load 3.66 3.27 2.12
+11:46:28 echo-app-read-1 181.21% 371.6MiB / 2GiB
+11:46:28 echo-app-1 0.54% 177.8MiB / 6GiB
+11:46:28 echo-cloudflared-1 0.29% 33.18MiB / 7.575GiB
+11:46:28 echo-proxy-1 2.51% 47.09MiB / 7.575GiB
+11:46:28 echo-postgres-1 38.96% 468.9MiB / 7.575GiB
+11:46:38 load 3.90 3.33 2.15
+11:46:38 echo-app-read-1 152.31% 393.1MiB / 2GiB
+11:46:38 echo-app-1 103.22% 407.1MiB / 6GiB
+11:46:38 echo-cloudflared-1 0.40% 33.19MiB / 7.575GiB
+11:46:38 echo-proxy-1 2.17% 48.3MiB / 7.575GiB
+11:46:38 echo-postgres-1 30.08% 493.6MiB / 7.575GiB
+11:46:48 load 4.28 3.43 2.20
+11:46:48 echo-app-read-1 188.57% 395.2MiB / 2GiB
+11:46:48 echo-app-1 0.82% 177.8MiB / 6GiB
+11:46:48 echo-cloudflared-1 0.22% 33.2MiB / 7.575GiB
+11:46:48 echo-proxy-1 2.30% 50.5MiB / 7.575GiB
+11:46:48 echo-postgres-1 26.11% 500.1MiB / 7.575GiB
+11:46:59 load 4.77 3.57 2.25
+11:46:59 echo-app-read-1 87.73% 395MiB / 2GiB
+11:46:59 echo-app-1 0.62% 177.8MiB / 6GiB
+11:46:59 echo-cloudflared-1 0.20% 33.2MiB / 7.575GiB
+11:46:59 echo-proxy-1 10.00% 45.75MiB / 7.575GiB
+11:46:59 echo-postgres-1 9.35% 423.9MiB / 7.575GiB
+11:47:09 load 4.19 3.48 2.24
+11:47:09 echo-app-read-1 86.39% 393.9MiB / 2GiB
+11:47:09 echo-app-1 0.50% 177.8MiB / 6GiB
+11:47:09 echo-cloudflared-1 0.20% 33.19MiB / 7.575GiB
+11:47:09 echo-proxy-1 9.07% 45.68MiB / 7.575GiB
+11:47:09 echo-postgres-1 8.34% 424.1MiB / 7.575GiB
+11:47:19 load 3.76 3.42 2.23
+11:47:19 echo-app-read-1 164.99% 393.6MiB / 2GiB
+11:47:19 echo-app-1 0.58% 177.8MiB / 6GiB
+11:47:19 echo-cloudflared-1 0.21% 33.19MiB / 7.575GiB
+11:47:19 echo-proxy-1 15.39% 44.56MiB / 7.575GiB
+11:47:19 echo-postgres-1 14.78% 425MiB / 7.575GiB
+11:47:29 load 3.48 3.37 2.23
+11:47:29 echo-app-read-1 162.52% 393.6MiB / 2GiB
+11:47:29 echo-app-1 1.39% 177.8MiB / 6GiB
+11:47:29 echo-cloudflared-1 0.21% 33.19MiB / 7.575GiB
+11:47:29 echo-proxy-1 15.06% 42.92MiB / 7.575GiB
+11:47:29 echo-postgres-1 14.09% 424.9MiB / 7.575GiB
+11:47:39 load 3.40 3.36 2.24
+11:47:39 echo-app-read-1 178.90% 393.8MiB / 2GiB
+11:47:39 echo-app-1 1.39% 177.8MiB / 6GiB
+11:47:39 echo-cloudflared-1 0.28% 33.19MiB / 7.575GiB
+11:47:39 echo-proxy-1 8.79% 46.62MiB / 7.575GiB
+11:47:39 echo-postgres-1 2.72% 425MiB / 7.575GiB
+11:47:49 load 3.51 3.38 2.26
+11:47:49 echo-app-read-1 165.81% 394.2MiB / 2GiB
+11:47:49 echo-app-1 100.84% 352.1MiB / 6GiB
+11:47:49 echo-cloudflared-1 0.21% 33.19MiB / 7.575GiB
+11:47:49 echo-proxy-1 14.09% 46.62MiB / 7.575GiB
+11:47:49 echo-postgres-1 15.46% 425.2MiB / 7.575GiB
+11:47:58 load 3.67 3.42 2.28
+11:47:58 echo-app-read-1 177.49% 394.5MiB / 2GiB
+11:47:58 echo-app-1 30.83% 177.8MiB / 6GiB
+11:47:58 echo-cloudflared-1 0.20% 33.19MiB / 7.575GiB
+11:47:58 echo-proxy-1 11.55% 46.59MiB / 7.575GiB
+11:47:58 echo-postgres-1 11.36% 425.2MiB / 7.575GiB
+11:48:09 load 3.51 3.39 2.28
+11:48:09 echo-app-read-1 184.21% 394.3MiB / 2GiB
+11:48:09 echo-app-1 0.55% 177.8MiB / 6GiB
+11:48:09 echo-cloudflared-1 0.21% 33.2MiB / 7.575GiB
+11:48:09 echo-proxy-1 16.87% 46.66MiB / 7.575GiB
+11:48:09 echo-postgres-1 15.22% 425.4MiB / 7.575GiB
+11:48:19 load 3.80 3.46 2.32
+11:48:19 echo-app-read-1 181.58% 394.6MiB / 2GiB
+11:48:19 echo-app-1 0.68% 177.8MiB / 6GiB
+11:48:19 echo-cloudflared-1 0.31% 33.21MiB / 7.575GiB
+11:48:19 echo-proxy-1 16.72% 46.67MiB / 7.575GiB
+11:48:19 echo-postgres-1 15.78% 425.5MiB / 7.575GiB
+11:48:29 load 4.22 3.56 2.36
+11:48:29 echo-app-read-1 172.74% 395MiB / 2GiB
+11:48:29 echo-app-1 32.87% 177.8MiB / 6GiB
+11:48:29 echo-cloudflared-1 0.21% 33.23MiB / 7.575GiB
+11:48:29 echo-proxy-1 15.81% 46.79MiB / 7.575GiB
+11:48:29 echo-postgres-1 14.55% 425.5MiB / 7.575GiB
+11:48:39 load 4.02 3.54 2.37
+11:48:39 echo-app-read-1 179.44% 395MiB / 2GiB
+11:48:39 echo-app-1 0.55% 177.8MiB / 6GiB
+11:48:39 echo-cloudflared-1 0.23% 32.71MiB / 7.575GiB
+11:48:39 echo-proxy-1 16.99% 47.08MiB / 7.575GiB
+11:48:39 echo-postgres-1 15.23% 425.5MiB / 7.575GiB
+11:48:49 load 3.77 3.50 2.37
+11:48:49 echo-app-read-1 180.83% 395.1MiB / 2GiB
+11:48:49 echo-app-1 0.84% 177.8MiB / 6GiB
+11:48:49 echo-cloudflared-1 0.35% 32.71MiB / 7.575GiB
+11:48:49 echo-proxy-1 16.30% 47.53MiB / 7.575GiB
+11:48:49 echo-postgres-1 15.39% 425.6MiB / 7.575GiB
+11:48:59 load 4.34 3.63 2.43
+11:48:59 echo-app-read-1 166.87% 395.1MiB / 2GiB
+11:48:59 echo-app-1 96.82% 334.4MiB / 6GiB
+11:48:59 echo-cloudflared-1 0.26% 32.71MiB / 7.575GiB
+11:48:59 echo-proxy-1 15.82% 47.72MiB / 7.575GiB
+11:48:59 echo-postgres-1 15.09% 425.7MiB / 7.575GiB
+11:49:09 load 4.69 3.73 2.47
+11:49:09 echo-app-read-1 175.28% 395.3MiB / 2GiB
+11:49:09 echo-app-1 0.53% 177.8MiB / 6GiB
+11:49:09 echo-cloudflared-1 0.23% 32.71MiB / 7.575GiB
+11:49:09 echo-proxy-1 16.68% 48MiB / 7.575GiB
+11:49:09 echo-postgres-1 14.35% 448.1MiB / 7.575GiB
+11:49:20 load 4.89 3.81 2.51
+11:49:20 echo-app-read-1 177.04% 395.4MiB / 2GiB
+11:49:20 echo-app-1 0.67% 177.8MiB / 6GiB
+11:49:20 echo-cloudflared-1 0.20% 32.71MiB / 7.575GiB
+11:49:20 echo-proxy-1 15.96% 48.07MiB / 7.575GiB
+11:49:20 echo-postgres-1 16.22% 448.1MiB / 7.575GiB
+11:49:30 load 4.37 3.73 2.50
+11:49:30 echo-app-read-1 45.19% 395.9MiB / 2GiB
+11:49:30 echo-app-1 35.12% 177.8MiB / 6GiB
+11:49:30 echo-cloudflared-1 0.31% 32.71MiB / 7.575GiB
+11:49:30 echo-proxy-1 0.02% 47.8MiB / 7.575GiB
+11:49:30 echo-postgres-1 8.19% 449.1MiB / 7.575GiB
+11:49:40 load 3.85 3.64 2.48
+11:49:40 echo-app-read-1 90.34% 395.9MiB / 2GiB
+11:49:40 echo-app-1 0.62% 179MiB / 6GiB
+11:49:40 echo-cloudflared-1 0.29% 32.71MiB / 7.575GiB
+11:49:40 echo-proxy-1 0.90% 47.8MiB / 7.575GiB
+11:49:40 echo-postgres-1 8.61% 452.1MiB / 7.575GiB
+11:49:50 load 3.41 3.55 2.47
+11:49:50 echo-app-read-1 23.79% 395.9MiB / 2GiB
+11:49:50 echo-app-1 1.04% 179MiB / 6GiB
+11:49:50 echo-cloudflared-1 0.33% 32.71MiB / 7.575GiB
+11:49:50 echo-proxy-1 0.28% 47.47MiB / 7.575GiB
+11:49:50 echo-postgres-1 7.73% 452.2MiB / 7.575GiB
+11:50:00 load 3.05 3.47 2.45
+11:50:00 echo-app-read-1 173.24% 400.2MiB / 2GiB
+11:50:00 echo-app-1 38.76% 179MiB / 6GiB
+11:50:00 echo-cloudflared-1 0.22% 32.71MiB / 7.575GiB
+11:50:00 echo-proxy-1 1.71% 47.34MiB / 7.575GiB
+11:50:00 echo-postgres-1 16.72% 456.8MiB / 7.575GiB
+11:50:10 load 2.96 3.43 2.45
+11:50:10 echo-app-read-1 176.40% 401.1MiB / 2GiB
+11:50:10 echo-app-1 59.38% 287.4MiB / 6GiB
+11:50:10 echo-cloudflared-1 0.24% 32.71MiB / 7.575GiB
+11:50:10 echo-proxy-1 1.73% 47.34MiB / 7.575GiB
+11:50:10 echo-postgres-1 52.77% 457.8MiB / 7.575GiB
+11:50:20 load 2.97 3.42 2.46
+11:50:20 echo-app-read-1 200.18% 411.1MiB / 2GiB
+11:50:20 echo-app-1 0.54% 179MiB / 6GiB
+11:50:20 echo-cloudflared-1 0.23% 32.71MiB / 7.575GiB
+11:50:20 echo-proxy-1 1.95% 47.35MiB / 7.575GiB
+11:50:20 echo-postgres-1 17.92% 458.7MiB / 7.575GiB
+11:50:31 load 2.90 3.39 2.46
+11:50:31 echo-app-read-1 201.71% 411.6MiB / 2GiB
+11:50:31 echo-app-1 30.95% 179MiB / 6GiB
+11:50:31 echo-cloudflared-1 0.24% 32.71MiB / 7.575GiB
+11:50:31 echo-proxy-1 1.74% 47.07MiB / 7.575GiB
+11:50:31 echo-postgres-1 16.94% 460.1MiB / 7.575GiB
+11:50:41 load 2.82 3.36 2.46
+11:50:41 echo-app-read-1 201.31% 406.2MiB / 2GiB
+11:50:41 echo-app-1 5.62% 179MiB / 6GiB
+11:50:41 echo-cloudflared-1 0.55% 32.71MiB / 7.575GiB
+11:50:41 echo-proxy-1 1.93% 47.1MiB / 7.575GiB
+11:50:41 echo-postgres-1 17.92% 460.2MiB / 7.575GiB
+11:50:51 load 2.77 3.33 2.46
+11:50:51 echo-app-read-1 199.29% 401.4MiB / 2GiB
+11:50:51 echo-app-1 0.50% 179MiB / 6GiB
+11:50:51 echo-cloudflared-1 0.24% 32.71MiB / 7.575GiB
+11:50:51 echo-proxy-1 1.83% 47.09MiB / 7.575GiB
+11:50:51 echo-postgres-1 18.98% 461MiB / 7.575GiB
+11:51:01 load 3.03 3.37 2.48
+11:51:01 echo-app-read-1 192.48% 402.2MiB / 2GiB
+11:51:01 echo-app-1 16.74% 183.3MiB / 6GiB
+11:51:01 echo-cloudflared-1 0.48% 32.71MiB / 7.575GiB
+11:51:01 echo-proxy-1 2.20% 47.11MiB / 7.575GiB
+11:51:01 echo-postgres-1 23.21% 460.9MiB / 7.575GiB
+11:51:11 load 3.02 3.36 2.48
+11:51:11 echo-app-read-1 177.32% 406.5MiB / 2GiB
+11:51:11 echo-app-1 20.98% 179MiB / 6GiB
+11:51:11 echo-cloudflared-1 0.90% 32.72MiB / 7.575GiB
+11:51:11 echo-proxy-1 1.96% 47.12MiB / 7.575GiB
+11:51:11 echo-postgres-1 17.07% 493.5MiB / 7.575GiB
+11:51:21 load 3.10 3.36 2.50
+11:51:21 echo-app-read-1 153.31% 408.2MiB / 2GiB
+11:51:21 echo-app-1 30.45% 184.6MiB / 6GiB
+11:51:21 echo-cloudflared-1 0.32% 32.72MiB / 7.575GiB
+11:51:21 echo-proxy-1 2.29% 47.55MiB / 7.575GiB
+11:51:21 echo-postgres-1 0.43% 494.1MiB / 7.575GiB
+11:51:31 load 3.18 3.37 2.51
+11:51:31 echo-app-read-1 181.67% 401.5MiB / 2GiB
+11:51:31 echo-app-1 103.00% 387.8MiB / 6GiB
+11:51:31 echo-cloudflared-1 0.29% 32.72MiB / 7.575GiB
+11:51:31 echo-proxy-1 2.42% 47.73MiB / 7.575GiB
+11:51:31 echo-postgres-1 16.77% 494.4MiB / 7.575GiB
+11:51:42 load 3.30 3.39 2.52
+11:51:42 echo-app-read-1 176.42% 401.5MiB / 2GiB
+11:51:42 echo-app-1 0.53% 179MiB / 6GiB
+11:51:42 echo-cloudflared-1 0.59% 32.72MiB / 7.575GiB
+11:51:42 echo-proxy-1 1.81% 47.93MiB / 7.575GiB
+11:51:42 echo-postgres-1 15.86% 494.6MiB / 7.575GiB
+11:51:52 load 3.40 3.41 2.54
+11:51:52 echo-app-read-1 199.82% 411.1MiB / 2GiB
+11:51:52 echo-app-1 0.51% 179MiB / 6GiB
+11:51:52 echo-cloudflared-1 0.28% 32.72MiB / 7.575GiB
+11:51:52 echo-proxy-1 2.20% 49.37MiB / 7.575GiB
+11:51:52 echo-postgres-1 18.72% 494.7MiB / 7.575GiB
+11:52:02 load 3.42 3.41 2.55
+11:52:02 echo-app-read-1 194.87% 406.9MiB / 2GiB
+11:52:02 echo-app-1 36.85% 179MiB / 6GiB
+11:52:02 echo-cloudflared-1 0.71% 32.81MiB / 7.575GiB
+11:52:02 echo-proxy-1 2.25% 50.86MiB / 7.575GiB
+11:52:02 echo-postgres-1 18.45% 494.8MiB / 7.575GiB
+11:52:12 load 3.36 3.40 2.56
+11:52:12 echo-app-read-1 91.20% 404.9MiB / 2GiB
+11:52:12 echo-app-1 1.52% 179MiB / 6GiB
+11:52:12 echo-cloudflared-1 0.29% 32.85MiB / 7.575GiB
+11:52:12 echo-proxy-1 1.31% 50.59MiB / 7.575GiB
+11:52:12 echo-postgres-1 9.35% 494.9MiB / 7.575GiB
+11:52:22 load 3.00 3.32 2.54
+11:52:22 echo-app-read-1 90.83% 406MiB / 2GiB
+11:52:22 echo-app-1 0.81% 179MiB / 6GiB
+11:52:22 echo-cloudflared-1 0.35% 32.93MiB / 7.575GiB
+11:52:22 echo-proxy-1 1.21% 48.8MiB / 7.575GiB
+11:52:22 echo-postgres-1 8.40% 494.7MiB / 7.575GiB
+11:52:32 load 2.77 3.26 2.53
+11:52:32 echo-app-read-1 174.37% 410.1MiB / 2GiB
+11:52:32 echo-app-1 40.24% 179MiB / 6GiB
+11:52:32 echo-cloudflared-1 0.21% 32.93MiB / 7.575GiB
+11:52:32 echo-proxy-1 2.24% 48.8MiB / 7.575GiB
+11:52:32 echo-postgres-1 16.72% 494.6MiB / 7.575GiB
+11:52:42 load 2.73 3.24 2.53
+11:52:42 echo-app-read-1 169.22% 416.8MiB / 2GiB
+11:52:42 echo-app-1 99.69% 374.8MiB / 6GiB
+11:52:42 echo-cloudflared-1 0.21% 32.93MiB / 7.575GiB
+11:52:42 echo-proxy-1 2.32% 47.12MiB / 7.575GiB
+11:52:42 echo-postgres-1 16.63% 494.8MiB / 7.575GiB
+11:52:52 load 2.46 3.16 2.52
+11:52:52 echo-app-read-1 120.88% 415.8MiB / 2GiB
+11:52:52 echo-app-1 0.49% 179MiB / 6GiB
+11:52:52 echo-cloudflared-1 0.25% 32.93MiB / 7.575GiB
+11:52:52 echo-proxy-1 1.40% 47.14MiB / 7.575GiB
+11:52:52 echo-postgres-1 3.98% 496.7MiB / 7.575GiB
+11:53:03 load 2.47 3.14 2.52
+11:53:03 echo-app-read-1 178.29% 418.7MiB / 2GiB
+11:53:03 echo-app-1 38.25% 179MiB / 6GiB
+11:53:03 echo-cloudflared-1 0.20% 32.94MiB / 7.575GiB
+11:53:03 echo-proxy-1 1.92% 47.27MiB / 7.575GiB
+11:53:03 echo-postgres-1 15.00% 496.8MiB / 7.575GiB
+11:53:13 load 2.47 3.12 2.52
+11:53:13 echo-app-read-1 50.14% 421.9MiB / 2GiB
+11:53:13 echo-app-1 0.75% 179MiB / 6GiB
+11:53:13 echo-cloudflared-1 0.20% 33MiB / 7.575GiB
+11:53:13 echo-proxy-1 0.55% 47.62MiB / 7.575GiB
+11:53:13 echo-postgres-1 15.18% 497.1MiB / 7.575GiB
+11:53:23 load 2.40 3.08 2.51
+11:53:23 echo-app-read-1 187.31% 425MiB / 2GiB
+11:53:23 echo-app-1 0.51% 179MiB / 6GiB
+11:53:23 echo-cloudflared-1 0.21% 33.13MiB / 7.575GiB
+11:53:23 echo-proxy-1 2.15% 47.66MiB / 7.575GiB
+11:53:23 echo-postgres-1 19.82% 497MiB / 7.575GiB
+11:53:33 load 2.42 3.06 2.51
+11:53:33 echo-app-read-1 178.86% 426.4MiB / 2GiB
+11:53:33 echo-app-1 37.94% 179MiB / 6GiB
+11:53:33 echo-cloudflared-1 0.25% 33.17MiB / 7.575GiB
+11:53:33 echo-proxy-1 2.03% 47.67MiB / 7.575GiB
+11:53:33 echo-postgres-1 16.54% 497.2MiB / 7.575GiB
+11:53:43 load 2.36 3.03 2.51
+11:53:43 echo-app-read-1 191.96% 423.3MiB / 2GiB
+11:53:43 echo-app-1 0.90% 179MiB / 6GiB
+11:53:43 echo-cloudflared-1 0.40% 33.22MiB / 7.575GiB
+11:53:43 echo-proxy-1 2.30% 47.72MiB / 7.575GiB
+11:53:43 echo-postgres-1 16.60% 497.4MiB / 7.575GiB
+11:53:53 load 2.46 3.03 2.51
+11:53:53 echo-app-read-1 170.32% 423.3MiB / 2GiB
+11:53:53 echo-app-1 97.54% 346.7MiB / 6GiB
+11:53:53 echo-cloudflared-1 0.40% 33.26MiB / 7.575GiB
+11:53:53 echo-proxy-1 2.09% 47.82MiB / 7.575GiB
+11:53:53 echo-postgres-1 15.85% 497.5MiB / 7.575GiB
+11:54:03 load 2.69 3.06 2.53
+11:54:03 echo-app-read-1 191.56% 423.4MiB / 2GiB
+11:54:03 echo-app-1 38.11% 179MiB / 6GiB
+11:54:03 echo-cloudflared-1 0.26% 33.27MiB / 7.575GiB
+11:54:03 echo-proxy-1 2.36% 47.87MiB / 7.575GiB
+11:54:03 echo-postgres-1 17.64% 497.4MiB / 7.575GiB
+11:54:14 load 2.97 3.11 2.55
+11:54:14 echo-app-read-1 189.82% 435.4MiB / 2GiB
+11:54:14 echo-app-1 1.09% 179MiB / 6GiB
+11:54:14 echo-cloudflared-1 0.18% 33.27MiB / 7.575GiB
+11:54:14 echo-proxy-1 2.49% 48.22MiB / 7.575GiB
+11:54:14 echo-postgres-1 17.23% 497.5MiB / 7.575GiB
+11:54:24 load 2.89 3.09 2.55
+11:54:24 echo-app-read-1 188.22% 432.6MiB / 2GiB
+11:54:24 echo-app-1 0.71% 179MiB / 6GiB
+11:54:24 echo-cloudflared-1 0.29% 32.86MiB / 7.575GiB
+11:54:24 echo-proxy-1 2.76% 48.82MiB / 7.575GiB
+11:54:24 echo-postgres-1 5.16% 497.6MiB / 7.575GiB
+11:54:34 load 2.83 3.07 2.55
+11:54:34 echo-app-read-1 182.66% 432.3MiB / 2GiB
+11:54:34 echo-app-1 39.83% 179MiB / 6GiB
+11:54:34 echo-cloudflared-1 0.35% 32.86MiB / 7.575GiB
+11:54:34 echo-proxy-1 2.59% 49.41MiB / 7.575GiB
+11:54:34 echo-postgres-1 16.24% 497.8MiB / 7.575GiB
+11:54:44 load 3.10 3.12 2.57
+11:54:44 echo-app-read-1 184.71% 432.4MiB / 2GiB
+11:54:44 echo-app-1 0.86% 179MiB / 6GiB
+11:54:44 echo-cloudflared-1 0.21% 32.86MiB / 7.575GiB
+11:54:44 echo-proxy-1 2.11% 50.91MiB / 7.575GiB
+11:54:44 echo-postgres-1 18.32% 497.7MiB / 7.575GiB
+11:54:54 load 2.78 3.05 2.55
+11:54:54 echo-app-read-1 85.93% 437.1MiB / 2GiB
+11:54:54 echo-app-1 0.84% 179MiB / 6GiB
+11:54:54 echo-cloudflared-1 0.30% 32.86MiB / 7.575GiB
+11:54:54 echo-proxy-1 5.00% 47.37MiB / 7.575GiB
+11:54:54 echo-postgres-1 8.21% 497.5MiB / 7.575GiB
+11:55:04 load 2.58 2.99 2.54
+11:55:04 echo-app-read-1 81.52% 437MiB / 2GiB
+11:55:04 echo-app-1 136.71% 349.9MiB / 6GiB
+11:55:04 echo-cloudflared-1 0.24% 32.87MiB / 7.575GiB
+11:55:04 echo-proxy-1 4.23% 47.44MiB / 7.575GiB
+11:55:04 echo-postgres-1 7.36% 521.7MiB / 7.575GiB
+11:55:14 load 2.87 3.04 2.56
+11:55:14 echo-app-read-1 162.51% 437.2MiB / 2GiB
+11:55:14 echo-app-1 5.28% 179MiB / 6GiB
+11:55:14 echo-cloudflared-1 0.35% 32.87MiB / 7.575GiB
+11:55:14 echo-proxy-1 8.25% 46.98MiB / 7.575GiB
+11:55:14 echo-postgres-1 14.87% 534.1MiB / 7.575GiB
+11:55:24 load 3.45 3.16 2.60
+11:55:24 echo-app-read-1 161.06% 437.1MiB / 2GiB
+11:55:24 echo-app-1 0.54% 179MiB / 6GiB
+11:55:24 echo-cloudflared-1 0.27% 32.87MiB / 7.575GiB
+11:55:24 echo-proxy-1 7.71% 46.98MiB / 7.575GiB
+11:55:24 echo-postgres-1 13.22% 534.1MiB / 7.575GiB
+11:55:35 load 3.21 3.12 2.60
+11:55:35 echo-app-read-1 173.02% 440.8MiB / 2GiB
+11:55:35 echo-app-1 0.80% 179MiB / 6GiB
+11:55:35 echo-cloudflared-1 0.27% 32.87MiB / 7.575GiB
+11:55:35 echo-proxy-1 8.09% 46.99MiB / 7.575GiB
+11:55:35 echo-postgres-1 13.72% 534.1MiB / 7.575GiB
+11:55:45 load 2.94 3.07 2.58
+11:55:45 echo-app-read-1 172.29% 440.8MiB / 2GiB
+11:55:45 echo-app-1 4.92% 179MiB / 6GiB
+11:55:45 echo-cloudflared-1 0.57% 32.87MiB / 7.575GiB
+11:55:45 echo-proxy-1 7.47% 47.29MiB / 7.575GiB
+11:55:45 echo-postgres-1 12.83% 534.1MiB / 7.575GiB
+11:55:55 load 2.80 3.03 2.58
+11:55:55 echo-app-read-1 174.78% 440.8MiB / 2GiB
+11:55:55 echo-app-1 0.48% 179MiB / 6GiB
+11:55:55 echo-cloudflared-1 0.39% 32.87MiB / 7.575GiB
+11:55:55 echo-proxy-1 8.24% 47.57MiB / 7.575GiB
+11:55:55 echo-postgres-1 13.86% 534.2MiB / 7.575GiB
+11:56:05 load 2.68 3.00 2.57
+11:56:05 echo-app-read-1 175.36% 440.8MiB / 2GiB
+11:56:05 echo-app-1 41.27% 179MiB / 6GiB
+11:56:05 echo-cloudflared-1 0.54% 32.9MiB / 7.575GiB
+11:56:05 echo-proxy-1 7.60% 47.76MiB / 7.575GiB
+11:56:05 echo-postgres-1 13.94% 534.1MiB / 7.575GiB
+11:56:15 load 2.96 3.05 2.59
+11:56:15 echo-app-read-1 50.22% 440.8MiB / 2GiB
+11:56:15 echo-app-1 105.62% 332.6MiB / 6GiB
+11:56:15 echo-cloudflared-1 0.24% 32.94MiB / 7.575GiB
+11:56:15 echo-proxy-1 0.00% 47.69MiB / 7.575GiB
+11:56:15 echo-postgres-1 0.13% 534.1MiB / 7.575GiB
+11:56:25 load 3.06 3.06 2.60
+11:56:25 echo-app-read-1 181.96% 440.8MiB / 2GiB
+11:56:25 echo-app-1 1.01% 179MiB / 6GiB
+11:56:25 echo-cloudflared-1 0.35% 32.95MiB / 7.575GiB
+11:56:25 echo-proxy-1 9.12% 48.11MiB / 7.575GiB
+11:56:25 echo-postgres-1 13.89% 534.2MiB / 7.575GiB
+11:56:35 load 3.06 3.06 2.61
+11:56:35 echo-app-read-1 162.90% 440.8MiB / 2GiB
+11:56:35 echo-app-1 39.60% 179MiB / 6GiB
+11:56:35 echo-cloudflared-1 0.44% 32.95MiB / 7.575GiB
+11:56:35 echo-proxy-1 7.55% 48.05MiB / 7.575GiB
+11:56:35 echo-postgres-1 14.44% 534.2MiB / 7.575GiB
+11:56:46 load 3.20 3.09 2.62
+11:56:46 echo-app-read-1 178.92% 440.8MiB / 2GiB
+11:56:46 echo-app-1 0.60% 179MiB / 6GiB
+11:56:46 echo-cloudflared-1 0.21% 32.96MiB / 7.575GiB
+11:56:46 echo-proxy-1 7.18% 48.92MiB / 7.575GiB
+11:56:46 echo-postgres-1 14.09% 534.2MiB / 7.575GiB
+11:56:56 load 3.62 3.19 2.66
+11:56:56 echo-app-read-1 176.93% 440.8MiB / 2GiB
+11:56:56 echo-app-1 0.59% 179MiB / 6GiB
+11:56:56 echo-cloudflared-1 0.22% 32.96MiB / 7.575GiB
+11:56:56 echo-proxy-1 9.30% 48.95MiB / 7.575GiB
+11:56:56 echo-postgres-1 14.44% 534.1MiB / 7.575GiB
+11:57:06 load 3.37 3.15 2.65
+11:57:06 echo-app-read-1 154.15% 441.1MiB / 2GiB
+11:57:06 echo-app-1 43.81% 179MiB / 6GiB
+11:57:06 echo-cloudflared-1 0.21% 32.96MiB / 7.575GiB
+11:57:06 echo-proxy-1 6.95% 51.41MiB / 7.575GiB
+11:57:06 echo-postgres-1 13.47% 534.2MiB / 7.575GiB
+11:57:16 load 3.47 3.17 2.66
+11:57:16 echo-app-read-1 178.29% 440.9MiB / 2GiB
+11:57:16 echo-app-1 0.56% 180.7MiB / 6GiB
+11:57:16 echo-cloudflared-1 0.17% 32.96MiB / 7.575GiB
+11:57:16 echo-proxy-1 7.54% 51.95MiB / 7.575GiB
+11:57:16 echo-postgres-1 12.41% 534MiB / 7.575GiB
+11:57:26 load 3.38 3.17 2.67
+11:57:26 echo-app-read-1 0.47% 440.8MiB / 2GiB
+11:57:26 echo-app-1 182.35% 390MiB / 6GiB
+11:57:26 echo-cloudflared-1 0.18% 32.96MiB / 7.575GiB
+11:57:26 echo-proxy-1 1.41% 48.17MiB / 7.575GiB
+11:57:26 echo-postgres-1 16.43% 534.1MiB / 7.575GiB
+11:57:36 load 3.39 3.18 2.68
+11:57:36 echo-app-read-1 0.36% 440.8MiB / 2GiB
+11:57:36 echo-app-1 124.26% 181.1MiB / 6GiB
+11:57:36 echo-cloudflared-1 0.32% 33.01MiB / 7.575GiB
+11:57:36 echo-proxy-1 1.47% 47.49MiB / 7.575GiB
+11:57:36 echo-postgres-1 17.84% 534.2MiB / 7.575GiB
+11:57:47 load 2.95 3.09 2.65
+11:57:47 echo-app-read-1 0.33% 440.8MiB / 2GiB
+11:57:47 echo-app-1 98.73% 181.4MiB / 6GiB
+11:57:47 echo-cloudflared-1 0.25% 33.02MiB / 7.575GiB
+11:57:47 echo-proxy-1 1.59% 47.48MiB / 7.575GiB
+11:57:47 echo-postgres-1 19.70% 534.5MiB / 7.575GiB
+11:57:57 load 2.72 3.04 2.64
+11:57:57 echo-app-read-1 0.35% 440.8MiB / 2GiB
+11:57:57 echo-app-1 99.60% 181.4MiB / 6GiB
+11:57:57 echo-cloudflared-1 0.22% 33.03MiB / 7.575GiB
+11:57:57 echo-proxy-1 1.40% 47.49MiB / 7.575GiB
+11:57:57 echo-postgres-1 19.97% 534.3MiB / 7.575GiB
+11:58:07 load 2.53 2.99 2.63
+11:58:07 echo-app-read-1 0.36% 440.8MiB / 2GiB
+11:58:07 echo-app-1 110.98% 181.4MiB / 6GiB
+11:58:07 echo-cloudflared-1 0.22% 33.03MiB / 7.575GiB
+11:58:07 echo-proxy-1 1.25% 47.51MiB / 7.575GiB
+11:58:07 echo-postgres-1 0.25% 534.2MiB / 7.575GiB
+11:58:17 load 2.30 2.92 2.61
+11:58:17 echo-app-read-1 0.35% 440.8MiB / 2GiB
+11:58:17 echo-app-1 100.52% 181.4MiB / 6GiB
+11:58:17 echo-cloudflared-1 0.20% 33.03MiB / 7.575GiB
+11:58:17 echo-proxy-1 1.39% 47.82MiB / 7.575GiB
+11:58:17 echo-postgres-1 17.60% 534.4MiB / 7.575GiB
+11:58:27 load 2.26 2.89 2.60
+11:58:27 echo-app-read-1 0.37% 440.8MiB / 2GiB
+11:58:27 echo-app-1 29.80% 181.5MiB / 6GiB
+11:58:27 echo-cloudflared-1 0.29% 32.75MiB / 7.575GiB
+11:58:27 echo-proxy-1 0.27% 47.56MiB / 7.575GiB
+11:58:27 echo-postgres-1 4.95% 534.3MiB / 7.575GiB
+11:58:37 load 2.22 2.86 2.60
+11:58:37 echo-app-read-1 0.37% 440.8MiB / 2GiB
+11:58:37 echo-app-1 225.94% 367.9MiB / 6GiB
+11:58:37 echo-cloudflared-1 0.22% 32.75MiB / 7.575GiB
+11:58:37 echo-proxy-1 1.21% 47.62MiB / 7.575GiB
+11:58:37 echo-postgres-1 18.48% 534.5MiB / 7.575GiB
+11:58:47 load 2.98 3.00 2.65
+11:58:47 echo-app-read-1 0.33% 440.8MiB / 2GiB
+11:58:47 echo-app-1 99.98% 181.6MiB / 6GiB
+11:58:47 echo-cloudflared-1 0.17% 32.75MiB / 7.575GiB
+11:58:47 echo-proxy-1 1.60% 47.72MiB / 7.575GiB
+11:58:47 echo-postgres-1 19.29% 534.3MiB / 7.575GiB
+11:58:57 load 2.52 2.90 2.62
+11:58:57 echo-app-read-1 0.34% 440.8MiB / 2GiB
+11:58:57 echo-app-1 98.85% 181.5MiB / 6GiB
+11:58:57 echo-cloudflared-1 0.30% 32.75MiB / 7.575GiB
+11:58:57 echo-proxy-1 1.61% 47.82MiB / 7.575GiB
+11:58:57 echo-postgres-1 19.83% 534.5MiB / 7.575GiB
+11:59:08 load 2.45 2.87 2.61
+11:59:08 echo-app-read-1 0.31% 440.8MiB / 2GiB
+11:59:08 echo-app-1 135.79% 181.7MiB / 6GiB
+11:59:08 echo-cloudflared-1 0.22% 32.75MiB / 7.575GiB
+11:59:08 echo-proxy-1 1.42% 48.49MiB / 7.575GiB
+11:59:08 echo-postgres-1 18.17% 534.5MiB / 7.575GiB
+11:59:18 load 2.46 2.86 2.61
+11:59:18 echo-app-read-1 0.31% 440.8MiB / 2GiB
+11:59:18 echo-app-1 91.08% 181.9MiB / 6GiB
+11:59:18 echo-cloudflared-1 0.29% 32.75MiB / 7.575GiB
+11:59:18 echo-proxy-1 1.45% 48.66MiB / 7.575GiB
+11:59:18 echo-postgres-1 17.50% 534.5MiB / 7.575GiB
+11:59:28 load 2.38 2.83 2.60
+11:59:28 echo-app-read-1 0.29% 440.7MiB / 2GiB
+11:59:28 echo-app-1 98.50% 182.1MiB / 6GiB
+11:59:28 echo-cloudflared-1 0.17% 32.75MiB / 7.575GiB
+11:59:28 echo-proxy-1 1.57% 48.64MiB / 7.575GiB
+11:59:28 echo-postgres-1 18.27% 534.7MiB / 7.575GiB
+11:59:38 load 2.09 2.75 2.58
+11:59:38 echo-app-read-1 0.34% 440.7MiB / 2GiB
+11:59:38 echo-app-1 133.47% 181.9MiB / 6GiB
+11:59:38 echo-cloudflared-1 0.30% 32.75MiB / 7.575GiB
+11:59:38 echo-proxy-1 1.70% 49.21MiB / 7.575GiB
+11:59:38 echo-postgres-1 7.81% 534.5MiB / 7.575GiB
+11:59:48 load 2.16 2.74 2.58
+11:59:48 echo-app-read-1 0.30% 440.7MiB / 2GiB
+11:59:48 echo-app-1 191.20% 351.4MiB / 6GiB
+11:59:48 echo-cloudflared-1 0.39% 32.75MiB / 7.575GiB
+11:59:48 echo-proxy-1 1.52% 49.96MiB / 7.575GiB
+11:59:48 echo-postgres-1 16.95% 534.4MiB / 7.575GiB
+11:59:58 load 2.27 2.75 2.58
+11:59:58 echo-app-read-1 0.34% 440.7MiB / 2GiB
+11:59:58 echo-app-1 100.08% 182.5MiB / 6GiB
+11:59:58 echo-cloudflared-1 0.31% 32.75MiB / 7.575GiB
+11:59:58 echo-proxy-1 1.44% 51.26MiB / 7.575GiB
+11:59:58 echo-postgres-1 18.20% 534.8MiB / 7.575GiB
+12:00:08 load 2.00 2.68 2.56
+12:00:08 echo-app-read-1 0.32% 440.7MiB / 2GiB
+12:00:08 echo-app-1 129.18% 182.7MiB / 6GiB
+12:00:08 echo-cloudflared-1 0.23% 32.78MiB / 7.575GiB
+12:00:08 echo-proxy-1 1.72% 48.41MiB / 7.575GiB
+12:00:08 echo-postgres-1 11.96% 534.6MiB / 7.575GiB
+12:00:18 load 2.24 2.70 2.57
+12:00:18 echo-app-read-1 0.32% 440.7MiB / 2GiB
+12:00:18 echo-app-1 86.46% 182.7MiB / 6GiB
+12:00:18 echo-cloudflared-1 0.62% 32.84MiB / 7.575GiB
+12:00:18 echo-proxy-1 2.23% 47.34MiB / 7.575GiB
+12:00:18 echo-postgres-1 14.93% 534.6MiB / 7.575GiB
+12:00:28 load 2.05 2.65 2.55
+12:00:28 echo-app-read-1 0.35% 440.7MiB / 2GiB
+12:00:28 echo-app-1 101.43% 182.8MiB / 6GiB
+12:00:28 echo-cloudflared-1 0.20% 32.87MiB / 7.575GiB
+12:00:28 echo-proxy-1 2.12% 47.33MiB / 7.575GiB
+12:00:28 echo-postgres-1 14.31% 534.6MiB / 7.575GiB
+12:00:39 load 1.89 2.59 2.54
+12:00:39 echo-app-read-1 0.32% 440.7MiB / 2GiB
+12:00:39 echo-app-1 134.73% 182.8MiB / 6GiB
+12:00:39 echo-cloudflared-1 0.20% 32.88MiB / 7.575GiB
+12:00:39 echo-proxy-1 2.02% 47.33MiB / 7.575GiB
+12:00:39 echo-postgres-1 12.44% 534.6MiB / 7.575GiB
+12:00:49 load 1.75 2.54 2.52
+12:00:49 echo-app-read-1 0.33% 440.7MiB / 2GiB
+12:00:49 echo-app-1 101.45% 182.8MiB / 6GiB
+12:00:49 echo-cloudflared-1 0.44% 32.88MiB / 7.575GiB
+12:00:49 echo-proxy-1 2.22% 47.1MiB / 7.575GiB
+12:00:49 echo-postgres-1 13.54% 534.6MiB / 7.575GiB
+12:00:59 load 1.64 2.49 2.50
+12:00:59 echo-app-read-1 0.37% 440.7MiB / 2GiB
+12:00:59 echo-app-1 141.92% 303.7MiB / 6GiB
+12:00:59 echo-cloudflared-1 0.25% 32.9MiB / 7.575GiB
+12:00:59 echo-proxy-1 1.98% 47.24MiB / 7.575GiB
+12:00:59 echo-postgres-1 13.59% 534.6MiB / 7.575GiB
+12:01:09 load 1.69 2.47 2.50
+12:01:09 echo-app-read-1 0.35% 440.7MiB / 2GiB
+12:01:09 echo-app-1 127.02% 195.8MiB / 6GiB
+12:01:09 echo-cloudflared-1 0.29% 32.93MiB / 7.575GiB
+12:01:09 echo-proxy-1 2.09% 47.41MiB / 7.575GiB
+12:01:09 echo-postgres-1 13.43% 534.6MiB / 7.575GiB
+12:01:19 load 2.21 2.56 2.53
+12:01:19 echo-app-read-1 1.90% 440.7MiB / 2GiB
+12:01:19 echo-app-1 99.37% 182.8MiB / 6GiB
+12:01:19 echo-cloudflared-1 0.22% 32.93MiB / 7.575GiB
+12:01:19 echo-proxy-1 2.10% 47.41MiB / 7.575GiB
+12:01:19 echo-postgres-1 13.92% 534.7MiB / 7.575GiB
+12:01:29 load 2.03 2.50 2.51
+12:01:29 echo-app-read-1 0.39% 440.7MiB / 2GiB
+12:01:29 echo-app-1 20.64% 182.8MiB / 6GiB
+12:01:29 echo-cloudflared-1 0.42% 32.93MiB / 7.575GiB
+12:01:29 echo-proxy-1 0.86% 47.43MiB / 7.575GiB
+12:01:29 echo-postgres-1 3.01% 534.6MiB / 7.575GiB
+12:01:39 load 1.87 2.45 2.49
+12:01:39 echo-app-read-1 0.30% 440.7MiB / 2GiB
+12:01:39 echo-app-1 119.26% 195.4MiB / 6GiB
+12:01:39 echo-cloudflared-1 0.17% 32.96MiB / 7.575GiB
+12:01:39 echo-proxy-1 2.24% 47.45MiB / 7.575GiB
+12:01:39 echo-postgres-1 14.75% 534.7MiB / 7.575GiB
+12:01:49 load 1.73 2.41 2.48
+12:01:49 echo-app-read-1 14.05% 440.7MiB / 2GiB
+12:01:49 echo-app-1 99.89% 184.5MiB / 6GiB
+12:01:49 echo-cloudflared-1 0.54% 33MiB / 7.575GiB
+12:01:49 echo-proxy-1 2.83% 47.84MiB / 7.575GiB
+12:01:49 echo-postgres-1 14.11% 534.7MiB / 7.575GiB
+12:02:00 load 1.55 2.34 2.45
+12:02:00 echo-app-read-1 0.37% 440.7MiB / 2GiB
+12:02:00 echo-app-1 101.29% 184.5MiB / 6GiB
+12:02:00 echo-cloudflared-1 0.20% 33.02MiB / 7.575GiB
+12:02:00 echo-proxy-1 2.16% 48.09MiB / 7.575GiB
+12:02:00 echo-postgres-1 15.36% 534.8MiB / 7.575GiB
+12:02:10 load 1.46 2.30 2.44
+12:02:10 echo-app-read-1 0.37% 440.7MiB / 2GiB
+12:02:10 echo-app-1 167.68% 278.8MiB / 6GiB
+12:02:10 echo-cloudflared-1 0.38% 33.08MiB / 7.575GiB
+12:02:10 echo-proxy-1 2.14% 48.32MiB / 7.575GiB
+12:02:10 echo-postgres-1 14.77% 534.6MiB / 7.575GiB
+12:02:20 load 2.07 2.40 2.47
+12:02:20 echo-app-read-1 21.35% 440.7MiB / 2GiB
+12:02:20 echo-app-1 157.78% 184.5MiB / 6GiB
+12:02:20 echo-cloudflared-1 1.70% 33.09MiB / 7.575GiB
+12:02:20 echo-proxy-1 2.31% 48.97MiB / 7.575GiB
+12:02:20 echo-postgres-1 14.13% 534.6MiB / 7.575GiB
+12:02:30 load 1.98 2.37 2.46
+12:02:30 echo-app-read-1 0.31% 440.7MiB / 2GiB
+12:02:30 echo-app-1 99.48% 184.5MiB / 6GiB
+12:02:30 echo-cloudflared-1 0.34% 33.09MiB / 7.575GiB
+12:02:30 echo-proxy-1 2.13% 50.68MiB / 7.575GiB
+12:02:30 echo-postgres-1 14.12% 534.7MiB / 7.575GiB
+12:02:40 load 1.91 2.34 2.45
+12:02:40 echo-app-read-1 78.60% 441.1MiB / 2GiB
+12:02:40 echo-app-1 10.17% 184.5MiB / 6GiB
+12:02:40 echo-cloudflared-1 0.20% 33.09MiB / 7.575GiB
+12:02:40 echo-proxy-1 2.52% 51.43MiB / 7.575GiB
+12:02:40 echo-postgres-1 12.68% 534.6MiB / 7.575GiB
+12:02:50 load 1.84 2.32 2.44
+12:02:50 echo-app-read-1 106.56% 441.6MiB / 2GiB
+12:02:50 echo-app-1 6.52% 184.4MiB / 6GiB
+12:02:50 echo-cloudflared-1 0.45% 33.1MiB / 7.575GiB
+12:02:50 echo-proxy-1 2.15% 47.44MiB / 7.575GiB
+12:02:50 echo-postgres-1 13.05% 534.6MiB / 7.575GiB
+12:03:00 load 1.71 2.27 2.42
+12:03:00 echo-app-read-1 56.24% 441.8MiB / 2GiB
+12:03:00 echo-app-1 2.61% 184.4MiB / 6GiB
+12:03:00 echo-cloudflared-1 0.23% 33.1MiB / 7.575GiB
+12:03:00 echo-proxy-1 0.86% 47.45MiB / 7.575GiB
+12:03:00 echo-postgres-1 0.29% 534.7MiB / 7.575GiB
+12:03:10 load 1.91 2.30 2.43
+12:03:10 echo-app-read-1 145.28% 450MiB / 2GiB
+12:03:10 echo-app-1 19.75% 190.2MiB / 6GiB
+12:03:10 echo-cloudflared-1 0.76% 33.1MiB / 7.575GiB
+12:03:10 echo-proxy-1 3.86% 47.61MiB / 7.575GiB
+12:03:10 echo-postgres-1 23.01% 534.8MiB / 7.575GiB
+12:03:20 load 2.15 2.34 2.44
+12:03:20 echo-app-read-1 145.30% 454.1MiB / 2GiB
+12:03:20 echo-app-1 2.75% 184.4MiB / 6GiB
+12:03:20 echo-cloudflared-1 0.22% 33.1MiB / 7.575GiB
+12:03:20 echo-proxy-1 1.07% 47.47MiB / 7.575GiB
+12:03:20 echo-postgres-1 8.87% 534.9MiB / 7.575GiB
+12:03:31 load 2.14 2.33 2.44
+12:03:31 echo-app-read-1 164.84% 451.3MiB / 2GiB
+12:03:31 echo-app-1 107.60% 384.2MiB / 6GiB
+12:03:31 echo-cloudflared-1 0.17% 33.1MiB / 7.575GiB
+12:03:31 echo-proxy-1 4.79% 47.82MiB / 7.575GiB
+12:03:31 echo-postgres-1 26.05% 535MiB / 7.575GiB
+12:03:41 load 2.43 2.38 2.45
+12:03:41 echo-app-read-1 184.99% 451.9MiB / 2GiB
+12:03:41 echo-app-1 21.00% 184.4MiB / 6GiB
+12:03:41 echo-cloudflared-1 0.30% 33.1MiB / 7.575GiB
+12:03:41 echo-proxy-1 6.06% 47.66MiB / 7.575GiB
+12:03:41 echo-postgres-1 30.58% 535.2MiB / 7.575GiB
+12:03:51 load 2.52 2.40 2.46
+12:03:51 echo-app-read-1 184.91% 454.2MiB / 2GiB
+12:03:51 echo-app-1 16.04% 184.9MiB / 6GiB
+12:03:51 echo-cloudflared-1 0.22% 33.1MiB / 7.575GiB
+12:03:51 echo-proxy-1 4.76% 48.23MiB / 7.575GiB
+12:03:51 echo-postgres-1 24.24% 535.4MiB / 7.575GiB
+12:04:01 load 2.37 2.37 2.45
+12:04:01 echo-app-read-1 181.17% 454.2MiB / 2GiB
+12:04:01 echo-app-1 15.82% 184.4MiB / 6GiB
+12:04:01 echo-cloudflared-1 0.51% 33.1MiB / 7.575GiB
+12:04:01 echo-proxy-1 5.23% 48.23MiB / 7.575GiB
+12:04:01 echo-postgres-1 29.19% 535.4MiB / 7.575GiB
+12:04:11 load 2.37 2.38 2.45
+12:04:11 echo-app-read-1 179.99% 454.3MiB / 2GiB
+12:04:11 echo-app-1 19.21% 186.7MiB / 6GiB
+12:04:11 echo-cloudflared-1 0.46% 33.11MiB / 7.575GiB
+12:04:11 echo-proxy-1 6.21% 48.29MiB / 7.575GiB
+12:04:11 echo-postgres-1 29.19% 534.8MiB / 7.575GiB
+12:04:21 load 2.62 2.43 2.47
+12:04:21 echo-app-read-1 194.70% 454.4MiB / 2GiB
+12:04:21 echo-app-1 10.71% 184.5MiB / 6GiB
+12:04:21 echo-cloudflared-1 0.35% 33.12MiB / 7.575GiB
+12:04:21 echo-proxy-1 3.78% 48.5MiB / 7.575GiB
+12:04:21 echo-postgres-1 28.95% 534.9MiB / 7.575GiB
+12:04:31 load 3.20 2.56 2.51
+12:04:31 echo-app-read-1 193.36% 454.7MiB / 2GiB
+12:04:31 echo-app-1 37.81% 185.7MiB / 6GiB
+12:04:31 echo-cloudflared-1 0.23% 33.12MiB / 7.575GiB
+12:04:31 echo-proxy-1 6.38% 48.59MiB / 7.575GiB
+12:04:31 echo-postgres-1 23.72% 529.4MiB / 7.575GiB
+12:04:42 load 3.27 2.59 2.52
+12:04:42 echo-app-read-1 166.25% 454.5MiB / 2GiB
+12:04:42 echo-app-1 112.18% 342.2MiB / 6GiB
+12:04:42 echo-cloudflared-1 0.40% 33.16MiB / 7.575GiB
+12:04:42 echo-proxy-1 5.40% 49.86MiB / 7.575GiB
+12:04:42 echo-postgres-1 26.88% 531.3MiB / 7.575GiB
+12:04:52 load 3.14 2.59 2.52
+12:04:52 echo-app-read-1 191.73% 454.6MiB / 2GiB
+12:04:52 echo-app-1 0.48% 184.4MiB / 6GiB
+12:04:52 echo-cloudflared-1 0.23% 33.17MiB / 7.575GiB
+12:04:52 echo-proxy-1 1.59% 49.7MiB / 7.575GiB
+12:04:52 echo-postgres-1 29.39% 531.5MiB / 7.575GiB
+12:05:02 load 3.13 2.60 2.53
+12:05:02 echo-app-read-1 172.05% 454.9MiB / 2GiB
+12:05:02 echo-app-1 19.39% 186.1MiB / 6GiB
+12:05:02 echo-cloudflared-1 0.27% 33.19MiB / 7.575GiB
+12:05:02 echo-proxy-1 5.49% 52.82MiB / 7.575GiB
+12:05:02 echo-postgres-1 26.78% 526.6MiB / 7.575GiB
+12:05:12 load 3.44 2.68 2.55
+12:05:12 echo-app-read-1 165.96% 454.9MiB / 2GiB
+12:05:12 echo-app-1 26.23% 184.5MiB / 6GiB
+12:05:12 echo-cloudflared-1 0.17% 33.21MiB / 7.575GiB
+12:05:12 echo-proxy-1 4.74% 52.92MiB / 7.575GiB
+12:05:12 echo-postgres-1 26.13% 528.3MiB / 7.575GiB
+12:05:22 load 3.52 2.73 2.57
+12:05:22 echo-app-read-1 81.04% 454.9MiB / 2GiB
+12:05:22 echo-app-1 6.98% 184.4MiB / 6GiB
+12:05:22 echo-cloudflared-1 0.19% 33.23MiB / 7.575GiB
+12:05:22 echo-proxy-1 2.73% 52.66MiB / 7.575GiB
+12:05:22 echo-postgres-1 13.18% 528.4MiB / 7.575GiB
+12:05:32 load 3.06 2.65 2.55
+12:05:32 echo-app-read-1 79.80% 455.4MiB / 2GiB
+12:05:32 echo-app-1 5.97% 184.4MiB / 6GiB
+12:05:32 echo-cloudflared-1 0.18% 33.28MiB / 7.575GiB
+12:05:32 echo-proxy-1 2.44% 48.84MiB / 7.575GiB
+12:05:32 echo-postgres-1 12.59% 530.2MiB / 7.575GiB
+12:05:42 load 2.74 2.60 2.53
+12:05:42 echo-app-read-1 148.74% 455.1MiB / 2GiB
+12:05:42 echo-app-1 15.29% 184.5MiB / 6GiB
+12:05:42 echo-cloudflared-1 0.34% 33.33MiB / 7.575GiB
+12:05:42 echo-proxy-1 5.01% 48.84MiB / 7.575GiB
+12:05:42 echo-postgres-1 3.08% 530.2MiB / 7.575GiB
+12:05:53 load 3.11 2.68 2.56
+12:05:53 echo-app-read-1 172.72% 455.3MiB / 2GiB
+12:05:53 echo-app-1 105.59% 360.8MiB / 6GiB
+12:05:53 echo-cloudflared-1 0.30% 33.42MiB / 7.575GiB
+12:05:53 echo-proxy-1 4.27% 48.89MiB / 7.575GiB
+12:05:53 echo-postgres-1 20.31% 531.5MiB / 7.575GiB
+12:06:03 load 3.17 2.71 2.57
+12:06:03 echo-app-read-1 0.41% 455.4MiB / 2GiB
+12:06:03 echo-app-1 0.54% 184.5MiB / 6GiB
+12:06:03 echo-cloudflared-1 0.59% 33.47MiB / 7.575GiB
+12:06:03 echo-proxy-1 0.00% 48.88MiB / 7.575GiB
+12:06:03 echo-postgres-1 0.43% 531.6MiB / 7.575GiB
+12:06:13 load 3.21 2.74 2.58
+12:06:13 echo-app-read-1 181.24% 455.5MiB / 2GiB
+12:06:13 echo-app-1 13.26% 184.6MiB / 6GiB
+12:06:13 echo-cloudflared-1 0.19% 33.49MiB / 7.575GiB
+12:06:13 echo-proxy-1 4.90% 48.91MiB / 7.575GiB
+12:06:13 echo-postgres-1 24.63% 532MiB / 7.575GiB
+12:06:23 load 3.25 2.76 2.59
+12:06:23 echo-app-read-1 194.00% 468.9MiB / 2GiB
+12:06:23 echo-app-1 13.46% 184.5MiB / 6GiB
+12:06:23 echo-cloudflared-1 0.19% 33.58MiB / 7.575GiB
+12:06:23 echo-proxy-1 4.68% 48.9MiB / 7.575GiB
+12:06:23 echo-postgres-1 24.34% 532.9MiB / 7.575GiB
+12:06:33 load 2.99 2.72 2.58
+12:06:33 echo-app-read-1 173.72% 455.6MiB / 2GiB
+12:06:33 echo-app-1 14.25% 185MiB / 6GiB
+12:06:33 echo-cloudflared-1 0.38% 33.61MiB / 7.575GiB
+12:06:33 echo-proxy-1 5.29% 48.96MiB / 7.575GiB
+12:06:33 echo-postgres-1 25.04% 532.9MiB / 7.575GiB
+12:06:43 load 3.35 2.81 2.61
+12:06:43 echo-app-read-1 180.14% 455.9MiB / 2GiB
+12:06:43 echo-app-1 11.25% 184.7MiB / 6GiB
+12:06:43 echo-cloudflared-1 0.39% 33.62MiB / 7.575GiB
+12:06:43 echo-proxy-1 4.76% 49.19MiB / 7.575GiB
+12:06:43 echo-postgres-1 26.14% 533MiB / 7.575GiB
+12:06:53 load 3.89 2.95 2.66
+12:06:53 echo-app-read-1 179.76% 455.4MiB / 2GiB
+12:06:53 echo-app-1 18.03% 185.3MiB / 6GiB
+12:06:53 echo-cloudflared-1 0.29% 33.62MiB / 7.575GiB
+12:06:53 echo-proxy-1 5.48% 49.44MiB / 7.575GiB
+12:06:53 echo-postgres-1 25.75% 531.3MiB / 7.575GiB
+12:07:04 load 4.21 3.05 2.69
+12:07:04 echo-app-read-1 166.75% 455.5MiB / 2GiB
+12:07:04 echo-app-1 110.36% 341.7MiB / 6GiB
+12:07:04 echo-cloudflared-1 0.55% 33.62MiB / 7.575GiB
+12:07:04 echo-proxy-1 5.25% 49.13MiB / 7.575GiB
+12:07:04 echo-postgres-1 22.09% 531.9MiB / 7.575GiB
+12:07:14 load 4.24 3.10 2.71
+12:07:14 echo-app-read-1 165.19% 455.8MiB / 2GiB
+12:07:14 echo-app-1 11.77% 185.4MiB / 6GiB
+12:07:14 echo-cloudflared-1 0.22% 33.62MiB / 7.575GiB
+12:07:14 echo-proxy-1 4.75% 46.79MiB / 7.575GiB
+12:07:14 echo-postgres-1 19.58% 534.5MiB / 7.575GiB
+12:07:24 load 4.34 3.16 2.74
+12:07:24 echo-app-read-1 181.41% 455.5MiB / 2GiB
+12:07:24 echo-app-1 7.01% 184.4MiB / 6GiB
+12:07:24 echo-cloudflared-1 0.20% 33.62MiB / 7.575GiB
+12:07:24 echo-proxy-1 4.11% 46.76MiB / 7.575GiB
+12:07:24 echo-postgres-1 22.80% 536.9MiB / 7.575GiB
+12:07:34 load 4.13 3.15 2.74
+12:07:34 echo-app-read-1 73.67% 455.4MiB / 2GiB
+12:07:34 echo-app-1 0.56% 184.4MiB / 6GiB
+12:07:34 echo-cloudflared-1 0.88% 33.62MiB / 7.575GiB
+12:07:34 echo-proxy-1 1.16% 46.67MiB / 7.575GiB
+12:07:34 echo-postgres-1 14.85% 538.2MiB / 7.575GiB
+12:07:44 load 3.73 3.10 2.73
+12:07:44 echo-app-read-1 181.59% 455.6MiB / 2GiB
+12:07:44 echo-app-1 0.49% 186MiB / 6GiB
+12:07:44 echo-cloudflared-1 0.22% 33.62MiB / 7.575GiB
+12:07:44 echo-proxy-1 9.62% 47MiB / 7.575GiB
+12:07:44 echo-postgres-1 22.48% 532.8MiB / 7.575GiB
+12:07:54 load 3.70 3.11 2.74
+12:07:54 echo-app-read-1 184.73% 465.2MiB / 2GiB
+12:07:54 echo-app-1 16.53% 184.5MiB / 6GiB
+12:07:54 echo-cloudflared-1 0.24% 33.62MiB / 7.575GiB
+12:07:54 echo-proxy-1 4.76% 46.99MiB / 7.575GiB
+12:07:54 echo-postgres-1 27.78% 535.5MiB / 7.575GiB
+12:08:05 load 3.59 3.11 2.74
+--- proxy loopback done, writer start 12:08:05
+12:08:05 echo-app-read-1 0.95% 455.5MiB / 2GiB
+12:08:05 echo-app-1 0.69% 184.4MiB / 6GiB
+12:08:05 echo-cloudflared-1 0.24% 33.62MiB / 7.575GiB
+12:08:05 echo-proxy-1 0.02% 46.72MiB / 7.575GiB
+12:08:05 echo-postgres-1 2.25% 536.7MiB / 7.575GiB
+12:08:15 load 3.11 3.02 2.71
+12:08:15 echo-app-read-1 0.36% 455.5MiB / 2GiB
+12:08:15 echo-app-1 100.22% 187.3MiB / 6GiB
+12:08:15 echo-cloudflared-1 0.26% 33.62MiB / 7.575GiB
+12:08:15 echo-proxy-1 0.00% 46.72MiB / 7.575GiB
+12:08:15 echo-postgres-1 0.42% 537.5MiB / 7.575GiB
+12:08:25 load 2.71 2.94 2.69
+12:08:25 echo-app-read-1 0.31% 455.5MiB / 2GiB
+12:08:25 echo-app-1 82.38% 184.8MiB / 6GiB
+12:08:25 echo-cloudflared-1 0.25% 32.71MiB / 7.575GiB
+12:08:25 echo-proxy-1 0.00% 46.72MiB / 7.575GiB
+12:08:25 echo-postgres-1 12.26% 541.4MiB / 7.575GiB
+12:08:35 load 2.45 2.87 2.67
+12:08:35 echo-app-read-1 0.35% 455.8MiB / 2GiB
+12:08:35 echo-app-1 84.31% 184.7MiB / 6GiB
+12:08:35 echo-cloudflared-1 0.29% 32.71MiB / 7.575GiB
+12:08:35 echo-proxy-1 0.02% 46.72MiB / 7.575GiB
+12:08:35 echo-postgres-1 13.84% 545.9MiB / 7.575GiB
+12:08:45 load 2.30 2.83 2.66
+12:08:45 echo-app-read-1 0.42% 455.5MiB / 2GiB
+12:08:45 echo-app-1 1.90% 184.8MiB / 6GiB
+12:08:45 echo-cloudflared-1 0.27% 32.71MiB / 7.575GiB
+12:08:45 echo-proxy-1 0.00% 46.72MiB / 7.575GiB
+12:08:45 echo-postgres-1 3.17% 546.5MiB / 7.575GiB
+12:08:55 load 2.10 2.77 2.64
+12:08:55 echo-app-read-1 0.33% 455.5MiB / 2GiB
+12:08:55 echo-app-1 99.44% 184.8MiB / 6GiB
+12:08:55 echo-cloudflared-1 0.19% 32.71MiB / 7.575GiB
+12:08:55 echo-proxy-1 0.00% 46.72MiB / 7.575GiB
+12:08:55 echo-postgres-1 17.99% 546.6MiB / 7.575GiB
+12:09:05 load 2.01 2.73 2.63
+12:09:05 echo-app-read-1 0.33% 455.5MiB / 2GiB
+12:09:05 echo-app-1 97.47% 184.9MiB / 6GiB
+12:09:05 echo-cloudflared-1 0.46% 32.71MiB / 7.575GiB
+12:09:05 echo-proxy-1 0.09% 46.71MiB / 7.575GiB
+12:09:05 echo-postgres-1 15.50% 546.9MiB / 7.575GiB
+12:09:15 load 1.93 2.68 2.61
+12:09:15 echo-app-read-1 0.30% 455.5MiB / 2GiB
+12:09:15 echo-app-1 96.92% 184.9MiB / 6GiB
+12:09:15 echo-cloudflared-1 0.20% 32.71MiB / 7.575GiB
+12:09:15 echo-proxy-1 0.00% 46.71MiB / 7.575GiB
+12:09:15 echo-postgres-1 22.27% 550.4MiB / 7.575GiB
+12:09:25 load 1.95 2.66 2.61
+12:09:25 echo-app-read-1 0.31% 455.5MiB / 2GiB
+12:09:25 echo-app-1 191.15% 373.6MiB / 6GiB
+12:09:25 echo-cloudflared-1 0.50% 32.71MiB / 7.575GiB
+12:09:25 echo-proxy-1 0.19% 46.71MiB / 7.575GiB
+12:09:25 echo-postgres-1 16.06% 547.6MiB / 7.575GiB
+12:09:35 load 2.04 2.66 2.61
+12:09:35 echo-app-read-1 0.32% 455.5MiB / 2GiB
+12:09:35 echo-app-1 99.29% 184.9MiB / 6GiB
+12:09:35 echo-cloudflared-1 0.18% 32.71MiB / 7.575GiB
+12:09:35 echo-proxy-1 0.00% 46.71MiB / 7.575GiB
+12:09:35 echo-postgres-1 16.31% 548.1MiB / 7.575GiB
+12:09:46 load 2.04 2.64 2.60
+12:09:46 echo-app-read-1 0.35% 455.5MiB / 2GiB
+12:09:46 echo-app-1 97.26% 184.9MiB / 6GiB
+12:09:46 echo-cloudflared-1 0.28% 32.71MiB / 7.575GiB
+12:09:46 echo-proxy-1 0.07% 46.61MiB / 7.575GiB
+12:09:46 echo-postgres-1 15.66% 548.3MiB / 7.575GiB
+12:09:56 load 1.87 2.58 2.58
+12:09:56 echo-app-read-1 0.32% 455.5MiB / 2GiB
+12:09:56 echo-app-1 98.56% 184.9MiB / 6GiB
+12:09:56 echo-cloudflared-1 0.22% 32.71MiB / 7.575GiB
+12:09:56 echo-proxy-1 0.04% 46.6MiB / 7.575GiB
+12:09:56 echo-postgres-1 15.85% 548.1MiB / 7.575GiB
+12:10:06 load 1.90 2.56 2.58
+12:10:06 echo-app-read-1 0.36% 455.4MiB / 2GiB
+12:10:06 echo-app-1 98.25% 185MiB / 6GiB
+12:10:06 echo-cloudflared-1 0.22% 32.71MiB / 7.575GiB
+12:10:06 echo-proxy-1 0.10% 46.48MiB / 7.575GiB
+12:10:06 echo-postgres-1 16.63% 548.1MiB / 7.575GiB
+12:10:16 load 1.76 2.51 2.56
+12:10:16 echo-app-read-1 0.57% 455.4MiB / 2GiB
+12:10:16 echo-app-1 19.97% 185.1MiB / 6GiB
+12:10:16 echo-cloudflared-1 0.21% 32.71MiB / 7.575GiB
+12:10:16 echo-proxy-1 0.00% 46.48MiB / 7.575GiB
+12:10:16 echo-postgres-1 17.44% 548.3MiB / 7.575GiB
+12:10:26 load 1.64 2.46 2.54
+12:10:26 echo-app-read-1 0.30% 455.4MiB / 2GiB
+12:10:26 echo-app-1 95.86% 185.4MiB / 6GiB
+12:10:26 echo-cloudflared-1 0.18% 32.72MiB / 7.575GiB
+12:10:26 echo-proxy-1 0.00% 46.49MiB / 7.575GiB
+12:10:26 echo-postgres-1 21.91% 548.6MiB / 7.575GiB
+12:10:36 load 1.62 2.43 2.53
+12:10:36 echo-app-read-1 0.31% 455.4MiB / 2GiB
+12:10:36 echo-app-1 186.87% 351.3MiB / 6GiB
+12:10:36 echo-cloudflared-1 0.20% 32.72MiB / 7.575GiB
+12:10:36 echo-proxy-1 0.00% 46.49MiB / 7.575GiB
+12:10:36 echo-postgres-1 15.70% 548.6MiB / 7.575GiB
+12:10:46 load 1.91 2.46 2.54
+12:10:46 echo-app-read-1 0.31% 455.4MiB / 2GiB
+12:10:46 echo-app-1 97.43% 185.3MiB / 6GiB
+12:10:46 echo-cloudflared-1 0.19% 32.72MiB / 7.575GiB
+12:10:46 echo-proxy-1 0.00% 46.48MiB / 7.575GiB
+12:10:46 echo-postgres-1 15.68% 549.2MiB / 7.575GiB
+12:10:56 load 1.77 2.42 2.52
+12:10:56 echo-app-read-1 0.30% 454.5MiB / 2GiB
+12:10:56 echo-app-1 98.58% 185.5MiB / 6GiB
+12:10:56 echo-cloudflared-1 0.28% 32.72MiB / 7.575GiB
+12:10:56 echo-proxy-1 0.05% 46.48MiB / 7.575GiB
+12:10:56 echo-postgres-1 19.78% 549.2MiB / 7.575GiB
+12:11:06 load 1.73 2.38 2.51
+12:11:06 echo-app-read-1 0.32% 452.5MiB / 2GiB
+12:11:06 echo-app-1 82.56% 185.8MiB / 6GiB
+12:11:06 echo-cloudflared-1 0.24% 32.72MiB / 7.575GiB
+12:11:06 echo-proxy-1 0.00% 46.47MiB / 7.575GiB
+12:11:06 echo-postgres-1 16.03% 549.8MiB / 7.575GiB
+12:11:17 load 1.61 2.34 2.50
+12:11:17 echo-app-read-1 0.66% 452.5MiB / 2GiB
+12:11:17 echo-app-1 83.29% 185.8MiB / 6GiB
+12:11:17 echo-cloudflared-1 0.18% 32.72MiB / 7.575GiB
+12:11:17 echo-proxy-1 0.00% 46.47MiB / 7.575GiB
+12:11:17 echo-postgres-1 16.40% 549.9MiB / 7.575GiB
+12:11:27 load 1.52 2.29 2.48
+12:11:27 echo-app-read-1 0.33% 452.5MiB / 2GiB
+12:11:27 echo-app-1 95.25% 186.2MiB / 6GiB
+12:11:27 echo-cloudflared-1 0.21% 32.72MiB / 7.575GiB
+12:11:27 echo-proxy-1 0.00% 46.47MiB / 7.575GiB
+12:11:27 echo-postgres-1 15.71% 550MiB / 7.575GiB
+12:11:37 load 1.52 2.27 2.47
+12:11:37 echo-app-read-1 0.31% 452.5MiB / 2GiB
+12:11:37 echo-app-1 97.95% 186.6MiB / 6GiB
+12:11:37 echo-cloudflared-1 0.24% 32.72MiB / 7.575GiB
+12:11:37 echo-proxy-1 0.00% 46.47MiB / 7.575GiB
+12:11:37 echo-postgres-1 18.06% 550.1MiB / 7.575GiB
+12:11:47 load 1.51 2.24 2.46
+12:11:47 echo-app-read-1 0.59% 452.1MiB / 2GiB
+12:11:47 echo-app-1 58.75% 246.7MiB / 6GiB
+12:11:47 echo-cloudflared-1 0.16% 32.72MiB / 7.575GiB
+12:11:47 echo-proxy-1 0.00% 46.47MiB / 7.575GiB
+12:11:47 echo-postgres-1 0.95% 550.1MiB / 7.575GiB
+12:11:57 load 1.51 2.22 2.45
+12:11:57 echo-app-read-1 0.33% 452.1MiB / 2GiB
+12:11:57 echo-app-1 102.65% 187.6MiB / 6GiB
+12:11:57 echo-cloudflared-1 0.22% 32.71MiB / 7.575GiB
+12:11:57 echo-proxy-1 0.00% 46.47MiB / 7.575GiB
+12:11:57 echo-postgres-1 18.35% 553.1MiB / 7.575GiB
+12:12:07 load 1.52 2.19 2.44
+12:12:07 echo-app-read-1 0.33% 452.1MiB / 2GiB
+12:12:07 echo-app-1 102.40% 187.8MiB / 6GiB
+12:12:07 echo-cloudflared-1 0.43% 32.71MiB / 7.575GiB
+12:12:07 echo-proxy-1 0.12% 46.47MiB / 7.575GiB
+12:12:07 echo-postgres-1 23.22% 554.3MiB / 7.575GiB
+12:12:17 load 1.76 2.22 2.44
+12:12:17 echo-app-read-1 0.31% 450.4MiB / 2GiB
+12:12:17 echo-app-1 104.15% 190.6MiB / 6GiB
+12:12:17 echo-cloudflared-1 0.32% 32.71MiB / 7.575GiB
+12:12:17 echo-proxy-1 0.07% 46.47MiB / 7.575GiB
+12:12:17 echo-postgres-1 19.85% 567.4MiB / 7.575GiB
+12:12:27 load 1.95 2.25 2.45
+12:12:27 echo-app-read-1 0.27% 450.6MiB / 2GiB
+12:12:27 echo-app-1 102.74% 193.2MiB / 6GiB
+12:12:27 echo-cloudflared-1 0.26% 32.71MiB / 7.575GiB
+12:12:27 echo-proxy-1 0.06% 46.46MiB / 7.575GiB
+12:12:27 echo-postgres-1 22.95% 565.6MiB / 7.575GiB
+12:12:38 load 1.73 2.19 2.43
+12:12:38 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:12:38 echo-app-1 105.31% 195.3MiB / 6GiB
+12:12:38 echo-cloudflared-1 0.40% 32.71MiB / 7.575GiB
+12:12:38 echo-proxy-1 0.08% 46.46MiB / 7.575GiB
+12:12:38 echo-postgres-1 21.52% 575.9MiB / 7.575GiB
+12:12:48 load 1.77 2.18 2.42
+12:12:48 echo-app-read-1 0.29% 450.6MiB / 2GiB
+12:12:48 echo-app-1 104.51% 195.7MiB / 6GiB
+12:12:48 echo-cloudflared-1 0.19% 32.71MiB / 7.575GiB
+12:12:48 echo-proxy-1 0.00% 46.46MiB / 7.575GiB
+12:12:48 echo-postgres-1 18.40% 581.7MiB / 7.575GiB
+12:12:58 load 1.72 2.16 2.41
+12:12:58 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:12:58 echo-app-1 103.43% 199.9MiB / 6GiB
+12:12:58 echo-cloudflared-1 0.38% 32.71MiB / 7.575GiB
+12:12:58 echo-proxy-1 0.12% 46.46MiB / 7.575GiB
+12:12:58 echo-postgres-1 19.46% 577.7MiB / 7.575GiB
+12:13:08 load 1.77 2.15 2.41
+12:13:08 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:13:08 echo-app-1 188.48% 410.8MiB / 6GiB
+12:13:08 echo-cloudflared-1 0.30% 32.71MiB / 7.575GiB
+12:13:08 echo-proxy-1 0.00% 46.46MiB / 7.575GiB
+12:13:08 echo-postgres-1 16.33% 600.7MiB / 7.575GiB
+12:13:18 load 2.01 2.19 2.42
+12:13:18 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:13:18 echo-app-1 109.73% 201.8MiB / 6GiB
+12:13:18 echo-cloudflared-1 0.33% 32.71MiB / 7.575GiB
+12:13:18 echo-proxy-1 0.15% 46.46MiB / 7.575GiB
+12:13:18 echo-postgres-1 1.08% 561.9MiB / 7.575GiB
+12:13:28 load 2.17 2.22 2.43
+12:13:28 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:13:28 echo-app-1 105.77% 203.5MiB / 6GiB
+12:13:28 echo-cloudflared-1 0.22% 32.72MiB / 7.575GiB
+12:13:28 echo-proxy-1 0.03% 46.48MiB / 7.575GiB
+12:13:28 echo-postgres-1 15.96% 599.3MiB / 7.575GiB
+12:13:37 load 2.08 2.20 2.42
+12:13:37 echo-app-read-1 0.28% 450.6MiB / 2GiB
+12:13:37 echo-app-1 106.72% 206.8MiB / 6GiB
+12:13:37 echo-cloudflared-1 0.53% 32.72MiB / 7.575GiB
+12:13:37 echo-proxy-1 0.13% 46.51MiB / 7.575GiB
+12:13:37 echo-postgres-1 18.75% 601.7MiB / 7.575GiB
+12:13:47 load 1.99 2.18 2.41
+12:13:47 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:13:47 echo-app-1 93.13% 207.2MiB / 6GiB
+12:13:47 echo-cloudflared-1 0.44% 32.72MiB / 7.575GiB
+12:13:47 echo-proxy-1 0.09% 46.68MiB / 7.575GiB
+12:13:47 echo-postgres-1 15.29% 562.2MiB / 7.575GiB
+12:13:57 load 1.99 2.17 2.40
+12:13:57 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:13:57 echo-app-1 92.47% 205.1MiB / 6GiB
+12:13:57 echo-cloudflared-1 0.37% 32.72MiB / 7.575GiB
+12:13:57 echo-proxy-1 0.08% 46.78MiB / 7.575GiB
+12:13:57 echo-postgres-1 9.74% 562.6MiB / 7.575GiB
+12:14:08 load 1.76 2.11 2.38
+12:14:08 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:14:08 echo-app-1 99.44% 205.4MiB / 6GiB
+12:14:08 echo-cloudflared-1 0.22% 32.72MiB / 7.575GiB
+12:14:08 echo-proxy-1 0.00% 46.79MiB / 7.575GiB
+12:14:08 echo-postgres-1 11.11% 562.9MiB / 7.575GiB
+12:14:18 load 1.65 2.08 2.37
+12:14:18 echo-app-read-1 0.27% 450.6MiB / 2GiB
+12:14:18 echo-app-1 192.61% 401.7MiB / 6GiB
+12:14:18 echo-cloudflared-1 0.28% 32.75MiB / 7.575GiB
+12:14:18 echo-proxy-1 0.16% 46.84MiB / 7.575GiB
+12:14:18 echo-postgres-1 12.56% 563.1MiB / 7.575GiB
+12:14:28 load 1.62 2.06 2.36
+12:14:28 echo-app-read-1 0.29% 450.6MiB / 2GiB
+12:14:28 echo-app-1 99.34% 205.1MiB / 6GiB
+12:14:28 echo-cloudflared-1 0.21% 32.83MiB / 7.575GiB
+12:14:28 echo-proxy-1 0.00% 46.85MiB / 7.575GiB
+12:14:28 echo-postgres-1 9.45% 563.1MiB / 7.575GiB
+12:14:38 load 1.84 2.09 2.36
+12:14:38 echo-app-read-1 0.49% 450.6MiB / 2GiB
+12:14:38 echo-app-1 99.89% 206MiB / 6GiB
+12:14:38 echo-cloudflared-1 0.33% 32.83MiB / 7.575GiB
+12:14:38 echo-proxy-1 0.08% 46.88MiB / 7.575GiB
+12:14:38 echo-postgres-1 9.89% 563.4MiB / 7.575GiB
+12:14:48 load 1.78 2.07 2.35
+12:14:48 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:14:48 echo-app-1 98.97% 205.8MiB / 6GiB
+12:14:48 echo-cloudflared-1 0.27% 32.83MiB / 7.575GiB
+12:14:48 echo-proxy-1 0.05% 46.89MiB / 7.575GiB
+12:14:48 echo-postgres-1 12.28% 563.6MiB / 7.575GiB
+12:14:58 load 2.03 2.11 2.36
+12:14:58 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:14:58 echo-app-1 98.97% 205.7MiB / 6GiB
+12:14:58 echo-cloudflared-1 0.16% 32.83MiB / 7.575GiB
+12:14:58 echo-proxy-1 0.04% 46.91MiB / 7.575GiB
+12:14:58 echo-postgres-1 9.65% 563.6MiB / 7.575GiB
+12:15:08 load 2.09 2.13 2.36
+12:15:08 echo-app-read-1 0.38% 450.6MiB / 2GiB
+12:15:08 echo-app-1 94.01% 205.8MiB / 6GiB
+12:15:08 echo-cloudflared-1 0.23% 32.83MiB / 7.575GiB
+12:15:08 echo-proxy-1 0.03% 46.98MiB / 7.575GiB
+12:15:08 echo-postgres-1 9.22% 563.6MiB / 7.575GiB
+12:15:18 load 2.30 2.17 2.38
+12:15:18 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:15:18 echo-app-1 96.26% 205.8MiB / 6GiB
+12:15:18 echo-cloudflared-1 0.34% 32.82MiB / 7.575GiB
+12:15:18 echo-proxy-1 0.02% 46.98MiB / 7.575GiB
+12:15:18 echo-postgres-1 9.79% 563.8MiB / 7.575GiB
+12:15:28 load 2.66 2.25 2.40
+12:15:28 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:15:28 echo-app-1 99.64% 384.4MiB / 6GiB
+12:15:28 echo-cloudflared-1 0.30% 32.82MiB / 7.575GiB
+12:15:28 echo-proxy-1 0.03% 46.99MiB / 7.575GiB
+12:15:28 echo-postgres-1 9.27% 563.9MiB / 7.575GiB
+12:15:39 load 2.47 2.22 2.39
+12:15:39 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:15:39 echo-app-1 98.72% 205.8MiB / 6GiB
+12:15:39 echo-cloudflared-1 0.32% 32.82MiB / 7.575GiB
+12:15:39 echo-proxy-1 0.04% 46.99MiB / 7.575GiB
+12:15:39 echo-postgres-1 10.26% 563.9MiB / 7.575GiB
+12:15:49 load 2.48 2.23 2.39
+12:15:49 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:15:49 echo-app-1 100.26% 205.8MiB / 6GiB
+12:15:49 echo-cloudflared-1 0.17% 32.82MiB / 7.575GiB
+12:15:49 echo-proxy-1 0.03% 46.99MiB / 7.575GiB
+12:15:49 echo-postgres-1 9.86% 564.2MiB / 7.575GiB
+12:15:59 load 2.18 2.18 2.37
+12:15:59 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:15:59 echo-app-1 98.75% 205.9MiB / 6GiB
+12:15:59 echo-cloudflared-1 0.24% 32.82MiB / 7.575GiB
+12:15:59 echo-proxy-1 0.01% 46.99MiB / 7.575GiB
+12:15:59 echo-postgres-1 9.81% 563.9MiB / 7.575GiB
+12:16:09 load 2.00 2.14 2.35
+12:16:09 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:16:09 echo-app-1 97.06% 205.9MiB / 6GiB
+12:16:09 echo-cloudflared-1 0.37% 32.84MiB / 7.575GiB
+12:16:09 echo-proxy-1 0.06% 47.25MiB / 7.575GiB
+12:16:09 echo-postgres-1 8.86% 563.9MiB / 7.575GiB
+12:16:19 load 1.84 2.10 2.34
+12:16:19 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:16:19 echo-app-1 87.40% 213MiB / 6GiB
+12:16:19 echo-cloudflared-1 0.26% 32.84MiB / 7.575GiB
+12:16:19 echo-proxy-1 0.00% 47MiB / 7.575GiB
+12:16:19 echo-postgres-1 11.14% 565.6MiB / 7.575GiB
+12:16:29 load 1.71 2.06 2.33
+12:16:29 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:16:29 echo-app-1 89.68% 213MiB / 6GiB
+12:16:29 echo-cloudflared-1 0.22% 32.88MiB / 7.575GiB
+12:16:29 echo-proxy-1 0.00% 47MiB / 7.575GiB
+12:16:29 echo-postgres-1 9.39% 567.7MiB / 7.575GiB
+12:16:39 load 1.53 2.01 2.31
+12:16:39 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:16:39 echo-app-1 209.76% 377.8MiB / 6GiB
+12:16:39 echo-cloudflared-1 0.29% 32.89MiB / 7.575GiB
+12:16:39 echo-proxy-1 0.05% 47MiB / 7.575GiB
+12:16:39 echo-postgres-1 16.04% 567.6MiB / 7.575GiB
+12:16:49 load 1.67 2.03 2.31
+12:16:49 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:16:49 echo-app-1 108.00% 227.5MiB / 6GiB
+12:16:49 echo-cloudflared-1 0.43% 32.89MiB / 7.575GiB
+12:16:49 echo-proxy-1 0.17% 47MiB / 7.575GiB
+12:16:49 echo-postgres-1 15.53% 568MiB / 7.575GiB
+12:17:00 load 1.57 1.99 2.29
+12:17:00 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:17:00 echo-app-1 106.52% 227.5MiB / 6GiB
+12:17:00 echo-cloudflared-1 0.20% 32.89MiB / 7.575GiB
+12:17:00 echo-proxy-1 0.00% 47MiB / 7.575GiB
+12:17:00 echo-postgres-1 3.49% 567.9MiB / 7.575GiB
+12:17:10 load 1.79 2.03 2.30
+12:17:10 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:17:10 echo-app-1 107.14% 227.6MiB / 6GiB
+12:17:10 echo-cloudflared-1 0.37% 32.91MiB / 7.575GiB
+12:17:10 echo-proxy-1 0.08% 47MiB / 7.575GiB
+12:17:10 echo-postgres-1 13.20% 568.4MiB / 7.575GiB
+12:17:20 load 1.83 2.03 2.30
+12:17:20 echo-app-read-1 0.38% 450.6MiB / 2GiB
+12:17:20 echo-app-1 0.56% 227.6MiB / 6GiB
+12:17:20 echo-cloudflared-1 0.27% 32.93MiB / 7.575GiB
+12:17:20 echo-proxy-1 0.00% 47MiB / 7.575GiB
+12:17:20 echo-postgres-1 11.40% 568.3MiB / 7.575GiB
+12:17:30 load 1.86 2.03 2.29
+12:17:30 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:17:30 echo-app-1 108.96% 227.7MiB / 6GiB
+12:17:30 echo-cloudflared-1 0.42% 32.95MiB / 7.575GiB
+12:17:30 echo-proxy-1 0.05% 47MiB / 7.575GiB
+12:17:30 echo-postgres-1 12.52% 568.6MiB / 7.575GiB
+12:17:40 load 2.03 2.06 2.30
+12:17:40 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:17:40 echo-app-1 107.45% 227.7MiB / 6GiB
+12:17:40 echo-cloudflared-1 0.20% 32.96MiB / 7.575GiB
+12:17:40 echo-proxy-1 0.00% 47MiB / 7.575GiB
+12:17:40 echo-postgres-1 12.90% 568.5MiB / 7.575GiB
+12:17:50 load 2.03 2.06 2.30
+12:17:50 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:17:50 echo-app-1 204.44% 418.4MiB / 6GiB
+12:17:50 echo-cloudflared-1 0.38% 32.96MiB / 7.575GiB
+12:17:50 echo-proxy-1 0.09% 47MiB / 7.575GiB
+12:17:50 echo-postgres-1 13.20% 568.6MiB / 7.575GiB
+12:18:00 load 2.02 2.05 2.29
+12:18:00 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:18:00 echo-app-1 106.18% 232.4MiB / 6GiB
+12:18:00 echo-cloudflared-1 0.19% 32.96MiB / 7.575GiB
+12:18:00 echo-proxy-1 0.00% 46.96MiB / 7.575GiB
+12:18:00 echo-postgres-1 13.03% 568.9MiB / 7.575GiB
+12:18:10 load 1.94 2.04 2.28
+12:18:10 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:18:10 echo-app-1 107.94% 232.5MiB / 6GiB
+12:18:10 echo-cloudflared-1 0.24% 32.96MiB / 7.575GiB
+12:18:10 echo-proxy-1 0.04% 46.95MiB / 7.575GiB
+12:18:10 echo-postgres-1 14.73% 568.7MiB / 7.575GiB
+12:18:20 load 1.86 2.02 2.28
+12:18:20 echo-app-read-1 0.36% 450.6MiB / 2GiB
+12:18:20 echo-app-1 109.45% 232.4MiB / 6GiB
+12:18:20 echo-cloudflared-1 0.20% 32.96MiB / 7.575GiB
+12:18:20 echo-proxy-1 0.00% 46.95MiB / 7.575GiB
+12:18:20 echo-postgres-1 13.70% 569MiB / 7.575GiB
+12:18:31 load 1.81 2.00 2.27
+12:18:31 echo-app-read-1 0.39% 450.6MiB / 2GiB
+12:18:31 echo-app-1 21.50% 232.6MiB / 6GiB
+12:18:31 echo-cloudflared-1 0.26% 32.75MiB / 7.575GiB
+12:18:31 echo-proxy-1 0.00% 46.95MiB / 7.575GiB
+12:18:31 echo-postgres-1 0.52% 568.9MiB / 7.575GiB
+12:18:41 load 1.76 1.98 2.26
+12:18:41 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:18:41 echo-app-1 109.18% 232.6MiB / 6GiB
+12:18:41 echo-cloudflared-1 0.19% 32.75MiB / 7.575GiB
+12:18:41 echo-proxy-1 0.02% 46.95MiB / 7.575GiB
+12:18:41 echo-postgres-1 13.38% 569.1MiB / 7.575GiB
+12:18:51 load 1.64 1.95 2.24
+12:18:51 echo-app-read-1 0.64% 450.8MiB / 2GiB
+12:18:51 echo-app-1 109.68% 232.5MiB / 6GiB
+12:18:51 echo-cloudflared-1 0.20% 32.75MiB / 7.575GiB
+12:18:51 echo-proxy-1 0.00% 46.95MiB / 7.575GiB
+12:18:51 echo-postgres-1 11.86% 569.4MiB / 7.575GiB
+12:19:01 load 1.70 1.95 2.24
+12:19:01 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:19:01 echo-app-1 186.28% 416.9MiB / 6GiB
+12:19:01 echo-cloudflared-1 0.21% 32.75MiB / 7.575GiB
+12:19:01 echo-proxy-1 0.00% 46.95MiB / 7.575GiB
+12:19:01 echo-postgres-1 10.54% 569.1MiB / 7.575GiB
+12:19:11 load 1.82 1.97 2.24
+12:19:11 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:19:11 echo-app-1 89.07% 237.3MiB / 6GiB
+12:19:11 echo-cloudflared-1 0.30% 32.75MiB / 7.575GiB
+12:19:11 echo-proxy-1 0.02% 46.95MiB / 7.575GiB
+12:19:11 echo-postgres-1 10.83% 584.8MiB / 7.575GiB
+12:19:21 load 1.69 1.94 2.23
+12:19:21 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:19:21 echo-app-1 98.03% 237.3MiB / 6GiB
+12:19:21 echo-cloudflared-1 0.35% 32.75MiB / 7.575GiB
+12:19:21 echo-proxy-1 0.08% 46.95MiB / 7.575GiB
+12:19:21 echo-postgres-1 11.32% 585MiB / 7.575GiB
+12:19:31 load 1.74 1.94 2.23
+12:19:31 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:19:31 echo-app-1 99.35% 237.3MiB / 6GiB
+12:19:31 echo-cloudflared-1 0.23% 32.75MiB / 7.575GiB
+12:19:31 echo-proxy-1 0.00% 46.96MiB / 7.575GiB
+12:19:31 echo-postgres-1 10.24% 584.9MiB / 7.575GiB
+12:19:41 load 1.62 1.91 2.21
+12:19:41 echo-app-read-1 0.36% 450.6MiB / 2GiB
+12:19:41 echo-app-1 99.69% 237.3MiB / 6GiB
+12:19:41 echo-cloudflared-1 0.43% 32.75MiB / 7.575GiB
+12:19:41 echo-proxy-1 0.10% 46.96MiB / 7.575GiB
+12:19:41 echo-postgres-1 11.96% 584.9MiB / 7.575GiB
+12:19:52 load 1.53 1.88 2.20
+12:19:52 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:19:52 echo-app-1 98.93% 237.3MiB / 6GiB
+12:19:52 echo-cloudflared-1 0.28% 32.75MiB / 7.575GiB
+12:19:52 echo-proxy-1 0.00% 46.96MiB / 7.575GiB
+12:19:52 echo-postgres-1 11.13% 585.1MiB / 7.575GiB
+12:20:02 load 1.45 1.85 2.19
+12:20:02 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:20:02 echo-app-1 71.19% 237.4MiB / 6GiB
+12:20:02 echo-cloudflared-1 0.46% 32.77MiB / 7.575GiB
+12:20:02 echo-proxy-1 0.16% 47.04MiB / 7.575GiB
+12:20:02 echo-postgres-1 0.43% 584.9MiB / 7.575GiB
+12:20:12 load 1.45 1.84 2.18
+12:20:12 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:20:12 echo-app-1 121.55% 237.5MiB / 6GiB
+12:20:12 echo-cloudflared-1 0.24% 32.79MiB / 7.575GiB
+12:20:12 echo-proxy-1 0.00% 47.07MiB / 7.575GiB
+12:20:12 echo-postgres-1 11.52% 585.4MiB / 7.575GiB
+12:20:22 load 1.46 1.83 2.17
+12:20:22 echo-app-read-1 0.29% 450.6MiB / 2GiB
+12:20:22 echo-app-1 99.72% 237.5MiB / 6GiB
+12:20:22 echo-cloudflared-1 0.78% 33.1MiB / 7.575GiB
+12:20:22 echo-proxy-1 0.26% 47.07MiB / 7.575GiB
+12:20:22 echo-postgres-1 10.19% 585.4MiB / 7.575GiB
+12:20:32 load 1.31 1.78 2.15
+12:20:32 echo-app-read-1 0.28% 450.6MiB / 2GiB
+12:20:32 echo-app-1 98.61% 237.5MiB / 6GiB
+12:20:32 echo-cloudflared-1 0.19% 32.89MiB / 7.575GiB
+12:20:32 echo-proxy-1 0.00% 47.09MiB / 7.575GiB
+12:20:32 echo-postgres-1 11.26% 585.4MiB / 7.575GiB
+12:20:42 load 1.42 1.79 2.15
+12:20:42 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:20:42 echo-app-1 99.02% 237.5MiB / 6GiB
+12:20:42 echo-cloudflared-1 0.20% 32.96MiB / 7.575GiB
+12:20:42 echo-proxy-1 0.00% 47.17MiB / 7.575GiB
+12:20:42 echo-postgres-1 12.40% 585.5MiB / 7.575GiB
+12:20:52 load 1.28 1.75 2.13
+12:20:52 echo-app-read-1 0.38% 450.6MiB / 2GiB
+12:20:52 echo-app-1 100.67% 237.6MiB / 6GiB
+12:20:52 echo-cloudflared-1 0.18% 32.96MiB / 7.575GiB
+12:20:52 echo-proxy-1 0.19% 47.18MiB / 7.575GiB
+12:20:52 echo-postgres-1 13.19% 585.6MiB / 7.575GiB
+12:21:02 load 1.24 1.72 2.12
+12:21:02 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:21:02 echo-app-1 100.93% 237.6MiB / 6GiB
+12:21:02 echo-cloudflared-1 0.29% 33.04MiB / 7.575GiB
+12:21:02 echo-proxy-1 0.08% 47.18MiB / 7.575GiB
+12:21:02 echo-postgres-1 12.22% 585.8MiB / 7.575GiB
+12:21:12 load 1.36 1.73 2.12
+12:21:12 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:21:12 echo-app-1 8.17% 237.6MiB / 6GiB
+12:21:12 echo-cloudflared-1 0.26% 33.06MiB / 7.575GiB
+12:21:12 echo-proxy-1 0.00% 47.19MiB / 7.575GiB
+12:21:12 echo-postgres-1 13.85% 585.8MiB / 7.575GiB
+12:21:22 load 1.23 1.69 2.10
+12:21:22 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:21:22 echo-app-1 142.24% 273.6MiB / 6GiB
+12:21:22 echo-cloudflared-1 0.25% 33.09MiB / 7.575GiB
+12:21:22 echo-proxy-1 0.00% 47.19MiB / 7.575GiB
+12:21:22 echo-postgres-1 10.84% 586MiB / 7.575GiB
+12:21:33 load 1.27 1.69 2.09
+12:21:33 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:21:33 echo-app-1 98.44% 238.4MiB / 6GiB
+12:21:33 echo-cloudflared-1 0.29% 33.12MiB / 7.575GiB
+12:21:33 echo-proxy-1 0.09% 47.19MiB / 7.575GiB
+12:21:33 echo-postgres-1 11.84% 586MiB / 7.575GiB
+12:21:43 load 1.31 1.68 2.09
+12:21:43 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:21:43 echo-app-1 93.40% 238.2MiB / 6GiB
+12:21:43 echo-cloudflared-1 0.31% 33.17MiB / 7.575GiB
+12:21:43 echo-proxy-1 0.07% 47.19MiB / 7.575GiB
+12:21:43 echo-postgres-1 8.14% 586.1MiB / 7.575GiB
+12:21:53 load 1.66 1.74 2.10
+12:21:53 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:21:53 echo-app-1 91.15% 238.2MiB / 6GiB
+12:21:53 echo-cloudflared-1 0.20% 33.23MiB / 7.575GiB
+12:21:53 echo-proxy-1 0.00% 47.2MiB / 7.575GiB
+12:21:53 echo-postgres-1 8.09% 586.1MiB / 7.575GiB
+12:22:03 load 1.48 1.70 2.08
+12:22:03 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:22:03 echo-app-1 98.15% 238.2MiB / 6GiB
+12:22:03 echo-cloudflared-1 0.18% 33.3MiB / 7.575GiB
+12:22:03 echo-proxy-1 0.00% 47.2MiB / 7.575GiB
+12:22:03 echo-postgres-1 8.15% 586.1MiB / 7.575GiB
+12:22:13 load 1.49 1.69 2.08
+12:22:13 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:22:13 echo-app-1 98.89% 238.2MiB / 6GiB
+12:22:13 echo-cloudflared-1 0.18% 33.3MiB / 7.575GiB
+12:22:13 echo-proxy-1 0.00% 47.2MiB / 7.575GiB
+12:22:13 echo-postgres-1 8.40% 586.1MiB / 7.575GiB
+12:22:23 load 1.41 1.67 2.07
+12:22:23 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:22:23 echo-app-1 100.04% 238.2MiB / 6GiB
+12:22:23 echo-cloudflared-1 0.39% 33.3MiB / 7.575GiB
+12:22:23 echo-proxy-1 0.14% 47.2MiB / 7.575GiB
+12:22:23 echo-postgres-1 8.17% 586.1MiB / 7.575GiB
+12:22:33 load 1.35 1.65 2.05
+12:22:33 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:22:33 echo-app-1 128.68% 242.4MiB / 6GiB
+12:22:33 echo-cloudflared-1 0.48% 33.3MiB / 7.575GiB
+12:22:33 echo-proxy-1 0.12% 47.2MiB / 7.575GiB
+12:22:33 echo-postgres-1 8.63% 586.1MiB / 7.575GiB
+12:22:43 load 1.55 1.68 2.06
+12:22:43 echo-app-read-1 0.37% 450.6MiB / 2GiB
+12:22:43 echo-app-1 144.89% 444MiB / 6GiB
+12:22:43 echo-cloudflared-1 0.61% 33.3MiB / 7.575GiB
+12:22:43 echo-proxy-1 0.17% 47.2MiB / 7.575GiB
+12:22:43 echo-postgres-1 8.21% 586.1MiB / 7.575GiB
+12:22:54 load 1.54 1.67 2.05
+12:22:54 echo-app-read-1 0.28% 450.6MiB / 2GiB
+12:22:54 echo-app-1 99.98% 238.2MiB / 6GiB
+12:22:54 echo-cloudflared-1 0.42% 33.3MiB / 7.575GiB
+12:22:54 echo-proxy-1 0.08% 47.2MiB / 7.575GiB
+12:22:54 echo-postgres-1 8.03% 586.3MiB / 7.575GiB
+12:23:04 load 1.54 1.67 2.05
+12:23:04 echo-app-read-1 0.45% 450.6MiB / 2GiB
+12:23:04 echo-app-1 5.61% 238.2MiB / 6GiB
+12:23:04 echo-cloudflared-1 0.40% 33.3MiB / 7.575GiB
+12:23:04 echo-proxy-1 0.10% 47.21MiB / 7.575GiB
+12:23:04 echo-postgres-1 3.24% 586.1MiB / 7.575GiB
+12:23:14 load 1.53 1.66 2.04
+12:23:14 echo-app-read-1 0.29% 450.6MiB / 2GiB
+12:23:14 echo-app-1 97.83% 238.2MiB / 6GiB
+12:23:14 echo-cloudflared-1 0.31% 33.3MiB / 7.575GiB
+12:23:14 echo-proxy-1 0.09% 47.21MiB / 7.575GiB
+12:23:14 echo-postgres-1 9.10% 586.1MiB / 7.575GiB
+12:23:24 load 1.52 1.66 2.03
+12:23:24 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:23:24 echo-app-1 99.44% 238.3MiB / 6GiB
+12:23:24 echo-cloudflared-1 0.18% 33.3MiB / 7.575GiB
+12:23:24 echo-proxy-1 0.00% 47.21MiB / 7.575GiB
+12:23:24 echo-postgres-1 8.24% 586.1MiB / 7.575GiB
+12:23:34 load 1.60 1.67 2.03
+12:23:34 echo-app-read-1 0.29% 450.6MiB / 2GiB
+12:23:34 echo-app-1 99.97% 238.3MiB / 6GiB
+12:23:34 echo-cloudflared-1 0.36% 33.3MiB / 7.575GiB
+12:23:34 echo-proxy-1 0.11% 47.21MiB / 7.575GiB
+12:23:34 echo-postgres-1 9.15% 586.2MiB / 7.575GiB
+12:23:44 load 1.95 1.74 2.05
+12:23:44 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:23:44 echo-app-1 99.66% 238.3MiB / 6GiB
+12:23:44 echo-cloudflared-1 0.25% 33.3MiB / 7.575GiB
+12:23:44 echo-proxy-1 0.00% 47.21MiB / 7.575GiB
+12:23:44 echo-postgres-1 7.76% 586.1MiB / 7.575GiB
+12:23:54 load 1.96 1.75 2.05
+12:23:54 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:23:54 echo-app-1 199.12% 464.3MiB / 6GiB
+12:23:54 echo-cloudflared-1 0.25% 33.31MiB / 7.575GiB
+12:23:54 echo-proxy-1 0.00% 47.21MiB / 7.575GiB
+12:23:54 echo-postgres-1 7.94% 586.1MiB / 7.575GiB
+12:24:04 load 1.81 1.73 2.04
+12:24:04 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:24:04 echo-app-1 101.11% 238.4MiB / 6GiB
+12:24:04 echo-cloudflared-1 0.18% 33.31MiB / 7.575GiB
+12:24:04 echo-proxy-1 0.02% 47.21MiB / 7.575GiB
+12:24:04 echo-postgres-1 7.85% 586.1MiB / 7.575GiB
+12:24:14 load 1.92 1.75 2.05
+12:24:14 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:24:14 echo-app-1 90.34% 238.2MiB / 6GiB
+12:24:14 echo-cloudflared-1 0.32% 33.31MiB / 7.575GiB
+12:24:14 echo-proxy-1 0.10% 47.22MiB / 7.575GiB
+12:24:14 echo-postgres-1 17.00% 586.2MiB / 7.575GiB
+12:24:25 load 1.78 1.73 2.04
+12:24:25 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:24:25 echo-app-1 85.95% 238.4MiB / 6GiB
+12:24:25 echo-cloudflared-1 0.20% 33.32MiB / 7.575GiB
+12:24:25 echo-proxy-1 0.00% 47.22MiB / 7.575GiB
+12:24:25 echo-postgres-1 15.77% 586.2MiB / 7.575GiB
+12:24:35 load 1.58 1.69 2.02
+12:24:35 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:24:35 echo-app-1 100.53% 238.3MiB / 6GiB
+12:24:35 echo-cloudflared-1 0.30% 33.32MiB / 7.575GiB
+12:24:35 echo-proxy-1 0.02% 47.22MiB / 7.575GiB
+12:24:35 echo-postgres-1 6.03% 586.2MiB / 7.575GiB
+12:24:45 load 1.57 1.68 2.01
+12:24:45 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:24:45 echo-app-1 99.45% 238.3MiB / 6GiB
+12:24:45 echo-cloudflared-1 0.22% 33.32MiB / 7.575GiB
+12:24:45 echo-proxy-1 0.00% 47.22MiB / 7.575GiB
+12:24:45 echo-postgres-1 17.52% 586.2MiB / 7.575GiB
+12:24:55 load 1.71 1.71 2.02
+12:24:55 echo-app-read-1 0.37% 450.6MiB / 2GiB
+12:24:55 echo-app-1 0.49% 238.2MiB / 6GiB
+12:24:55 echo-cloudflared-1 0.21% 33.32MiB / 7.575GiB
+12:24:55 echo-proxy-1 0.00% 47.24MiB / 7.575GiB
+12:24:55 echo-postgres-1 9.91% 586.2MiB / 7.575GiB
+12:25:05 load 1.85 1.74 2.02
+12:25:05 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:25:05 echo-app-1 188.70% 415.6MiB / 6GiB
+12:25:05 echo-cloudflared-1 0.39% 33.32MiB / 7.575GiB
+12:25:05 echo-proxy-1 0.08% 47.29MiB / 7.575GiB
+12:25:05 echo-postgres-1 16.48% 586.2MiB / 7.575GiB
+12:25:15 load 2.26 1.83 2.05
+12:25:15 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:25:15 echo-app-1 101.45% 238.4MiB / 6GiB
+12:25:15 echo-cloudflared-1 0.21% 33.32MiB / 7.575GiB
+12:25:15 echo-proxy-1 0.00% 47.3MiB / 7.575GiB
+12:25:15 echo-postgres-1 16.87% 594.2MiB / 7.575GiB
+12:25:25 load 2.07 1.80 2.04
+12:25:25 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:25:25 echo-app-1 99.91% 238.3MiB / 6GiB
+12:25:25 echo-cloudflared-1 0.18% 33.32MiB / 7.575GiB
+12:25:25 echo-proxy-1 0.00% 47.32MiB / 7.575GiB
+12:25:25 echo-postgres-1 18.72% 594MiB / 7.575GiB
+12:25:35 load 2.14 1.82 2.04
+12:25:35 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:25:35 echo-app-1 99.41% 238.3MiB / 6GiB
+12:25:35 echo-cloudflared-1 0.24% 33.32MiB / 7.575GiB
+12:25:35 echo-proxy-1 0.09% 47.33MiB / 7.575GiB
+12:25:35 echo-postgres-1 17.72% 593.9MiB / 7.575GiB
+12:25:46 load 2.11 1.83 2.04
+12:25:46 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:25:46 echo-app-1 101.08% 238.3MiB / 6GiB
+12:25:46 echo-cloudflared-1 0.18% 33.32MiB / 7.575GiB
+12:25:46 echo-proxy-1 0.10% 47.36MiB / 7.575GiB
+12:25:46 echo-postgres-1 18.85% 594MiB / 7.575GiB
+12:25:56 load 1.86 1.78 2.02
+12:25:56 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:25:56 echo-app-1 99.26% 238.3MiB / 6GiB
+12:25:56 echo-cloudflared-1 0.19% 33.32MiB / 7.575GiB
+12:25:56 echo-proxy-1 0.00% 47.37MiB / 7.575GiB
+12:25:56 echo-postgres-1 17.65% 593.9MiB / 7.575GiB
+12:26:06 load 1.73 1.76 2.01
+12:26:06 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:26:06 echo-app-1 100.59% 238.3MiB / 6GiB
+12:26:06 echo-cloudflared-1 0.23% 33.33MiB / 7.575GiB
+12:26:06 echo-proxy-1 0.00% 46.46MiB / 7.575GiB
+12:26:06 echo-postgres-1 16.97% 593.9MiB / 7.575GiB
+12:26:15 load 1.77 1.77 2.01
+12:26:15 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:26:15 echo-app-1 193.88% 270.1MiB / 6GiB
+12:26:15 echo-cloudflared-1 0.27% 33.33MiB / 7.575GiB
+12:26:15 echo-proxy-1 0.00% 46.46MiB / 7.575GiB
+12:26:15 echo-postgres-1 16.54% 593.9MiB / 7.575GiB
+12:26:25 load 1.73 1.76 2.01
+12:26:25 echo-app-read-1 0.40% 450.6MiB / 2GiB
+12:26:25 echo-app-1 5.06% 238.2MiB / 6GiB
+12:26:25 echo-cloudflared-1 0.66% 32.82MiB / 7.575GiB
+12:26:25 echo-proxy-1 0.27% 46.46MiB / 7.575GiB
+12:26:25 echo-postgres-1 13.39% 593.9MiB / 7.575GiB
+12:26:35 load 1.69 1.75 2.00
+12:26:35 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:26:35 echo-app-1 97.61% 238.4MiB / 6GiB
+12:26:35 echo-cloudflared-1 0.22% 32.82MiB / 7.575GiB
+12:26:35 echo-proxy-1 0.00% 46.46MiB / 7.575GiB
+12:26:35 echo-postgres-1 18.32% 594MiB / 7.575GiB
+12:26:45 load 1.59 1.72 1.99
+12:26:45 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:26:45 echo-app-1 99.00% 238.6MiB / 6GiB
+12:26:45 echo-cloudflared-1 0.35% 32.83MiB / 7.575GiB
+12:26:45 echo-proxy-1 0.07% 46.46MiB / 7.575GiB
+12:26:45 echo-postgres-1 20.26% 594.2MiB / 7.575GiB
+12:26:55 load 1.57 1.72 1.98
+12:26:55 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:26:55 echo-app-1 87.50% 238.2MiB / 6GiB
+12:26:55 echo-cloudflared-1 0.19% 32.82MiB / 7.575GiB
+12:26:55 echo-proxy-1 0.00% 46.46MiB / 7.575GiB
+12:26:55 echo-postgres-1 12.91% 594.1MiB / 7.575GiB
+12:27:06 load 1.48 1.69 1.97
+12:27:06 echo-app-read-1 0.44% 450.6MiB / 2GiB
+12:27:06 echo-app-1 87.63% 238.2MiB / 6GiB
+12:27:06 echo-cloudflared-1 0.37% 32.82MiB / 7.575GiB
+12:27:06 echo-proxy-1 0.10% 46.46MiB / 7.575GiB
+12:27:06 echo-postgres-1 11.85% 594MiB / 7.575GiB
+12:27:16 load 1.47 1.69 1.97
+12:27:16 echo-app-read-1 0.39% 450.6MiB / 2GiB
+12:27:16 echo-app-1 101.35% 228.8MiB / 6GiB
+12:27:16 echo-cloudflared-1 0.27% 32.83MiB / 7.575GiB
+12:27:16 echo-proxy-1 0.00% 46.47MiB / 7.575GiB
+12:27:16 echo-postgres-1 12.94% 594.2MiB / 7.575GiB
+12:27:26 load 1.56 1.70 1.97
+12:27:26 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:27:26 echo-app-1 199.12% 409.1MiB / 6GiB
+12:27:26 echo-cloudflared-1 0.31% 32.72MiB / 7.575GiB
+12:27:26 echo-proxy-1 0.08% 46.47MiB / 7.575GiB
+12:27:26 echo-postgres-1 13.91% 594.2MiB / 7.575GiB
+12:27:36 load 1.78 1.74 1.98
+12:27:36 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:27:36 echo-app-1 103.48% 228.8MiB / 6GiB
+12:27:36 echo-cloudflared-1 0.16% 32.72MiB / 7.575GiB
+12:27:36 echo-proxy-1 0.00% 46.47MiB / 7.575GiB
+12:27:36 echo-postgres-1 13.35% 594.2MiB / 7.575GiB
+12:27:46 load 1.73 1.73 1.98
+12:27:46 echo-app-read-1 0.38% 450.6MiB / 2GiB
+12:27:46 echo-app-1 102.60% 228.8MiB / 6GiB
+12:27:46 echo-cloudflared-1 0.15% 32.72MiB / 7.575GiB
+12:27:46 echo-proxy-1 0.00% 46.5MiB / 7.575GiB
+12:27:46 echo-postgres-1 13.46% 594.2MiB / 7.575GiB
+12:27:56 load 1.62 1.71 1.97
+12:27:56 echo-app-read-1 0.37% 450.6MiB / 2GiB
+12:27:56 echo-app-1 5.77% 228.9MiB / 6GiB
+12:27:56 echo-cloudflared-1 0.20% 32.72MiB / 7.575GiB
+12:27:56 echo-proxy-1 0.00% 46.55MiB / 7.575GiB
+12:27:56 echo-postgres-1 0.19% 594.2MiB / 7.575GiB
+12:28:06 load 1.44 1.67 1.95
+12:28:06 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:28:06 echo-app-1 102.13% 228.9MiB / 6GiB
+12:28:06 echo-cloudflared-1 0.53% 32.72MiB / 7.575GiB
+12:28:06 echo-proxy-1 0.18% 46.63MiB / 7.575GiB
+12:28:06 echo-postgres-1 13.40% 594.2MiB / 7.575GiB
+12:28:16 load 1.38 1.64 1.94
+12:28:16 echo-app-read-1 0.83% 450.6MiB / 2GiB
+12:28:16 echo-app-1 99.43% 228.9MiB / 6GiB
+12:28:16 echo-cloudflared-1 0.14% 32.72MiB / 7.575GiB
+12:28:16 echo-proxy-1 0.00% 46.64MiB / 7.575GiB
+12:28:16 echo-postgres-1 12.27% 594.2MiB / 7.575GiB
+12:28:27 load 1.32 1.62 1.93
+12:28:27 echo-app-read-1 0.29% 450.6MiB / 2GiB
+12:28:27 echo-app-1 101.58% 228.9MiB / 6GiB
+12:28:27 echo-cloudflared-1 0.17% 32.72MiB / 7.575GiB
+12:28:27 echo-proxy-1 0.00% 46.64MiB / 7.575GiB
+12:28:27 echo-postgres-1 12.06% 594.2MiB / 7.575GiB
+12:28:37 load 1.35 1.62 1.92
+12:28:37 echo-app-read-1 0.29% 450.6MiB / 2GiB
+12:28:37 echo-app-1 191.56% 412.4MiB / 6GiB
+12:28:37 echo-cloudflared-1 0.37% 32.72MiB / 7.575GiB
+12:28:37 echo-proxy-1 0.09% 46.65MiB / 7.575GiB
+12:28:37 echo-postgres-1 12.81% 594.2MiB / 7.575GiB
+12:28:47 load 1.61 1.66 1.93
+12:28:47 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:28:47 echo-app-1 102.62% 229.6MiB / 6GiB
+12:28:47 echo-cloudflared-1 0.18% 32.72MiB / 7.575GiB
+12:28:47 echo-proxy-1 0.00% 46.68MiB / 7.575GiB
+12:28:47 echo-postgres-1 13.91% 594.2MiB / 7.575GiB
+12:28:57 load 1.44 1.63 1.92
+12:28:57 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:28:57 echo-app-1 101.02% 229.7MiB / 6GiB
+12:28:57 echo-cloudflared-1 0.17% 32.72MiB / 7.575GiB
+12:28:57 echo-proxy-1 0.00% 46.68MiB / 7.575GiB
+12:28:57 echo-postgres-1 12.05% 594.2MiB / 7.575GiB
+12:29:07 load 1.53 1.64 1.92
+12:29:07 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:29:07 echo-app-1 102.29% 229.8MiB / 6GiB
+12:29:07 echo-cloudflared-1 0.22% 32.72MiB / 7.575GiB
+12:29:07 echo-proxy-1 0.00% 46.72MiB / 7.575GiB
+12:29:07 echo-postgres-1 12.89% 594.2MiB / 7.575GiB
+12:29:17 load 1.60 1.65 1.92
+12:29:17 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:29:17 echo-app-1 102.87% 232.6MiB / 6GiB
+12:29:17 echo-cloudflared-1 0.20% 32.71MiB / 7.575GiB
+12:29:17 echo-proxy-1 0.00% 46.74MiB / 7.575GiB
+12:29:17 echo-postgres-1 13.19% 594.2MiB / 7.575GiB
+12:29:27 load 1.59 1.65 1.91
+12:29:27 echo-app-read-1 0.37% 450.6MiB / 2GiB
+12:29:27 echo-app-1 0.53% 232.5MiB / 6GiB
+12:29:27 echo-cloudflared-1 0.26% 32.71MiB / 7.575GiB
+12:29:27 echo-proxy-1 0.00% 46.77MiB / 7.575GiB
+12:29:27 echo-postgres-1 1.05% 594.2MiB / 7.575GiB
+12:29:37 load 1.42 1.61 1.90
+12:29:37 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:29:37 echo-app-1 86.33% 237.9MiB / 6GiB
+12:29:37 echo-cloudflared-1 0.29% 32.71MiB / 7.575GiB
+12:29:37 echo-proxy-1 0.08% 46.77MiB / 7.575GiB
+12:29:37 echo-postgres-1 12.60% 594.3MiB / 7.575GiB
+12:29:47 load 1.36 1.59 1.89
+12:29:47 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:29:47 echo-app-1 182.04% 401.4MiB / 6GiB
+12:29:47 echo-cloudflared-1 0.41% 32.71MiB / 7.575GiB
+12:29:47 echo-proxy-1 0.08% 46.79MiB / 7.575GiB
+12:29:47 echo-postgres-1 12.68% 594.3MiB / 7.575GiB
+12:29:58 load 1.60 1.63 1.90
+12:29:58 echo-app-read-1 0.36% 450.6MiB / 2GiB
+12:29:58 echo-app-1 103.97% 238.1MiB / 6GiB
+12:29:58 echo-cloudflared-1 0.33% 32.71MiB / 7.575GiB
+12:29:58 echo-proxy-1 0.09% 46.79MiB / 7.575GiB
+12:29:58 echo-postgres-1 13.88% 594.4MiB / 7.575GiB
+12:30:08 load 1.51 1.61 1.89
+12:30:08 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:30:08 echo-app-1 102.02% 238.1MiB / 6GiB
+12:30:08 echo-cloudflared-1 0.19% 32.71MiB / 7.575GiB
+12:30:08 echo-proxy-1 0.04% 46.57MiB / 7.575GiB
+12:30:08 echo-postgres-1 17.05% 594.5MiB / 7.575GiB
+12:30:18 load 1.67 1.64 1.90
+12:30:18 echo-app-read-1 0.50% 450.6MiB / 2GiB
+12:30:18 echo-app-1 102.01% 243.3MiB / 6GiB
+12:30:18 echo-cloudflared-1 0.19% 32.71MiB / 7.575GiB
+12:30:18 echo-proxy-1 0.09% 46.57MiB / 7.575GiB
+12:30:18 echo-postgres-1 12.83% 594.5MiB / 7.575GiB
+12:30:28 load 1.64 1.64 1.90
+12:30:28 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:30:28 echo-app-1 104.37% 243.4MiB / 6GiB
+12:30:28 echo-cloudflared-1 0.22% 32.71MiB / 7.575GiB
+12:30:28 echo-proxy-1 0.04% 46.57MiB / 7.575GiB
+12:30:28 echo-postgres-1 15.68% 592.6MiB / 7.575GiB
+12:30:38 load 1.62 1.63 1.89
+12:30:38 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:30:38 echo-app-1 99.43% 258.2MiB / 6GiB
+12:30:38 echo-cloudflared-1 0.38% 32.71MiB / 7.575GiB
+12:30:38 echo-proxy-1 0.13% 46.57MiB / 7.575GiB
+12:30:38 echo-postgres-1 16.16% 592.5MiB / 7.575GiB
+12:30:48 load 1.68 1.65 1.89
+12:30:48 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:30:48 echo-app-1 103.79% 257.8MiB / 6GiB
+12:30:48 echo-cloudflared-1 0.20% 32.71MiB / 7.575GiB
+12:30:48 echo-proxy-1 0.02% 46.57MiB / 7.575GiB
+12:30:48 echo-postgres-1 15.58% 593MiB / 7.575GiB
+12:30:58 load 1.58 1.62 1.88
+12:30:58 echo-app-read-1 0.43% 450.6MiB / 2GiB
+12:30:58 echo-app-1 42.67% 261.8MiB / 6GiB
+12:30:58 echo-cloudflared-1 0.23% 32.71MiB / 7.575GiB
+12:30:58 echo-proxy-1 0.03% 46.57MiB / 7.575GiB
+12:30:58 echo-postgres-1 17.83% 587.7MiB / 7.575GiB
+12:31:08 load 1.50 1.60 1.87
+12:31:08 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:31:08 echo-app-1 105.03% 272.3MiB / 6GiB
+12:31:08 echo-cloudflared-1 0.20% 32.71MiB / 7.575GiB
+12:31:08 echo-proxy-1 0.03% 46.58MiB / 7.575GiB
+12:31:08 echo-postgres-1 17.48% 589.3MiB / 7.575GiB
+12:31:19 load 1.57 1.62 1.88
+12:31:19 echo-app-read-1 0.41% 450.6MiB / 2GiB
+12:31:19 echo-app-1 104.73% 272.3MiB / 6GiB
+12:31:19 echo-cloudflared-1 0.28% 32.71MiB / 7.575GiB
+12:31:19 echo-proxy-1 0.10% 46.59MiB / 7.575GiB
+12:31:19 echo-postgres-1 15.14% 590.1MiB / 7.575GiB
+12:31:29 load 1.71 1.65 1.88
+12:31:29 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:31:29 echo-app-1 103.82% 282.5MiB / 6GiB
+12:31:29 echo-cloudflared-1 0.22% 32.71MiB / 7.575GiB
+12:31:29 echo-proxy-1 0.01% 46.59MiB / 7.575GiB
+12:31:29 echo-postgres-1 16.94% 589.2MiB / 7.575GiB
+12:31:39 load 1.63 1.63 1.88
+12:31:39 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:31:39 echo-app-1 104.65% 282.3MiB / 6GiB
+12:31:39 echo-cloudflared-1 0.22% 32.71MiB / 7.575GiB
+12:31:39 echo-proxy-1 0.03% 46.59MiB / 7.575GiB
+12:31:39 echo-postgres-1 12.74% 590.1MiB / 7.575GiB
+12:31:49 load 1.46 1.59 1.86
+12:31:49 echo-app-read-1 0.32% 450.6MiB / 2GiB
+12:31:49 echo-app-1 107.72% 288.4MiB / 6GiB
+12:31:49 echo-cloudflared-1 0.24% 32.71MiB / 7.575GiB
+12:31:49 echo-proxy-1 0.00% 46.59MiB / 7.575GiB
+12:31:49 echo-postgres-1 15.78% 587.7MiB / 7.575GiB
+12:31:59 load 1.39 1.57 1.85
+12:31:59 echo-app-read-1 0.35% 450.6MiB / 2GiB
+12:31:59 echo-app-1 106.67% 287.7MiB / 6GiB
+12:31:59 echo-cloudflared-1 0.27% 32.71MiB / 7.575GiB
+12:31:59 echo-proxy-1 0.00% 46.59MiB / 7.575GiB
+12:31:59 echo-postgres-1 14.48% 590.4MiB / 7.575GiB
+12:32:09 load 1.49 1.59 1.85
+12:32:09 echo-app-read-1 0.43% 450.6MiB / 2GiB
+12:32:09 echo-app-1 108.97% 291.6MiB / 6GiB
+12:32:09 echo-cloudflared-1 0.37% 32.71MiB / 7.575GiB
+12:32:09 echo-proxy-1 0.07% 46.61MiB / 7.575GiB
+12:32:09 echo-postgres-1 14.12% 592MiB / 7.575GiB
+12:32:19 load 1.79 1.65 1.87
+12:32:19 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:32:19 echo-app-1 182.36% 526.7MiB / 6GiB
+12:32:19 echo-cloudflared-1 0.20% 32.76MiB / 7.575GiB
+12:32:19 echo-proxy-1 0.00% 46.61MiB / 7.575GiB
+12:32:19 echo-postgres-1 11.12% 598.9MiB / 7.575GiB
+12:32:30 load 1.60 1.61 1.85
+12:32:30 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:32:30 echo-app-1 88.68% 288.6MiB / 6GiB
+12:32:30 echo-cloudflared-1 0.21% 32.82MiB / 7.575GiB
+12:32:30 echo-proxy-1 0.08% 46.61MiB / 7.575GiB
+12:32:30 echo-postgres-1 12.65% 599MiB / 7.575GiB
+12:32:40 load 1.51 1.59 1.85
+12:32:40 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:32:40 echo-app-1 98.61% 288.9MiB / 6GiB
+12:32:40 echo-cloudflared-1 0.19% 32.82MiB / 7.575GiB
+12:32:40 echo-proxy-1 0.00% 46.61MiB / 7.575GiB
+12:32:40 echo-postgres-1 11.59% 599.3MiB / 7.575GiB
+12:32:50 load 1.43 1.57 1.84
+12:32:50 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:32:50 echo-app-1 101.40% 288.6MiB / 6GiB
+12:32:50 echo-cloudflared-1 0.37% 32.84MiB / 7.575GiB
+12:32:50 echo-proxy-1 0.13% 46.61MiB / 7.575GiB
+12:32:50 echo-postgres-1 14.27% 599.4MiB / 7.575GiB
+12:33:00 load 1.28 1.54 1.82
+12:33:00 echo-app-read-1 0.36% 450.6MiB / 2GiB
+12:33:00 echo-app-1 97.70% 288.8MiB / 6GiB
+12:33:00 echo-cloudflared-1 0.22% 32.86MiB / 7.575GiB
+12:33:00 echo-proxy-1 0.00% 46.68MiB / 7.575GiB
+12:33:00 echo-postgres-1 11.25% 599.6MiB / 7.575GiB
+12:33:10 load 1.24 1.52 1.81
+12:33:10 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:33:10 echo-app-1 101.53% 288.7MiB / 6GiB
+12:33:10 echo-cloudflared-1 0.71% 32.88MiB / 7.575GiB
+12:33:10 echo-proxy-1 0.25% 46.69MiB / 7.575GiB
+12:33:10 echo-postgres-1 17.47% 597.4MiB / 7.575GiB
+12:33:20 load 1.12 1.48 1.80
+12:33:20 echo-app-read-1 0.36% 450.6MiB / 2GiB
+12:33:20 echo-app-1 100.52% 293.9MiB / 6GiB
+12:33:20 echo-cloudflared-1 0.24% 32.89MiB / 7.575GiB
+12:33:20 echo-proxy-1 0.00% 46.69MiB / 7.575GiB
+12:33:20 echo-postgres-1 15.98% 594.6MiB / 7.575GiB
+12:33:30 load 1.26 1.50 1.80
+12:33:30 echo-app-read-1 0.34% 450.6MiB / 2GiB
+12:33:30 echo-app-1 193.06% 486.8MiB / 6GiB
+12:33:30 echo-cloudflared-1 0.20% 32.9MiB / 7.575GiB
+12:33:30 echo-proxy-1 0.07% 46.72MiB / 7.575GiB
+12:33:30 echo-postgres-1 13.39% 595.9MiB / 7.575GiB
+12:33:40 load 1.30 1.50 1.80
+12:33:40 echo-app-read-1 0.38% 450.6MiB / 2GiB
+12:33:40 echo-app-1 81.68% 287.9MiB / 6GiB
+12:33:40 echo-cloudflared-1 0.52% 32.9MiB / 7.575GiB
+12:33:40 echo-proxy-1 0.21% 46.76MiB / 7.575GiB
+12:33:40 echo-postgres-1 1.66% 597MiB / 7.575GiB
+12:33:51 load 1.41 1.52 1.80
+12:33:51 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:33:51 echo-app-1 100.62% 298.5MiB / 6GiB
+12:33:51 echo-cloudflared-1 0.18% 32.9MiB / 7.575GiB
+12:33:51 echo-proxy-1 0.02% 46.78MiB / 7.575GiB
+12:33:51 echo-postgres-1 14.71% 596.5MiB / 7.575GiB
+12:34:01 load 1.72 1.58 1.82
+12:34:01 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:34:01 echo-app-1 100.96% 298.2MiB / 6GiB
+12:34:01 echo-cloudflared-1 0.22% 32.9MiB / 7.575GiB
+12:34:01 echo-proxy-1 0.00% 46.78MiB / 7.575GiB
+12:34:01 echo-postgres-1 14.55% 597MiB / 7.575GiB
+12:34:11 load 1.93 1.63 1.83
+12:34:11 echo-app-read-1 0.30% 450.6MiB / 2GiB
+12:34:11 echo-app-1 100.60% 298.9MiB / 6GiB
+12:34:11 echo-cloudflared-1 0.35% 32.9MiB / 7.575GiB
+12:34:11 echo-proxy-1 0.12% 46.79MiB / 7.575GiB
+12:34:11 echo-postgres-1 17.52% 594.7MiB / 7.575GiB
+12:34:21 load 1.79 1.61 1.82
+12:34:21 echo-app-read-1 0.33% 450.6MiB / 2GiB
+12:34:21 echo-app-1 96.96% 298.2MiB / 6GiB
+12:34:21 echo-cloudflared-1 0.27% 32.9MiB / 7.575GiB
+12:34:21 echo-proxy-1 0.02% 46.79MiB / 7.575GiB
+12:34:21 echo-postgres-1 12.89% 597.1MiB / 7.575GiB
+12:34:31 load 1.75 1.61 1.82
+12:34:31 echo-app-read-1 0.38% 450.6MiB / 2GiB
+12:34:31 echo-app-1 51.00% 299.2MiB / 6GiB
+12:34:31 echo-cloudflared-1 0.28% 32.9MiB / 7.575GiB
+12:34:31 echo-proxy-1 0.00% 46.79MiB / 7.575GiB
+12:34:31 echo-postgres-1 0.46% 598.6MiB / 7.575GiB
+12:34:41 load 2.03 1.67 1.84
+12:34:41 echo-app-read-1 0.31% 450.6MiB / 2GiB
+12:34:41 echo-app-1 197.37% 487MiB / 6GiB
+12:34:41 echo-cloudflared-1 0.25% 32.9MiB / 7.575GiB
+12:34:41 echo-proxy-1 0.09% 46.79MiB / 7.575GiB
+12:34:41 echo-postgres-1 10.61% 598.2MiB / 7.575GiB
+12:34:51 load 2.41 1.76 1.87
+12:34:51 echo-app-read-1 0.57% 450.6MiB / 2GiB
+12:34:51 echo-app-1 103.76% 311.6MiB / 6GiB
+12:34:51 echo-cloudflared-1 0.18% 32.9MiB / 7.575GiB
+12:34:51 echo-proxy-1 0.00% 46.79MiB / 7.575GiB
+12:34:51 echo-postgres-1 11.11% 598.9MiB / 7.575GiB
+--- writer done 12:35:00

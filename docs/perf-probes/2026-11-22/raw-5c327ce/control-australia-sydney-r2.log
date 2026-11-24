@@ -1,0 +1,3 @@
+label=australia-sydney-r2 at 05:32:12Z colo=SYD loc=AU 
+echo trace: p50=1677ms p95=1710ms fails=0
+speed.cloudflare 25MB: 3276 0.00MB/s ttfb=2.443504s total=60.005490s

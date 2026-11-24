@@ -1,0 +1,3 @@
+label=vietnam-novpn-r2 at 05:24:34Z colo=SIN loc=VN 
+echo trace: p50=462ms p95=1303ms fails=0
+speed.cloudflare 25MB: 15026296 0.00MB/s ttfb=0.260439s total=1.663750s

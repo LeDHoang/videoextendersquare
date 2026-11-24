@@ -1,0 +1,53 @@
+PASS  GET healthz  200 1042ms 11B cache=DYNAMIC cc=-
+PASS  GET readyz  200 2141ms 11B cache=DYNAMIC cc=-
+       {"ok":true}
+PASS  GET health  200 1787ms 598B cache=DYNAMIC cc=-
+       {"probes":{"ffmpeg":{"id":"ffmpeg","label":"FFMPEG","ok":true,"severity":"block"},"ffprobe":{"id":"ffprobe","label":"FFPROBE","ok":true,"severity":"block"},"cas":{"id":"cas","label":"CAS","ok":true,"severity":"degrade"},"encoder":{"id":"encoder","label":"ENCODER","ok":true,"severity":"block"},"libx2
+PASS  GET config  200 974ms 8075B cache=MISS cc=public, max-age=0, s-maxage=30
+PASS  GET auth_me  200 697ms 13B cache=DYNAMIC cc=-
+PASS  GET reels  200 1744ms 738108B cache=EXPIRED cc=public, max-age=0, s-maxage=30
+PASS  GET reels_feed  200 1448ms 32907B cache=DYNAMIC cc=no-store, no-cache, must-revalidate, max
+PASS  GET player  200 777ms 442058B cache=DYNAMIC cc=no-store, no-cache, must-revalidate, max
+PASS  GET player_inline  200 2210ms 464144B cache=DYNAMIC cc=no-store, no-cache, must-revalidate, max
+PASS  GET player_script  200 1454ms 620846B cache=DYNAMIC cc=no-cache
+PASS  GET tags  200 247ms 3020B cache=HIT cc=public, max-age=0, s-maxage=30
+PASS  GET tag_detail  200 3300ms 90778B cache=DYNAMIC cc=-
+PASS  GET locations  200 1276ms 1048B cache=HIT cc=public, max-age=0, s-maxage=30
+PASS  GET locations_activity  200 1477ms 5294B cache=DYNAMIC cc=-
+PASS  GET location_detail  200 1849ms 41664B cache=DYNAMIC cc=-
+PASS  GET map_attribution  200 876ms 167B cache=DYNAMIC cc=-
+PASS  GET earth_texture  200 1741ms 1315120B cache=DYNAMIC cc=public, max-age=86400, immutable
+PASS  GET social_feed  200 1063ms 41330B cache=DYNAMIC cc=-
+PASS  GET creators  200 1691ms 3995B cache=DYNAMIC cc=no-store
+PASS  GET search_suggest  200 2627ms 15220B cache=DYNAMIC cc=-
+PASS  GET packs  200 492ms 6383B cache=DYNAMIC cc=-
+PASS  GET billing_catalog  200 764ms 8307B cache=DYNAMIC cc=-
+PASS  GET msg_capabilities  200 3386ms 479B cache=DYNAMIC cc=-
+PASS  GET user  200 552ms 367B cache=DYNAMIC cc=-
+PASS  GET user_posts  200 474ms 67107B cache=DYNAMIC cc=-
+PASS  GET post  200 1164ms 2059B cache=DYNAMIC cc=-
+PASS  GET post_comments  200 485ms 64B cache=DYNAMIC cc=-
+PASS  GET spa_index  200 2980ms 3212B cache=DYNAMIC cc=no-cache
+PASS  GET spa_reels  200 757ms 3212B cache=DYNAMIC cc=no-cache
+PASS  GET spa_explore  200 1458ms 3212B cache=DYNAMIC cc=no-cache
+PASS  GET spa_js  200 1741ms 381085B cache=HIT cc=public, max-age=31536000, immutable
+PASS  GET spa_css  200 1156ms 255286B cache=MISS cc=public, max-age=31536000, immutable
+PASS  CSP enforced on /  default-src 'self'; script-src 'nonce-Imqkqprn4zxAjZnGSVBiBQx6' 'strict-dynamic' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fon
+PASS  CSP-Report-Only gone or alongside  report-only=no
+PASS  HSTS  max-age=15552000; includeSubDomains
+INFO  x-content-type-options: nosniff
+INFO  referrer-policy: strict-origin-when-cross-origin
+INFO  x-frame-options: DENY
+INFO  permissions-policy: camera=(), microphone=(), geolocation=(), xr-spatial-tracking=(self)
+INFO  cross-origin-opener-policy: same-origin
+PASS  CSP has no unsafe-eval  
+PASS  unknown API route is 404 JSON  404 application/json
+PASS  SPA deep link serves index  200
+PASS  anon POST rewards/claim refused (4xx)  401 b'{"detail":{"code":"AUTH_REQUIRED","message":"Sign in to continue."}}'
+PASS  http redirects to https  301 https://echomultiverse.com/
+PASS  media mp4 Range 206  206 bytes 0-1023/1150485 530ms
+PASS  media ACAO  https://echomultiverse.com
+PASS  media poster 200 + ACAO  200 https://echomultiverse.com 525ms
+FAIL  sit behind Cloudflare Access  200 
+
+1 failed: ['sit behind Cloudflare Access']

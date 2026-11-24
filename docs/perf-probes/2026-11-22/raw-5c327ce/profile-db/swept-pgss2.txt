@@ -1,0 +1,249 @@
+/Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+seeded 185000 sessions, impressions 716 MB, in 457s
+2026-11-24 13:44:14,626 INFO sx.access [b7fff4eef5574490a4e52f73d8336f6a]: GET /api/reels/player-inline 200 1545.4ms
+2026-11-24 13:44:14,643 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:14,732 INFO sx.access [71573b1e083c4753a735de628e9d91cc]: GET /api/reels/player-inline 200 88.0ms
+2026-11-24 13:44:14,733 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:14,790 INFO sx.access [8e43f363510940489a657113b3244ee2]: GET /api/reels/player-inline 200 55.6ms
+2026-11-24 13:44:14,791 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:14,849 INFO sx.access [b5b640fd8fe248b48bb1d34b11764441]: GET /api/reels/player-inline 200 56.9ms
+2026-11-24 13:44:14,850 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:14,911 INFO sx.access [0045e918ebf047af9686fb895da9ea38]: GET /api/reels/player-inline 200 59.7ms
+2026-11-24 13:44:14,912 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:14,985 INFO sx.access [186a25b4260447048b3b8b3f5f640385]: GET /api/reels/player-inline 200 71.7ms
+2026-11-24 13:44:14,986 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,089 INFO sx.access [8c115535b4064aba86dfecd98c1622b3]: GET /api/reels/player-inline 200 101.8ms
+2026-11-24 13:44:15,090 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,146 INFO sx.access [f9475178626b41f3b3c78f524b8724b4]: GET /api/reels/player-inline 200 55.4ms
+2026-11-24 13:44:15,147 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,199 INFO sx.access [4b97056e2d4b438999379743a81c818a]: GET /api/reels/player-inline 200 51.5ms
+2026-11-24 13:44:15,201 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,261 INFO sx.access [c7905428586849dcacdc749b34fa8c5d]: GET /api/reels/player-inline 200 60.1ms
+2026-11-24 13:44:15,263 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,314 INFO sx.access [12cb3426a6ab4aeab5a48fe0a41798ae]: GET /api/reels/player-inline 200 51.0ms
+2026-11-24 13:44:15,316 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,375 INFO sx.access [bbf562e8706642358ee4731bc49084e5]: GET /api/reels/player-inline 200 58.9ms
+2026-11-24 13:44:15,377 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,433 INFO sx.access [8c6efd8bab634339b3cb1f7c02c4fe2f]: GET /api/reels/player-inline 200 55.0ms
+2026-11-24 13:44:15,434 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,495 INFO sx.access [9aa51b039c9a4411b6b31b4c9956ed06]: GET /api/reels/player-inline 200 59.9ms
+2026-11-24 13:44:15,496 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,546 INFO sx.access [a5bf5d0634274df9b88dd8ce69943c95]: GET /api/reels/player-inline 200 49.5ms
+2026-11-24 13:44:15,547 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,598 INFO sx.access [bd3e6005e6844dada3e1a4723a26d4b7]: GET /api/reels/player-inline 200 50.3ms
+2026-11-24 13:44:15,599 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,649 INFO sx.access [d7316fe92f644d9fa3cd46d5ea92cfa1]: GET /api/reels/player-inline 200 48.9ms
+2026-11-24 13:44:15,651 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,700 INFO sx.access [c42eb4d94c484bb4a0d050ae8cc079de]: GET /api/reels/player-inline 200 49.1ms
+2026-11-24 13:44:15,702 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,750 INFO sx.access [ac5b8d7370d4452ea3ca417c9ed86138]: GET /api/reels/player-inline 200 47.8ms
+2026-11-24 13:44:15,751 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,799 INFO sx.access [f958a361c8bd4d659612ae5614e8ba68]: GET /api/reels/player-inline 200 46.8ms
+2026-11-24 13:44:15,800 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,852 INFO sx.access [ff6de1144c3b47d9b808b0739616aa9b]: GET /api/reels/player-inline 200 51.4ms
+2026-11-24 13:44:15,853 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,909 INFO sx.access [ef452a6e6b1046b8aa91910521553dc4]: GET /api/reels/player-inline 200 54.7ms
+2026-11-24 13:44:15,911 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:15,981 INFO sx.access [181a32478d094e3fa3876bf4c8745f94]: GET /api/reels/player-inline 200 69.6ms
+2026-11-24 13:44:15,982 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,048 INFO sx.access [cc9ecf163c4f49219fd75e6d3ce15ed3]: GET /api/reels/player-inline 200 64.6ms
+2026-11-24 13:44:16,049 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,103 INFO sx.access [1a48ced8acc44c558a0067ff86a56570]: GET /api/reels/player-inline 200 52.7ms
+2026-11-24 13:44:16,104 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,152 INFO sx.access [af8cb34d5e684844af6ba947d83c7b02]: GET /api/reels/player-inline 200 47.9ms
+2026-11-24 13:44:16,153 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,201 INFO sx.access [0f4d97ed09fe4cb8be32b730d48e485f]: GET /api/reels/player-inline 200 46.6ms
+2026-11-24 13:44:16,202 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,256 INFO sx.access [c27ed05f1cca441291923120dd984b4d]: GET /api/reels/player-inline 200 53.9ms
+2026-11-24 13:44:16,258 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,307 INFO sx.access [6b3fc398f33648bcb59073b941a13b6a]: GET /api/reels/player-inline 200 48.4ms
+2026-11-24 13:44:16,309 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,357 INFO sx.access [1c553e845b3945ad87043b5b1d7bee53]: GET /api/reels/player-inline 200 48.2ms
+2026-11-24 13:44:16,359 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,411 INFO sx.access [cf0848012f9f44e3af5fdc44763159d7]: GET /api/reels/player-inline 200 51.4ms
+2026-11-24 13:44:16,412 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,463 INFO sx.access [dd4885f60dda4cc78cb342f8fd2b818a]: GET /api/reels/player-inline 200 50.3ms
+2026-11-24 13:44:16,464 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,512 INFO sx.access [b38763883ab54ffc945fb1cabe95a531]: GET /api/reels/player-inline 200 47.0ms
+2026-11-24 13:44:16,513 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,564 INFO sx.access [aa1122a0a0494c99a8b00f05189c289e]: GET /api/reels/player-inline 200 50.2ms
+2026-11-24 13:44:16,565 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,622 INFO sx.access [e636ff1cf7894df5a954a6809602f623]: GET /api/reels/player-inline 200 55.7ms
+2026-11-24 13:44:16,623 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,673 INFO sx.access [b58c46e575b042129c022fcf8ac9ebe1]: GET /api/reels/player-inline 200 49.8ms
+2026-11-24 13:44:16,674 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,726 INFO sx.access [6573a3495a25405fa147c8d6ac589ca6]: GET /api/reels/player-inline 200 51.2ms
+2026-11-24 13:44:16,728 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,780 INFO sx.access [e711c6628c724578907419e2362a1627]: GET /api/reels/player-inline 200 51.3ms
+2026-11-24 13:44:16,781 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,844 INFO sx.access [6ae567b5176f4acdbeeef878cd0a6e7a]: GET /api/reels/player-inline 200 62.3ms
+2026-11-24 13:44:16,846 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,897 INFO sx.access [7f79e305a05847bf9b6695c1fd22291e]: GET /api/reels/player-inline 200 50.6ms
+2026-11-24 13:44:16,898 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:16,953 INFO sx.access [cece51d083b9435e8b58a492775a192c]: GET /api/reels/player-inline 200 54.2ms
+2026-11-24 13:44:16,954 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,001 INFO sx.access [0007a38ab3184aeaa4dbe0e30861213f]: GET /api/reels/player-inline 200 46.1ms
+2026-11-24 13:44:17,002 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,064 INFO sx.access [41c2e602cebf4baf90ab4a03c48f2df1]: GET /api/reels/player-inline 200 60.9ms
+2026-11-24 13:44:17,065 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,118 INFO sx.access [827453165d6f417db08b5446ecf7ff65]: GET /api/reels/player-inline 200 52.5ms
+2026-11-24 13:44:17,120 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,172 INFO sx.access [736d4cc2bac744b6ad19c76ac966cdd8]: GET /api/reels/player-inline 200 51.5ms
+2026-11-24 13:44:17,173 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,234 INFO sx.access [b014c833d8144649b3fd8984e1bba41d]: GET /api/reels/player-inline 200 60.3ms
+2026-11-24 13:44:17,237 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,305 INFO sx.access [10776fbeb05e4d15a890d59bf216c7e5]: GET /api/reels/player-inline 200 66.6ms
+2026-11-24 13:44:17,306 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,366 INFO sx.access [4c9843c0773443eaa20638aa8f3d0eb5]: GET /api/reels/player-inline 200 59.5ms
+2026-11-24 13:44:17,368 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,417 INFO sx.access [7378d4ddc93d412fbf6a1756ab61b56b]: GET /api/reels/player-inline 200 48.0ms
+2026-11-24 13:44:17,418 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,471 INFO sx.access [426d52a7863b4beb832bc89a66acdf28]: GET /api/reels/player-inline 200 53.0ms
+2026-11-24 13:44:17,472 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,528 INFO sx.access [10225dd4fff145b8bed6983b364f22f1]: GET /api/reels/player-inline 200 54.9ms
+2026-11-24 13:44:17,529 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,581 INFO sx.access [d97f7e61451e4772bef49c51197ad7ae]: GET /api/reels/player-inline 200 51.4ms
+2026-11-24 13:44:17,582 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,635 INFO sx.access [99233d8742954454aeb75ba464290df0]: GET /api/reels/player-inline 200 52.1ms
+2026-11-24 13:44:17,637 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,689 INFO sx.access [5a999376995645d78b381cb22c65d123]: GET /api/reels/player-inline 200 51.6ms
+2026-11-24 13:44:17,692 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,754 INFO sx.access [56575494b846420da7f89a167650ce23]: GET /api/reels/player-inline 200 60.7ms
+2026-11-24 13:44:17,755 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,811 INFO sx.access [b89324b9cde64ef0b42d2e1e27f42233]: GET /api/reels/player-inline 200 55.1ms
+2026-11-24 13:44:17,812 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,866 INFO sx.access [6abd8509668748f8bdedae16cd4c4582]: GET /api/reels/player-inline 200 53.2ms
+2026-11-24 13:44:17,867 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,915 INFO sx.access [26964a3d9d8345c7893b137ec700756d]: GET /api/reels/player-inline 200 47.5ms
+2026-11-24 13:44:17,917 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:17,972 INFO sx.access [c1577ce8b97444769fb98f2114549ddc]: GET /api/reels/player-inline 200 54.2ms
+2026-11-24 13:44:17,973 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:18,031 INFO sx.access [f874bda21c084ba59dce40ae9681029c]: GET /api/reels/player-inline 200 58.0ms
+2026-11-24 13:44:18,032 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:18,088 INFO sx.access [12ba679889fe471eb4f412eb8d8a81dc]: GET /api/reels/player-inline 200 54.3ms
+2026-11-24 13:44:18,089 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:18,141 INFO sx.access [dd84e4f3f3eb49f6bc0e00620070e318]: GET /api/reels/player-inline 200 52.1ms
+2026-11-24 13:44:18,143 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:18,193 INFO sx.access [045b75d45bf84c979a6dd8c5d7272913]: GET /api/reels/player-inline 200 49.2ms
+2026-11-24 13:44:18,194 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:18,239 INFO sx.access [ebc7165fca5d4322971b26f06b52ee8c]: GET /api/reels/player-inline 200 44.8ms
+2026-11-24 13:44:18,241 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:18,291 INFO sx.access [23660e1d615b4dc2a792601403b9625d]: GET /api/reels/player-inline 200 49.0ms
+2026-11-24 13:44:18,292 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:18,380 INFO sx.access [ab574a691445444b9c05e6156bb69d9f]: GET /api/reels/player-inline 200 84.8ms
+2026-11-24 13:44:18,383 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:18,715 INFO sx.access [eaf5b9f4ab024072ba842489afa8d053]: GET /api/reels/player-inline 200 330.9ms
+2026-11-24 13:44:18,718 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:19,235 INFO sx.access [8a6cfcfc41cc48efb1bd9392a1f217f4]: GET /api/reels/player-inline 200 516.0ms
+2026-11-24 13:44:19,238 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:19,345 INFO sx.access [7b816897ca93479396348ea2c2442ca1]: GET /api/reels/player-inline 200 105.6ms
+2026-11-24 13:44:19,347 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:19,441 INFO sx.access [e4b1e2d07beb4a399f53c10a9485ed6d]: GET /api/reels/player-inline 200 92.2ms
+2026-11-24 13:44:19,443 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:19,525 INFO sx.access [04a161b22a9a4905ae84e54b50307d97]: GET /api/reels/player-inline 200 80.7ms
+2026-11-24 13:44:19,527 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:19,684 INFO sx.access [46d38c33a8bd4653a938c8f9a79880fd]: GET /api/reels/player-inline 200 154.6ms
+2026-11-24 13:44:19,688 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:19,782 INFO sx.access [794e9354968a4c89b5b78ebdc48b35b9]: GET /api/reels/player-inline 200 91.4ms
+2026-11-24 13:44:19,784 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:19,871 INFO sx.access [f73fea7f0c7d4382a7e9e751be548f07]: GET /api/reels/player-inline 200 85.9ms
+2026-11-24 13:44:19,873 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:19,950 INFO sx.access [1b75e80d30cf411289e0d2513c28741c]: GET /api/reels/player-inline 200 75.7ms
+2026-11-24 13:44:19,952 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,036 INFO sx.access [08a5b14f38a849cfb4ef7dfafafbec28]: GET /api/reels/player-inline 200 82.6ms
+2026-11-24 13:44:20,038 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,123 INFO sx.access [697bf0a327b4489a9eeb27a87f1840be]: GET /api/reels/player-inline 200 83.0ms
+2026-11-24 13:44:20,126 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,207 INFO sx.access [c6e37cd45e4c4a378c2605570fe9ae51]: GET /api/reels/player-inline 200 78.9ms
+2026-11-24 13:44:20,209 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,283 INFO sx.access [ff874c4d94f5438dac2ece4b197ad15e]: GET /api/reels/player-inline 200 73.0ms
+2026-11-24 13:44:20,284 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,361 INFO sx.access [470b4eea9dc9457abc2707b41138c940]: GET /api/reels/player-inline 200 74.9ms
+2026-11-24 13:44:20,363 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,442 INFO sx.access [af09d584a96f446bb8e5c0b9efa709d4]: GET /api/reels/player-inline 200 77.4ms
+2026-11-24 13:44:20,444 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,541 INFO sx.access [aeeb70a7679c4b3294101e3be8f9795a]: GET /api/reels/player-inline 200 96.2ms
+2026-11-24 13:44:20,543 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,630 INFO sx.access [b31b70de8be544e6b203862589e7afcb]: GET /api/reels/player-inline 200 85.4ms
+2026-11-24 13:44:20,633 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,732 INFO sx.access [e5dde6b1b8a040618556e74ae5e111c8]: GET /api/reels/player-inline 200 97.9ms
+2026-11-24 13:44:20,734 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,832 INFO sx.access [786111d33eb340dc80278e77d6fa2f4e]: GET /api/reels/player-inline 200 96.5ms
+2026-11-24 13:44:20,834 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:20,937 INFO sx.access [42bbb3bf13ea4d0b822c7d75d54d8a3a]: GET /api/reels/player-inline 200 101.2ms
+2026-11-24 13:44:20,939 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,045 INFO sx.access [f07791abcd3f40a8a4fb65ca27261f72]: GET /api/reels/player-inline 200 105.0ms
+2026-11-24 13:44:21,048 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,146 INFO sx.access [659dc58e074b4f8a81cd1812b7ad9821]: GET /api/reels/player-inline 200 96.3ms
+2026-11-24 13:44:21,148 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,247 INFO sx.access [3cc064b39bf0453bb371a20bf840aa95]: GET /api/reels/player-inline 200 97.1ms
+2026-11-24 13:44:21,249 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,338 INFO sx.access [a960a3d84a7d4f129ca53fbac3142b35]: GET /api/reels/player-inline 200 88.0ms
+2026-11-24 13:44:21,340 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,436 INFO sx.access [82fe9f5961be49ecbba4cd604eb04186]: GET /api/reels/player-inline 200 94.4ms
+2026-11-24 13:44:21,438 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,528 INFO sx.access [9f8371348f6046f2b8853d6cc1cc217f]: GET /api/reels/player-inline 200 88.9ms
+2026-11-24 13:44:21,530 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,644 INFO sx.access [b75341c43590464c8d9a61e614e35d63]: GET /api/reels/player-inline 200 112.2ms
+2026-11-24 13:44:21,646 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,742 INFO sx.access [6e3a1ab7a1f7410297ff2360e971a67a]: GET /api/reels/player-inline 200 94.6ms
+2026-11-24 13:44:21,744 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+2026-11-24 13:44:21,839 INFO sx.access [cd847ff2e63f426b9e1f6602ddc6eca8]: GET /api/reels/player-inline 200 93.5ms
+2026-11-24 13:44:21,841 INFO httpx: HTTP Request: GET http://testserver/api/reels/player-inline "HTTP/1.1 200 OK"
+swept-pgss2 /api/reels/player-inline db=postgresql limiter=True: posts=207 bytes=428134 median=54.2ms p95=68.6ms mean=56.3ms
+         3120770 function calls (3102026 primitive calls) in 3.534 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1658 to 103 due to restriction <'server/'>
+   List reduced from 103 to 45 due to restriction <45>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+       30    0.007    0.000    3.275    0.109 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/routers/reels.py:3463(reels_player_inline)
+       30    0.007    0.000    2.982    0.099 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/routers/reels.py:1832(_recommendation_feed_data)
+       30    0.004    0.000    2.139    0.071 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:896(get_reel_page)
+       30    0.004    0.000    1.827    0.061 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:1017(_materialize_reel_page)
+       30    0.007    0.000    0.592    0.020 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:509(_pipeline_context)
+       30    0.000    0.000    0.476    0.016 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/auth.py:424(check)
+       30    0.003    0.000    0.476    0.016 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/auth.py:446(_check_shared)
+       60    0.099    0.002    0.255    0.004 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:228(rerank_page)
+       30    0.000    0.000    0.199    0.007 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:193(_resolve_session)
+       30    0.000    0.000    0.199    0.007 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:133(_new_session)
+       30    0.000    0.000    0.185    0.006 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/routers/reels.py:1247(_hidden_paths)
+       30    0.008    0.000    0.185    0.006 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/safety.py:56(unavailable_media_paths_for_viewer)
+       30    0.001    0.000    0.170    0.006 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:68(rank_candidates)
+       30    0.018    0.001    0.169    0.006 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:145(_ranked_candidates)
+      390    0.001    0.000    0.151    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/observability.py:57(__call__)
+      390    0.000    0.000    0.149    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/security_headers.py:165(__call__)
+      390    0.000    0.000    0.147    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/edge_cache.py:35(__call__)
+       30    0.001    0.000    0.142    0.005 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:165(_purge_actor_history)
+     5790    0.050    0.000    0.134    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:101(_features)
+       30    0.003    0.000    0.126    0.004 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/sources.py:246(gather_source_hits)
+       60    0.000    0.000    0.094    0.002 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/routers/reels.py:3136(_fill_player_data)
+   270000    0.049    0.000    0.073    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:281(<genexpr>)
+       30    0.031    0.001    0.058    0.002 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/sources.py:189(generate)
+       30    0.001    0.000    0.058    0.002 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/routers/reels.py:3404(_inline_player_template)
+       30    0.002    0.000    0.054    0.002 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/routers/reels.py:99(_icon_snippets)
+     5790    0.003    0.000    0.046    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:46(_quality)
+     5790    0.024    0.000    0.042    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:50(stats_quality)
+       30    0.002    0.000    0.042    0.001 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:439(_catalog)
+       30    0.000    0.000    0.039    0.001 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:252(_active_dismissals)
+       30    0.012    0.000    0.026    0.001 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/sources.py:223(generate)
+      120    0.000    0.000    0.023    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/routers/reels.py:3128(_json_for_script)
+       30    0.004    0.000    0.019    0.001 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/sources.py:176(generate)
+      240    0.007    0.000    0.018    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/sources.py:19(_ranked_hits)
+       30    0.002    0.000    0.017    0.001 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/sources.py:83(generate)
+    24840    0.007    0.000    0.010    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/sources.py:89(<genexpr>)
+    24840    0.007    0.000    0.010    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/sources.py:180(<genexpr>)
+       60    0.000    0.000    0.009    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/security_headers.py:183(send_with_headers)
+       60    0.000    0.000    0.008    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/observability.py:84(send_with_id)
+      300    0.000    0.000    0.008    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/routers/reels.py:126(_player_script_url)
+    11580    0.004    0.000    0.007    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:38(_bounded_affinity)
+     5790    0.004    0.000    0.007    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/relatedness.py:156(legacy_prior)
+       30    0.000    0.000    0.006    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/observability.py:68(log_access)
+       30    0.000    0.000    0.005    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/service.py:861(_page_from_request)
+     5790    0.002    0.000    0.005    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/recommendations/ranking.py:219(<lambda>)
+      450    0.001    0.000    0.005    0.000 /Users/hoangleduc/Documents/[ez]/Coding/VR Tiktok/videoextendersquare/server/social/models.py:34(uuid4_string)
+
+
+

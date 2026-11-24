@@ -1,0 +1,15 @@
+95|108.0|1.136|34808|13|2044748|INSERT INTO recommendation_impressions (id, request_id, session_id, post_id, creator_id, position, primary_sou
+95|24.8|0.261|1699|11|0|SELECT anon_1.posts_media_path AS anon_1_posts_media_path FROM (SELECT posts.media_path AS posts_media_path FR
+207|20.7|0.100|3449|0|226919|INSERT INTO posts (id, owner_id, media_path, media_type, title, caption, location, source, status, visibility,
+95|16.5|0.174|4915|0|0|SELECT recommendation_impressions.post_id AS recommendation_impressions_post_id FROM recommendation_impression
+95|14.7|0.155|4915|0|0|SELECT posts.owner_id AS posts_owner_id FROM posts JOIN recommendation_impressions ON recommendation_impressio
+95|14.4|0.152|1254|23|147964|INSERT INTO recommendation_sessions (id, actor_key, user_id, anonymous_id, surface, seed_post_id, filter_hash,
+95|12.9|0.136|665|0|0|SELECT posts.media_path AS posts_media_path, posts.id AS posts_id FROM posts WHERE posts.media_path IN ($1::VA
+95|11.9|0.125|916|4|58382|INSERT INTO recommendation_requests (id, session_id, page_index, requested_count, returned_count, candidate_co
+207|11.3|0.055|2042|0|53947|UPDATE users SET post_count=$1::INTEGER, updated_at=$2::TIMESTAMP WITH TIME ZONE WHERE users.id = $3::VARCHAR
+95|9.6|0.101|618|0|57595|INSERT INTO rate_limit_events (id, key_hash, created_at) SELECT $1::VARCHAR AS anon_1, $2::VARCHAR AS anon_2, 
+95|7.9|0.084|1117|0|8611|UPDATE recommendation_requests SET latency_ms=$1::INTEGER WHERE recommendation_requests.id = $2::VARCHAR
+291|4.3|0.015|2525|2|89951|INSERT INTO post_recommendation_daily_stats (post_id, day, impressions, qualified_views, completions, likes, s
+207|3.2|0.015|208|0|0|SELECT posts.id AS posts_id, posts.owner_id AS posts_owner_id, posts.media_path AS posts_media_path, posts.med
+286|3.1|0.011|0|0|0|BEGIN ISOLATION LEVEL READ COMMITTED
+95|2.6|0.028|350|0|0|SELECT recommendation_sessions.id AS recommendation_sessions_id FROM recommendation_sessions WHERE recommendat

@@ -1,0 +1,3 @@
+label=singapore-r2 at 05:28:19Z colo=SIN loc=SG 
+echo trace: p50=199ms p95=208ms fails=0
+speed.cloudflare 25MB: 7625129 0.00MB/s ttfb=1.233508s total=3.278633s

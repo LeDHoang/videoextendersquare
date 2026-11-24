@@ -19,6 +19,8 @@ A full probe of production after the `852ca88` deploy. It has five parts:
 - **Max concurrent players: about 5 to 7 at an open p95 of 1 s or less, and about 15 at 2 s.** A cold `/reels` open (18 requests) saturates at about 650 to 730 opens per minute from 5 to 10 players up. More players wait longer, but none get an error.
 - **`app-read` is the limit, at its 2-CPU cap.** Postgres and the proxy have room. The writer's DB pool hit 15 of 15 once during the writer-alone run.
 - **From outside, the API costs about 0.3 to 1.1 s TTFB at p50, depending on the location.** Through the VPN, every exit outside Asia is noisy.
+- **After `5c327ce`, the proxy rates held, but the writer-alone player routes fell 12 to 17%.** No request-path code changed. The cause is not known. One candidate is `recommendation_impressions`, which the probes grew to 2.2M rows that are never purged (see "After deploying 5c327ce"). The geo run was not comparable, and the Quest was not run.
+- **After the session sweep (`6c3720e`), r3 is 1 to 13% above the r2 baseline, but still below the 11-22 run on most routes.** The player routes are back to the 11-22 level. The same deploy also carried a bugfix branch, so the gain cannot be put on the sweep alone (see "After the session sweep").
 - **The SPA's `/api/reels` request never hits the edge cache.** The SPA always sends `refresh=false`, and `server/edge_cache.py` treats any `refresh` parameter as a forced re-scan. So the response gets `private, no-store` and Cloudflare reports `BYPASS` in every location (see "Flags"). The fix is made in the working tree but not deployed.
 
 ## After deploying 7ab15a6
@@ -40,6 +42,78 @@ The same player and loopback set was run again on the VPS after `7ab15a6` was de
 | session_spa, sessions per minute | 309 | 367 | 566 | 666 |
 
 The Quest 3 run on this release is in `quest.md`. It covers the time to VR and why reels play choppy in the headset.
+
+## After deploying 5c327ce
+
+The VPS set, the edge probe and Sentry were run again on 2026-11-22 after `5c327ce` was deployed (containers up at 11:26–11:27 UTC). That release gives new video-only uploads and renditions a silent audio track. It does not change the request path. The raw logs are in `raw-5c327ce/`. Every step returned only 200.
+
+- **Edge probe:** 43 of 44 checks pass. The one failure is SIT, as before.
+- **Sentry:** nothing new from this release.
+- **Browser check:** not rerun.
+- **Through the proxy, every route is 2 to 8% below `7ab15a6`.** Each is inside the ±9% run-to-run band, but all ten moved in the same direction.
+- **Max concurrent players is about the same.** Cold `/reels` opens peak at 687 per minute, against 718. At 150 players the open p95 is 22.6 s, against 21.0 s, and the per-request p95 is 4.3 s, against 3.6 s. The `player_inline` route is still flat at about 19 to 20 rps.
+- **On the writer alone, the player routes fell again.** player-inline went from 13.0 to 10.8 rps (−17%), and its p95 at 10 connections from 877 to 1042 ms. The player went from 14.2 to 12.5 rps (−12%). Session starts fell 9 to 11%. The other routes are within ±9%.
+
+| Route | Writer 7ab15a6 (rps) | Writer 5c327ce (rps) | Proxy 7ab15a6 (rps) | Proxy 5c327ce (rps) |
+|---|---|---|---|---|
+| `/api/reels/feed` | 18.1 | 17.8 | 32.7 | 32.0 |
+| `/api/reels/player` | 14.2 | **12.5** | 22.9 | 21.7 |
+| `/api/reels/player-inline` | 13.0 | **10.8** | 21.8 | 20.2 |
+| `/api/reels/tags` | 78.9 | 71.9 | 139.9 | 131.0 |
+| session, sessions per minute | 381 | 345 | 686 | 658 |
+| session_spa, sessions per minute | 367 | 327 | 666 | 620 |
+
+**The writer-alone fall is real. Its cause is not known.**
+
+- `loopback.py player_inline` was run twice more against the writer. Only the console output of those two runs was read, so they are not in `raw-5c327ce/`. All three runs gave 10.5 to 10.8 rps, and the 1-connection p50 was 96 ms in the saved run, against 82 ms on `7ab15a6`. So it is not noise.
+- No code on the request path changed between `7ab15a6` and `5c327ce`.
+- Between the two writer runs, `recommendation_impressions` grew from 1.61M to 2.04M rows (+27%), and the recommendation sessions from 143k to 182k. The probes made almost all of these rows: each request is a new anonymous visitor.
+- The table is now 2.2M rows and 2179 MB, with 842 MB in 8 indexes on random UUID keys. Postgres has `shared_buffers` of 128 MB, so the index pages no longer fit in its cache.
+- These rows are never purged. `_purge_actor_history` in `server/social/recommendations/service.py` deletes an actor's expired sessions only when that same actor starts a new session. A one-time visitor never comes back, so their rows stay.
+
+This makes table growth one candidate, but it does not explain the gap between the two paths. `app-read` runs the same route code against the same database, so it writes the same rows. Yet at 1 connection the proxy p50 for player-inline went only from 90 to 92 ms, while the writer's went from 82 to 96 ms. Something specific to the writer process may also be involved. A sweep of expired sessions and their impressions, followed by a new probe, would test the table-growth part (see "Flags").
+
+**Geo run: not comparable.**
+
+- Vietnam with no VPN (12:37 UTC, colo SIN, loc VN): the trace p50 / p95 was 112 / 1382 ms, against 59 / 119 ms. The 4 MB Range read ran at 0.58 MB/s, against 1.52 MB/s. The 1-player open p50 was 18.8 s, against 9.9 s, from 1 to 2 opens.
+- Singapore (12:42 UTC): the trace p50 was 406 ms, against 66 ms, and 2 trace requests failed with no status. The 5-player open p50 was 28.8 s, against 10.5 s.
+- A control from the Singapore exit showed a trace p50 of 1740 ms and 1.18 MB/s from a third-party download. Requests that end at the edge were slow too. Together with the slow Vietnam trace, this points to a slow client network at that hour rather than the origin.
+- The raw files are kept in `raw-5c327ce/geo-*`. They are not used for any comparison.
+- The other six locations were not run. Rerun them off-peak, near the 05:46 local time of the baseline. Run a location only if its trace p50 is within 1.5× of the baseline and no trace request fails.
+
+**Quest: not run.** The headset was locked. The 19 existing originals still have no audio track until `scripts/batch_silent_audio.py` runs for real. So a rerun on the existing reels should match `raw-quest/`. Only new uploads test the fix.
+
+## After the session sweep (r2, r3)
+
+The VPS set was run twice more on 2026-11-24. The raw logs are in `raw-5c327ce/` with an `-r2` or `-r3` suffix. Every step returned only 200.
+
+- **r2** ran at 12:53 ICT (05:53 UTC), before the sweep was deployed. It is the baseline for r3.
+- **r3** ran at 14:10–15:16 ICT (07:10–08:16 UTC) on `6c3720e`. That deploy adds `sweep_expired_sessions()` to the writer's cleanup loop, plus a bugfix branch. The backlog of expired sessions was drained before the run.
+
+| Route | Writer r1 (rps) | Writer r2 (rps) | Writer r3 (rps) | Proxy r1 (rps) | Proxy r2 (rps) | Proxy r3 (rps) |
+|---|---|---|---|---|---|---|
+| `/api/reels/feed` | 17.8 | 15.2 | 16.1 | 32.0 | 28.8 | 29.8 |
+| `/api/recommendations/creators` | 24.7 | 18.1 | 20.2 | 41.3 | 33.4 | 38.4 |
+| `/api/reels` | 86.3 | 68.2 | 74.4 | 136.7 | 114.5 | 123.5 |
+| `/api/reels/player` | 12.5 | 11.4 | 12.2 | 21.7 | 21.0 | 22.2 |
+| `/api/reels/player-inline` | 10.8 | 10.2 | 10.8 | 20.2 | 19.3 | 19.8 |
+| `/api/reels/tags` | 71.9 | 55.2 | 60.8 | 131.0 | 97.8 | 103.9 |
+| session, sessions per minute | 345 | 320 | 338 | 658 | 555 | 605 |
+| session_spa, sessions per minute | 327 | 290 | 327 | 620 | 525 | 554 |
+
+r1 is the 11-22 run on `5c327ce` (`loopback-writer.log`, `loopback-proxy.log`).
+
+- **r3 is 1 to 13% above r2 on every route, on both paths.** The player routes gained 3 to 8%, which is inside the ±9% run-to-run band. creators, reels, tags and session_spa gained 9 to 13% on the writer.
+- **r3 is still below r1 on most routes.** The player routes are back to r1. The feed, creators, reels and tags stay 9 to 18% below r1 on the writer. All are still well below the 11-12 figures.
+- **Writer p95 at 10 connections in r3:** feed 703 ms, player 922 ms, player-inline 1020 ms. In r2 these were 774, 1019 and 1121 ms.
+- **Max concurrent players:** the `player_inline` peak was 18.7 rps in r2 and 20.1 rps in r3. Cold `/reels` opens peaked at 629 and 731 per minute, against 687 in r1.
+- **The gain cannot be put on the sweep alone.** The same deploy carried the bugfix branch, and r2 is a single run.
+- **The table file did not shrink.** After the sweep, `recommendation_impressions` is 2540 MB with 839,674 live rows and 0 dead rows. A plain VACUUM frees the pages for reuse but keeps the file. `recommendation_sessions` is 237 MB (77,873 rows), `recommendation_requests` 105 MB and `engagement_events` 52 MB.
+- **WAL during r3:** `pg_stat_wal` grew by 1.62 GB, with 450,211 full-page images.
+
+**Locally, table size did not change player-inline.** `profile_inline.py` on Postgres 16 with `SEED_SESSIONS=185000` gave a median of 55.2 ms with 1851 MB of impressions, against 56.0 ms on an empty table. With `SWEEP=1` it gave 54.2 ms. The local Postgres has the default 128 MB `shared_buffers`, like prod, but the local disk and CPU differ. The logs are in `raw-5c327ce/profile-db/`.
+
+The `geo-*-r2` and `control-*-r2` files are kept raw. They are not summarised here.
 
 ## Results
 
@@ -257,6 +331,8 @@ Limits: this is one thread on a laptop, with a synthetic seed and macOS fsync. I
 4. **The DB pool reached 15 of 15** during the writer-alone run at high concurrency.
 5. **SIT is open to the public.** This is already tracked in `docs/to-beta.md`.
 6. **Sentry noise from `REWARDS_DISABLED`,** 61 events in 24 h. It is expected while rewards are off, but it hides real issues.
+7. **Expired recommendation sessions of one-time visitors are never purged.** `_purge_actor_history` runs only when the same actor starts a new session. `recommendation_impressions` is at 2.2M rows and 2179 MB, most of it from probes, and is one candidate for the writer-alone fall after `5c327ce`. A global sweep of expired sessions and their impressions would fix it. Every probe run adds about 400k rows.
+   - **Deployed in `6c3720e`.** `sweep_expired_sessions()` in the writer's cleanup loop deletes sessions expired more than 24 h ago, with their requests and impressions. The backlog was drained by hand on 2026-11-24. `recommendation_impressions` now holds 839,674 live rows. The file stays at 2540 MB.
 
 ## Online capacity / SX_CAPACITY_ONLINE
 
@@ -273,6 +349,9 @@ The rule in `2026-11-12/README.md` is: the writer feed ceiling × 50, rounded do
 - `raw/player-proxy.log`, `raw/loopback-proxy.log`, `raw/loopback-writer.log`: one JSON line per step.
 - `raw/cpu.log`: container CPU and memory, and load, with phase markers.
 - `raw/geo-<location>.json`: one JSON object per location. `raw/geo-<location>.log` holds the progress lines.
+- `raw-after-deploy/`: the VPS set after `7ab15a6`.
+- `raw-5c327ce/`: the VPS set, the edge probe and the two geo runs that are not comparable, after `5c327ce`. The `-r2` and `-r3` files are the runs before and after the session sweep. `profile-db/` holds the local seeded and swept profiles.
+- `raw-quest/` and `quest.md`: the Quest 3 run.
 
 ## How to run
 

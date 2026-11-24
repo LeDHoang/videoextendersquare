@@ -1,0 +1,15 @@
+95|98.0|1.031|31842|0|2020567|INSERT INTO recommendation_impressions (id, request_id, session_id, post_id, creator_id, position, primary_sou
+207|23.3|0.112|3449|0|226919|INSERT INTO posts (id, owner_id, media_path, media_type, title, caption, location, source, status, visibility,
+95|16.6|0.175|726|0|57595|INSERT INTO rate_limit_events (id, key_hash, created_at) SELECT $1::VARCHAR AS anon_1, $2::VARCHAR AS anon_2, 
+95|15.1|0.159|1710|0|597|SELECT anon_1.posts_media_path AS anon_1_posts_media_path FROM (SELECT posts.media_path AS posts_media_path FR
+95|13.0|0.137|665|0|0|SELECT posts.media_path AS posts_media_path, posts.id AS posts_id FROM posts WHERE posts.media_path IN ($1::VA
+207|12.7|0.061|2042|0|53949|UPDATE users SET post_count=$1::INTEGER, updated_at=$2::TIMESTAMP WITH TIME ZONE WHERE users.id = $3::VARCHAR
+95|12.6|0.132|767|0|58505|INSERT INTO recommendation_requests (id, session_id, page_index, requested_count, returned_count, candidate_co
+95|11.8|0.124|1394|10|148423|INSERT INTO recommendation_sessions (id, actor_key, user_id, anonymous_id, surface, seed_post_id, filter_hash,
+95|6.9|0.073|952|0|7506|UPDATE recommendation_requests SET latency_ms=$1::INTEGER WHERE recommendation_requests.id = $2::VARCHAR
+291|4.6|0.016|2525|2|89839|INSERT INTO post_recommendation_daily_stats (post_id, day, impressions, qualified_views, completions, likes, s
+207|2.7|0.013|208|0|0|SELECT posts.id AS posts_id, posts.owner_id AS posts_owner_id, posts.media_path AS posts_media_path, posts.med
+207|2.4|0.011|385|0|0|SELECT post_tags.post_id AS post_tags_post_id, post_tags.tag_id AS post_tags_tag_id, post_tags.created_at AS p
+207|2.2|0.011|414|0|0|SELECT count(*) AS count_1 FROM (SELECT post_likes.id AS post_likes_id, post_likes.user_id AS post_likes_user_
+95|2.0|0.021|0|0|0|SELECT pg_advisory_xact_lock($1::BIGINT) AS pg_advisory_xact_lock_1
+95|1.7|0.018|190|0|0|SELECT recommendation_sessions.id AS recommendation_sessions_id FROM recommendation_sessions WHERE recommendat

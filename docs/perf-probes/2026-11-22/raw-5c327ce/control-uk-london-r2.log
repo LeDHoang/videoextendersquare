@@ -1,0 +1,3 @@
+label=uk-london-r2 at 05:47:09Z colo=LHR loc=GB 
+echo trace: p50=904ms p95=916ms fails=0
+speed.cloudflare 25MB: 4913387 0.00MB/s ttfb=1.186497s total=5.088139s

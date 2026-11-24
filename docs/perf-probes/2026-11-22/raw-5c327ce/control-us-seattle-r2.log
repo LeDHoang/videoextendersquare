@@ -1,0 +1,3 @@
+label=us-seattle-r2 at 05:38:38Z colo=SEA loc=US 
+echo trace: p50=983ms p95=996ms fails=0
+speed.cloudflare 25MB: 4405929 0.00MB/s ttfb=1.267593s total=5.674171s

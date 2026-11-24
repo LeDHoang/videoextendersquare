@@ -1,0 +1,3 @@
+label=germany-frankfurt-r2 at 05:49:53Z colo=FRA loc=DE 
+echo trace: p50=770ms p95=809ms fails=0
+speed.cloudflare 25MB: 7550794 0.00MB/s ttfb=0.962353s total=3.310910s

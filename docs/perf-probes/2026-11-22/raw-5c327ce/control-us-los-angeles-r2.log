@@ -1,0 +1,3 @@
+label=us-los-angeles-r2 at 05:41:22Z colo=SJC loc=US 
+echo trace: p50=752ms p95=858ms fails=0
+speed.cloudflare 25MB: 6887798 0.00MB/s ttfb=0.989489s total=3.629607s

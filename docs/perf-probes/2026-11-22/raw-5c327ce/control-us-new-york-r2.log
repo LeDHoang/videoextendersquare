@@ -1,0 +1,3 @@
+label=us-new-york-r2 at 05:44:25Z colo=EWR loc=US 
+echo trace: p50=1016ms p95=1048ms fails=0
+speed.cloudflare 25MB: 3723635 0.00MB/s ttfb=1.363419s total=6.713868s
