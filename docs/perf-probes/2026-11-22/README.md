@@ -21,6 +21,7 @@ A full probe of production after the `852ca88` deploy. It has five parts:
 - **From outside, the API costs about 0.3 to 1.1 s TTFB at p50, depending on the location.** Through the VPN, every exit outside Asia is noisy.
 - **After `5c327ce`, the proxy rates held, but the writer-alone player routes fell 12 to 17%.** No request-path code changed. The cause is not known. One candidate is `recommendation_impressions`, which the probes grew to 2.2M rows that are never purged (see "After deploying 5c327ce"). The geo run was not comparable, and the Quest was not run.
 - **After the session sweep (`6c3720e`), r3 is 1 to 13% above the r2 baseline, but still below the 11-22 run on most routes.** The player routes are back to the 11-22 level. The same deploy also carried a bugfix branch, so the gain cannot be put on the sweep alone (see "After the session sweep").
+- **After the pipeline-context fix (`20bfb10`), r4 is 23 to 40% above r3 on the feed and player routes, on both paths.** The writer feed is at 22.5 rps, above the 11-12 run. The player routes are still below 11-12. The other routes are flat, and cold `/reels` opens still peak at about 730 per minute (see "After the pipeline-context fix").
 - **The SPA's `/api/reels` request never hits the edge cache.** The SPA always sends `refresh=false`, and `server/edge_cache.py` treats any `refresh` parameter as a forced re-scan. So the response gets `private, no-store` and Cloudflare reports `BYPASS` in every location (see "Flags"). The fix is made in the working tree but not deployed.
 
 ## After deploying 7ab15a6
@@ -114,6 +115,51 @@ r1 is the 11-22 run on `5c327ce` (`loopback-writer.log`, `loopback-proxy.log`).
 **Locally, table size did not change player-inline.** `profile_inline.py` on Postgres 16 with `SEED_SESSIONS=185000` gave a median of 55.2 ms with 1851 MB of impressions, against 56.0 ms on an empty table. With `SWEEP=1` it gave 54.2 ms. The local Postgres has the default 128 MB `shared_buffers`, like prod, but the local disk and CPU differ. The logs are in `raw-5c327ce/profile-db/`.
 
 The `geo-*-r2` and `control-*-r2` files are kept raw. They are not summarised here.
+
+## After the pipeline-context fix (r4)
+
+r4 ran on 2026-11-24 on `20bfb10`, which adds the `perf/pipeline-context-waste` branch to `6c3720e` (see "Less waste in `_pipeline_context`"). No other server code changed. The raw logs are in `raw-5c327ce/` with an `-r4` suffix. Every step returned only 200.
+
+- The run was paused by the operator and resumed on another client network. Part 1 ran at 16:05–16:31 ICT (09:05–09:31 UTC): the player probe and the proxy routes up to `locations_activity`. Part 2 ran at 17:03–17:37 ICT (10:03–10:37 UTC): the last three proxy routes, then the full writer set. Only whole steps were kept. The load average was 0.15 before part 2. The pause marker is in `cpu-r4.log`.
+- The probe runs on the VPS against loopback, so the client network does not enter the figures.
+
+| Route | Writer r3 (rps) | Writer r4 (rps) | Proxy r3 (rps) | Proxy r4 (rps) |
+|---|---|---|---|---|
+| `/api/reels/feed` | 16.1 | **22.5** | 29.8 | **40.5** |
+| `/api/recommendations/creators` | 20.2 | 20.6 | 38.4 | 38.0 |
+| `/api/reels` | 74.4 | 74.6 | 123.5 | 124.6 |
+| `/api/reels/player` | 12.2 | **15.7** | 22.2 | **27.3** |
+| `/api/reels/player-inline` | 10.8 | **13.5** | 19.8 | **25.2** |
+| `/api/reels/tags` | 60.8 | 59.4 | 103.9 | 102.4 |
+| session, sessions per minute | 338 | **416** | 605 | **773** |
+| session_spa, sessions per minute | 327 | **376** | 554 | **729** |
+
+- **The routes that build a pipeline context gained 23 to 40%, on both paths.** The feed gained 40% on the writer and 36% through the proxy. The player gained 29% and 23%, and player-inline 25% and 27%. All are well outside the ±9% run-to-run band.
+- **The other routes are flat.** creators, reels and tags are within ±3%. locations/activity went from 18.1 to 19.9 rps on the writer and stayed at about 19 through the proxy. search/suggestions stayed at about 27 on both paths.
+- **Session starts gained 15 to 32%.** This follows from the feed and player gains, because the session sequence includes both routes.
+- **Latency fell with the rates.** At 1 connection the writer p50 fell from 68 to 49 ms on the feed, 93 to 74 ms on the player and 95 to 77 ms on player-inline. At 10 connections the writer p95 fell from 703 to 505 ms, 922 to 725 ms and 1020 to 853 ms. At 50 connections it fell from 3166 to 2346 ms, 4364 to 3303 ms and 4775 to 3977 ms. The session p95 at 50 fell from 4065 to 3233 ms.
+- **Max concurrent players: more requests per second, but the same cold opens.** The `player_inline` peak through the proxy went from 20.1 to 24.5 rps, about 1470 opens per minute against 1200. Cold `/reels` opens still peak at 731 per minute, and the open p95 at 10 players is 1150 ms, against 1154 ms. At 150 players the open p95 is 22.4 s, against 22.0 s. The per-request p95 fell from 273 to 136 ms at 10 players, and from 3893 to 3453 ms at 150. So a cold open is now held by something other than the pipeline-context routes.
+- **Against r1 and 11-12.** On the writer, the feed, player and player-inline are now above r1 (17.8, 12.5 and 10.8 rps). The feed is also above 11-12 (18.6 rps). The player and player-inline are still below 11-12 (17.7 and 17.5 rps). creators, reels and tags stay 14 to 17% below r1 on the writer.
+- **Unlike r3, this gain can be put on one change.** The deploy carried only the `perf/pipeline-context-waste` branch and docs. r4 is still a single run.
+
+**Against the 11-12 run (`7bf201b`), before the drop.** The drop is the 11-22 run on `852ca88` (see "Results"). The feed is now above 11-12. The player has about two thirds of its drop back, and player-inline about half. player-inline is the largest gap left.
+
+| Route | 11-12 (rps) | 11-22 (rps) | r4 (rps) | r4 as share of 11-12 | Share of the drop recovered |
+|---|---|---|---|---|---|
+| Writer `/api/reels/feed` | 18.6 | 15.1 | 22.5 | 121% | all, and more |
+| Writer `/api/reels/player` | 17.7 | 11.8 | 15.7 | 89% | 66% |
+| Writer `/api/reels/player-inline` | 17.5 | 10.6 | 13.5 | 77% | 42% |
+| Writer session, sessions per minute | 443 | 330 | 416 | 94% | 76% |
+| Writer session_spa, sessions per minute | 430 | 309 | 376 | 87% | 55% |
+| Proxy `/api/reels/feed` | 33.6 | 27.8 | 40.5 | 121% | all, and more |
+| Proxy `/api/reels/player` | 29.3 | 21.2 | 27.3 | 93% | 75% |
+| Proxy `/api/reels/player-inline` | 30.8 | 20.0 | 25.2 | 82% | 48% |
+| Proxy session, sessions per minute | 770 | 596 | 773 | 100% | all |
+| Proxy session_spa, sessions per minute | 772 | 566 | 729 | 94% | 79% |
+
+- **p95 at 10 connections, 11-12 against r4.** On the writer, the feed went from 594 to 505 ms, the player from 656 to 725 ms and player-inline from 629 to 853 ms. Through the proxy, the player went from 412 to 474 ms and player-inline from 434 to 471 ms. So the feed is faster than on 11-12, and the player routes are still slower.
+- **The routes outside the pipeline have slipped since 11-22.** On 11-22 they were close to 11-12. They fell between r1 and r3, and r4 did not bring them back. On the writer, tags went from 81.2 (11-12) and 76.3 (11-22) to 59.4 rps, 73% of 11-12. reels went from 89.2 and 81.5 to 74.6 rps (84%). search/suggestions went from 33.2 and 31.7 to 28.0 rps (84%). creators went from 22.2 and 22.5 to 20.6 rps (93%). Through the proxy these routes are at 77 to 93% of 11-12. This is a second fall, apart from the original drop. Its cause is not known.
+- **Max concurrent players cannot be compared with 11-12.** `player_probe.py` first ran on 11-22. Cold opens are unchanged since then, at about 730 per minute.
 
 ## Results
 
@@ -325,6 +371,8 @@ The ten statements gone are the three actor-affinity reads, two `engagement_even
 
 cProfile inflates ORM-heavy code, so the ms rows overstate the gain. The wall-time rows come from 5 runs of `6c3720e` and 4 of the branch (60 timed requests each), taken in turns. The laptop had a load average of 11–13 at the time, so run medians swung by 30 ms and do not separate the two trees. The low percentiles, which load disturbs least, are about 5 ms lower on the branch. Treat that as an estimate.
 
+**Deployed in `20bfb10`.** On prod the gain is larger than the local estimate: on the writer alone, the feed is up 40%, the player 29% and player-inline 25% (see "After the pipeline-context fix").
+
 ## Not covered
 
 - Signed-in flows and writes: uploads, publish, likes, comments, DMs, billing. Every probe was anonymous and read-only.
@@ -353,7 +401,7 @@ cProfile inflates ORM-heavy code, so the ms rows overstate the gain. The wall-ti
 
 ## Online capacity / SX_CAPACITY_ONLINE
 
-The rule in `2026-11-12/README.md` is: the writer feed ceiling × 50, rounded down for headroom. The writer feed ceiling is now 15.1 rps, so 15.1 × 50 ≈ 755 viewers. That is below the current 800. Set `SX_CAPACITY_ONLINE=650`, which keeps the same headroom as 930 → 800 on 11-12. The watchdog then alerts at 70%, which is 455. Raise it again once the feed regression is fixed and a new probe confirms the ceiling. After `7ab15a6` the writer feed ceiling is 18.1 rps, so 18.1 × 50 ≈ 905 viewers. With the same headroom, that allows about 780.
+The rule in `2026-11-12/README.md` is: the writer feed ceiling × 50, rounded down for headroom. The writer feed ceiling is now 15.1 rps, so 15.1 × 50 ≈ 755 viewers. That is below the current 800. Set `SX_CAPACITY_ONLINE=650`, which keeps the same headroom as 930 → 800 on 11-12. The watchdog then alerts at 70%, which is 455. Raise it again once the feed regression is fixed and a new probe confirms the ceiling. After `7ab15a6` the writer feed ceiling is 18.1 rps, so 18.1 × 50 ≈ 905 viewers. With the same headroom, that allows about 780. After `20bfb10` (r4) the writer feed ceiling is 22.5 rps, so 22.5 × 50 ≈ 1125 viewers. With the same headroom, that allows about 970. This is a single run, and `SX_CAPACITY_ONLINE` was not changed.
 
 ## Files
 
@@ -367,7 +415,7 @@ The rule in `2026-11-12/README.md` is: the writer feed ceiling × 50, rounded do
 - `raw/cpu.log`: container CPU and memory, and load, with phase markers.
 - `raw/geo-<location>.json`: one JSON object per location. `raw/geo-<location>.log` holds the progress lines.
 - `raw-after-deploy/`: the VPS set after `7ab15a6`.
-- `raw-5c327ce/`: the VPS set, the edge probe and the two geo runs that are not comparable, after `5c327ce`. The `-r2` and `-r3` files are the runs before and after the session sweep. `profile-db/` holds the local seeded and swept profiles.
+- `raw-5c327ce/`: the VPS set, the edge probe and the two geo runs that are not comparable, after `5c327ce`. The `-r2` and `-r3` files are the runs before and after the session sweep. The `-r4` files are the run after the pipeline-context fix; each holds both parts of that run. `profile-db/` holds the local seeded and swept profiles.
 - `raw-quest/` and `quest.md`: the Quest 3 run.
 
 ## How to run
