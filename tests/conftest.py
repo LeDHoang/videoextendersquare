@@ -135,10 +135,12 @@ def _fresh_grid_cache():
 
 @pytest.fixture(autouse=True)
 def _fresh_recent_stats():
-    """Last week's daily stats are cached in process memory for every post."""
+    """Last week's daily stats and the lifetime post stats are cached in process
+    memory for every post."""
     from server.social.recommendations import service
 
     service._recent_stats_cache["entry"] = (None, 0.0, {})
+    service._post_stats_cache["entry"] = (0.0, {})
 
 
 @pytest.fixture(autouse=True)

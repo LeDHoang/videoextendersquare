@@ -29,7 +29,7 @@ from server import kill_switch, metrics, quotas
 from server.jobs import job_manager
 from server.read_limit import HEAVY_READ
 from server.settings import is_production
-from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
+from server.social.auth import AuthContext, ensure_anonymous_cookie, get_optional_auth, has_anonymous_cookie, rate_limiter, request_identity, require_admin_csrf, require_auth_csrf, validate_origin
 from server.social.safety import unavailable_media_paths_for_viewer
 from server.social.database import get_db
 from server.social.geo import (
@@ -1981,6 +1981,8 @@ def _recommendation_feed_data(
     elif scope_first is not None:
         scope_order = [path_to_post_id[path] for path in scoped_list if path in path_to_post_id]
 
+    # No valid cookie on the way in: the actor is minted below and has no rows anywhere.
+    fresh_actor = not viewer_id and not has_anonymous_cookie(request)
     anonymous_hash = ensure_anonymous_cookie(request, response)
     actor = actor_identity(viewer_id, None if viewer_id else anonymous_hash)
     feed_filters = {
@@ -2013,6 +2015,7 @@ def _recommendation_feed_data(
             limit=limit,
             pool_only=pool_only,
             extra_post_ids=frozenset(scope_id_order),
+            fresh_actor=fresh_actor,
         )
     except RecommendationCursorError as exc:
         raise HTTPException(
