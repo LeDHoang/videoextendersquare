@@ -1573,6 +1573,7 @@ def _build_payload_entries(
         base["stereo_url"] = stereo["stereo_url"]
         base["stereo_crop"] = stereo["stereo_crop"]
         base["depth_url"] = stereo["depth_url"]
+        base["projection"] = (social_row.get("projection") if social_row is not None else None) or "flat"
         is_stereo = stereo["stereo_layout"] != "mono"
 
 
@@ -1729,6 +1730,7 @@ def _pack_feed_data(
             "stereo_url": card.get("stereo_url"),
             "stereo_crop": bool(card.get("stereo_crop")),
             "depth_url": card.get("depth_url"),
+            "projection": card.get("projection") or "flat",
             "images": card.get("images") or [],
             "dwell_ms": card.get("dwell_ms"),
             "comments": [],

@@ -3096,6 +3096,10 @@
       if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceAspect) {
         WebXRVR.setSourceAspect(item && item.aspect);
       }
+      // Every entry sets it, so a 180/360 post never leaves a flat one on the sphere.
+      if (typeof WebXRVR !== 'undefined' && WebXRVR.setSourceProjection) {
+        WebXRVR.setSourceProjection((item && item.projection) || 'flat');
+      }
     }
     // </reels-stereo>
 
@@ -7545,6 +7549,9 @@
       if (width > 0 && height > 0 && stereoLayout !== 'mono') {
         sideSpecs.appendChild(specChip('3D', stereoLayout === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM'));
       }
+      // A 180° / 360° reel plays wrapped around the viewer in VR; 2D shows the whole frame.
+      const sphere = { equirect180: '180°', equirect360: '360°' }[item.projection];
+      if (sphere) sideSpecs.appendChild(specChip('VR', sphere));
     }
     // Everything in the column that depends on WHICH reel is playing.
     function renderSidePanel() {

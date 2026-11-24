@@ -12,7 +12,7 @@ import StudioStage from './StudioStage.jsx';
 import { ModeChoice, QualityChoice, Step } from './OptionsPanel.jsx';
 import { MODES } from './useExtendConfig.js';
 import PostForm from './PostForm.jsx';
-import { metaStereoCandidate, postSource, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
+import { PROJECTIONS, asIsTargetOf, isSpherical, metaStereoCandidate, postSource, projectionOf, shelfOf, spatialOf, stereoOf } from './mediaItems.js';
 import { onRovingKeyDown } from '../ui/roving.js';
 
 // A result made elsewhere has no upload here; its stage is the square master.
@@ -77,6 +77,41 @@ function StereoChoice({ item, onChange }) {
   );
 }
 
+const PROJECTION_LABELS = { flat: 'FLAT', equirect180: '180°', equirect360: '360°' };
+
+// How VR shows a video: a flat screen, or wrapped around the viewer as a 180° /
+// 360° equirectangular picture. Prefilled from the file's spherical metadata;
+// files without it (an outpaint result) are picked by hand.
+function ProjectionChoice({ item, onChange }) {
+  const value = projectionOf(item);
+  const detected = item.meta?.projection?.method === 'metadata';
+  return (
+    <Step title="VR view">
+      <div className="sx-seg" role="radiogroup" aria-label="VR view" onKeyDown={onRovingKeyDown}>
+        {PROJECTIONS.map((projection) => (
+          <button
+            type="button"
+            key={projection}
+            role="radio"
+            aria-checked={value === projection}
+            tabIndex={value === projection ? 0 : -1}
+            className={value === projection ? 'sx-selected' : ''}
+            onClick={() => onChange({ projectionPick: projection })}
+          >
+            {PROJECTION_LABELS[projection]}
+          </button>
+        ))}
+      </div>
+      <p className="sx-studio-note">
+        {value === 'flat'
+          ? 'Shown on a screen in VR.'
+          : `Wraps around the viewer in VR (${PROJECTION_LABELS[value]} equirectangular). 2D views show the whole frame.`}
+        {detected ? ' Detected from the file\'s spherical metadata.' : ''}
+      </p>
+    </Step>
+  );
+}
+
 function ErrorBox({ title, children }) {
   return (
     <div className="sx-error-box" role="alert">
@@ -123,7 +158,7 @@ export default function MediaDialog({
   const cover = items[0];
   const group = items.length > 1;
   const meta = cover.meta || MASTER_META;
-  const shelf = shelfOf(cover, cfg.asIsShapeFor(meta));
+  const shelf = shelfOf(cover, asIsTargetOf({ ...cover, meta }, cfg));
   const stereo = stereoOf(cover);
   const working = !group && shelf === 'working';
   const render = cover.render;
@@ -146,7 +181,7 @@ export default function MediaDialog({
     && (metaStereoCandidate(cover.meta) || stereoFrame(cover.meta?.width, cover.meta?.height)?.manual);
   const title = group ? `${items.length} images, one post` : cover.name;
   // An upload that already has its shape can be posted as it is, or extended / upscaled first.
-  const asIsChoice = !group && !posted && !render && !stereo && !!cover.meta && !!postSource(cover, cfg.asIsShapeFor(meta)) && (onRedo || onRedoBack);
+  const asIsChoice = !group && !posted && !render && !stereo && !!cover.meta && !!postSource(cover, asIsTargetOf(cover, cfg)) && (onRedo || onRedoBack);
   // Original / Extend shows over the options, and over the post form of such an upload.
   // Posting as it is is Original with no upscale, whatever the options hold.
   const modeChoice = asIsChoice || (makeMode && !group);
@@ -201,7 +236,7 @@ export default function MediaDialog({
           />
           <div className="sx-media-side">
             {stereoChoice ? <StereoChoice item={cover} onChange={onStereo} /> : null}
-            {modeChoice ? <ModeChoice value={shownMode} onChange={pickMode} isVideo={cover.kind === 'video'} /> : null}
+            {modeChoice ? <ModeChoice value={shownMode} onChange={pickMode} isVideo={cover.kind === 'video'} originalOnly={isSpherical(cover)} /> : null}
             {asIsChoice && !makeMode ? (
               <Step title="Quality">
                 <QualityChoice engines={cfg.engines} value="" onChange={(engine) => onPick(shownMode, engine)} />
@@ -295,6 +330,7 @@ export default function MediaDialog({
                   </div>
                 ) : null}
 
+                {!group && cover.kind === 'video' && convert?.status !== 'ready' ? <ProjectionChoice item={cover} onChange={onStereo} /> : null}
                 <PostForm draft={draft} onChange={onDraft} />
                 <Button variant="primary" className="sx-studio-render" disabled={postDisabled} disabledReasons={postReasons} loading={publishing} onClick={onPost}>
                   <SendIcon /> POST

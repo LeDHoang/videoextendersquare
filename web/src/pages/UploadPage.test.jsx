@@ -131,6 +131,11 @@ const META = {
   'phone.png': meta('phone.png', 1200, 2100),
   'pair.png': meta('pair.png', 2304, 2048),
   'tall.png': meta('tall.png', 1200, 1500),
+  'pano.mp4': meta('pano.mp4', 2048, 1024, {
+    duration: 4,
+    stereo: { candidate: 'sbs', detected: false, method: null, score: 0.1 },
+    projection: { projection: 'equirect360', method: 'metadata' },
+  }),
 };
 
 const fileOf = (name) => new File(['x'], name, { type: name.endsWith('.mp4') ? 'video/mp4' : 'image/png' });
@@ -1160,6 +1165,46 @@ describe('UploadPage — 3D stereo posts', () => {
     renderPage();
     await pick(['eyes1.png', 'a.png']);
     expect(await screen.findByRole('button', { name: 'Post 2 as one' })).toHaveAccessibleDescription('3D and flat images cannot share a post.');
+  });
+});
+
+describe('UploadPage — 180°/360° video', () => {
+  const extendCard = () => screen.queryByRole('radio', { name: 'Extend' });
+
+  it('posts a 360 file as it is or upscaled in its own shape, with no Extend, depth or 3D', async () => {
+    mocks.features = { spatial_default: true, stereo_convert: true };
+    mocks.form.mockResolvedValue({ job_id: 'job-up' });
+    renderPage();
+    await pick(['pano.mp4']);
+    // Detected 360: it goes straight to the post form as the Original.
+    expect(await screen.findByRole('button', { name: 'POST' })).toBeInTheDocument();
+    expect(radio('Video Pipeline Mode', 'Original')).toHaveAttribute('aria-checked', 'true');
+    expect(extendCard()).toBeNull();
+    expect(screen.queryByRole('button', { name: /ADD DEPTH FOR VR/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Make 3D' })).toBeNull();
+    // An upscale keeps the shape: quality only, no shape to pick.
+    fireEvent.click(radio('Upscale Engine', 'Fast'));
+    expect(extendCard()).toBeNull();
+    expect(screen.queryByRole('radiogroup', { name: 'Video Shape' })).toBeNull();
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-pano.mp4', upscale_engine: 'fast', upscale_only: 'true' });
+  });
+
+  it('switches a 360 file to Original when Extend was picked for another video', async () => {
+    mocks.form.mockResolvedValue({ job_id: 'job-up' });
+    renderPage();
+    await pick(['portrait.mp4']);
+    await pickFast('1080×1350 ➔ 2048×2048');
+    expect(radio('Video Pipeline Mode', 'Extend')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(button('Close'));
+    await pick(['pano.mp4']);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open pano.mp4' }));
+    await waitFor(() => expect(radio('Video Pipeline Mode', 'Original')).toHaveAttribute('aria-checked', 'true'));
+    expect(extendCard()).toBeNull();
+    fireEvent.click(renderButton());
+    await waitFor(() => expect(mocks.form).toHaveBeenCalledTimes(1));
+    expect(formObject(mocks.form.mock.calls[0][1])).toMatchObject({ stage_id: 'st-pano.mp4', upscale_engine: 'fast', upscale_only: 'true' });
   });
 });
 

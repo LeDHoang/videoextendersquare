@@ -6238,6 +6238,137 @@ test('an SBS source fills a 4096x2048 proxy; each XR eye samples its own half', 
   renderer.stopPreview();
 });
 
+// Where a sphere vertex with texture coordinate (u, v) sits, as a unit direction.
+function sphereDirAt(geo, u, v) {
+  const uv = geo.attributes.uv;
+  const pos = geo.attributes.position;
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < uv.count; i++) {
+    const d = Math.hypot(uv.getX(i) - u, uv.getY(i) - v);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  const p = [pos.getX(best), pos.getY(best), pos.getZ(best)];
+  const r = Math.hypot(...p);
+  return p.map((c) => Math.round((c / r) * 100) / 100 + 0);
+}
+
+test('equirect spheres put the frame centre straight ahead, right on the right, top up', () => {
+  const { renderer, api } = stereoHarness(stereoVideo('eq-geo', 'mono', 2048, 1024));
+  // 360: centre ahead (-Z), quarter points right (+X) and left (-X), the seam behind (+Z).
+  const full = api.sphereGeometry('equirect360');
+  assert.deepEqual(sphereDirAt(full, 0.5, 0.5), [0, 0, -1]);
+  assert.deepEqual(sphereDirAt(full, 0.75, 0.5), [1, 0, 0]);
+  assert.deepEqual(sphereDirAt(full, 0.25, 0.5), [-1, 0, 0]);
+  assert.deepEqual(sphereDirAt(full, 0, 0.5), [0, 0, 1]);
+  assert.deepEqual(sphereDirAt(full, 0.5, 1), [0, 1, 0]);
+  assert.deepEqual(sphereDirAt(full, 0.5, 0), [0, -1, 0]);
+  // 180: the frame spans the front hemisphere, left edge -X to right edge +X.
+  const half = api.sphereGeometry('equirect180');
+  assert.deepEqual(sphereDirAt(half, 0.5, 0.5), [0, 0, -1]);
+  assert.deepEqual(sphereDirAt(half, 1, 0.5), [1, 0, 0]);
+  assert.deepEqual(sphereDirAt(half, 0, 0.5), [-1, 0, 0]);
+  assert.deepEqual(sphereDirAt(half, 0.5, 1), [0, 1, 0]);
+  for (const geo of [full, half]) {
+    const uv = geo.attributes.uv;
+    let [minU, maxU, minV, maxV] = [1, 0, 1, 0];
+    for (let i = 0; i < uv.count; i++) {
+      minV = Math.min(minV, uv.getY(i)); maxV = Math.max(maxV, uv.getY(i));
+      // three nudges pole vertices half a segment sideways; they cover no area.
+      if (uv.getY(i) === 0 || uv.getY(i) === 1) continue;
+      minU = Math.min(minU, uv.getX(i)); maxU = Math.max(maxU, uv.getX(i));
+    }
+    assert.deepEqual([minU, maxU, minV, maxV], [0, 1, 0, 1], 'the whole frame maps onto the sphere');
+  }
+  renderer.stopPreview();
+});
+
+test('a 180 post plays on the sphere instead of the flat screen, and a flat post brings the screen back', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('eq-180', 'mono', 1088, 1088));
+  frame();
+  assert.equal(renderer.getSourceProjection(), 'flat');
+  assert.equal(api.getSphereState().screenVisible, true);
+  renderer.setSourceProjection('equirect180');
+  frame();
+  let state = api.getSphereState();
+  assert.equal(state.projection, 'equirect180');
+  assert.equal(state.geometryFor, 'equirect180');
+  assert.equal(state.screenVisible, false);
+  assert.equal(state.groundGlobeVisible, false);
+  assert.equal(state.mono.visible && state.mono.materialVisible, true);
+  assert.equal(state.mono.mapIsScreen, true);
+  assert.equal(state.left.visible || state.right.visible, false);
+  // Centred on the head.
+  const cam = api.getCamera();
+  assert.deepEqual([...state.position], [cam.position.x, cam.position.y, cam.position.z]);
+  // 360 swaps the geometry on the same mesh.
+  renderer.setSourceProjection('equirect360');
+  frame();
+  assert.equal(api.getSphereState().geometryFor, 'equirect360');
+  // Unknown values and flat posts fall back to the screen.
+  renderer.setSourceProjection('cubemap');
+  frame();
+  state = api.getSphereState();
+  assert.equal(state.projection, 'flat');
+  assert.equal(state.mono.visible, false);
+  assert.equal(state.screenVisible, true);
+  assert.equal(state.groundGlobeVisible, true);
+  renderer.stopPreview();
+});
+
+test('the screen shape button does nothing while a 180/360 post is on the sphere', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('eq-shape', 'mono', 2048, 1024));
+  renderer.setSourceProjection('equirect360');
+  frame();
+  const before = renderer.getCurvatureMode();
+  api.executeControl('curve');
+  assert.equal(renderer.getCurvatureMode(), before);
+  // A flat post gets the button back.
+  renderer.setSourceProjection('flat');
+  frame();
+  api.executeControl('curve');
+  assert.notEqual(renderer.getCurvatureMode(), before);
+  renderer.stopPreview();
+});
+
+test('the sphere faces the head when the post starts, then stays put as the head turns', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('eq-yaw', 'mono', 2048, 1024));
+  api.setPreviewLook(0.6, 0);
+  renderer.setSourceProjection('equirect360');
+  frame();
+  closeTo(api.getSphereState().yaw, 0.6);
+  api.setPreviewLook(-1.1, 0);
+  frame();
+  closeTo(api.getSphereState().yaw, 0.6);
+  // The next post faces the new heading.
+  renderer.setSourceProjection('equirect360');
+  frame();
+  closeTo(api.getSphereState().yaw, -1.1);
+  renderer.stopPreview();
+});
+
+test('a stereo 360 post gives each XR eye its own half on the sphere', () => {
+  const { renderer, api, frame } = stereoHarness(stereoVideo('eq-sbs', 'sbs', 4096, 1024));
+  renderer.setSourceProjection('equirect360');
+  frame();
+  let state = api.getSphereState();
+  // Desktop preview: the left eye on the mono sphere.
+  assert.equal(state.mono.materialVisible, true);
+  assert.equal(state.mono.mapIsLeftEye, true);
+  api.setXrSessionForTest({});
+  frame();
+  state = api.getSphereState();
+  assert.equal(state.mono.visible, true);
+  assert.equal(state.mono.materialVisible, false);
+  assert.equal(state.left.layers, 0b010);
+  assert.equal(state.right.layers, 0b100);
+  assert.equal(state.left.visible && state.right.visible, true);
+  assert.equal(state.left.mapIsLeftEye && state.right.mapIsRightEye, true);
+  assert.equal(api.getSphereState().screenVisible, false);
+  api.setXrSessionForTest(null);
+  renderer.stopPreview();
+});
+
 test('each eye texture re-uploads on every stereo video frame (no first-frame freeze)', () => {
   const source = stereoVideo('sbs-play', 'sbs');
   const { renderer, api, frame, counters } = stereoHarness(source);

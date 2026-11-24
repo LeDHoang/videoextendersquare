@@ -86,9 +86,9 @@ function ChoiceCards({ options, cards, value, onChange, ariaLabel }) {
   );
 }
 
-// Original or Extend (cfg.mode).
-export function ModeChoice({ value, onChange, isVideo }) {
-  return <ChoiceCards options={MODE_ORDER} cards={MODE_CARDS} value={value} onChange={onChange} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />;
+// Original or Extend (cfg.mode); `originalOnly` leaves Extend out (a 180°/360° video).
+export function ModeChoice({ value, onChange, isVideo, originalOnly = false }) {
+  return <ChoiceCards options={originalOnly ? [MODES[1]] : MODE_ORDER} cards={MODE_CARDS} value={value} onChange={onChange} ariaLabel={isVideo ? 'Video Pipeline Mode' : 'Pipeline Mode'} />;
 }
 
 // No upscale, then the kind's engines (cfg.engine; '' is no upscale).

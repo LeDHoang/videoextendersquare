@@ -45,6 +45,7 @@ IMAGE_POST_DWELL_MS = 15_000
 MAX_POST_IMAGES = 10
 # Who can see a post: everyone, or only its owner.
 POST_VISIBILITIES = ("public", "private")
+POST_PROJECTIONS = ("flat", "equirect180", "equirect360")
 
 
 def normalize_media_path(value: str) -> str:
@@ -316,6 +317,7 @@ _RECORD_POST = Bundle(
     Post.height,
     Post.dwell_ms,
     Post.stereo_layout,
+    Post.projection,
     Post.media_files,
 )
 # What public_user and avatar_url read.
@@ -418,6 +420,7 @@ def _load_reel_records(db: Session, normalized: list[str], include_comments: boo
             "height": post.height,
             "aspect": post_aspect(post.width, post.height, post.stereo_layout),
             "stereo_layout": post.stereo_layout or "mono",
+            "projection": post.projection or "flat",
             "media_files": post.media_files,
             **post_image_fields(post, slides_by_post.get(post.id, [])),
             "author_name": owner.username,
@@ -913,9 +916,12 @@ def create_or_update_post(
     slide_paths: list[str] | None = None,
     stereo_layout: str | None = None,
     visibility: str | None = None,
+    projection: str | None = None,
 ) -> Post:
     if visibility is not None and visibility not in POST_VISIBILITIES:
         raise ValueError(f"Unknown post visibility: {visibility!r}")
+    if projection is not None and projection not in POST_PROJECTIONS:
+        raise ValueError(f"Unknown post projection: {projection!r}")
     normalized_path = normalize_media_path(media_path)
     post = db.query(Post).filter(Post.media_path == normalized_path).first()
     created = created_at or utcnow()
@@ -947,6 +953,10 @@ def create_or_update_post(
         post.stereo_layout = stereo_layout if stereo_layout in {"mono", "sbs", "tb"} else "mono"
     elif not post.stereo_layout:
         post.stereo_layout = "mono"
+    if projection is not None:
+        post.projection = projection
+    elif not post.projection:
+        post.projection = "flat"
     apply_media_info(post)
     post.legacy_like_count = max(0, int(legacy_likes or 0))
     post.legacy_view_count = max(0, int(legacy_views or 0))
@@ -1080,6 +1090,7 @@ def post_card(
         "created_at": post.created_at.isoformat() if post.created_at else None,
     }
     card.update(stereo_fields(post.media_path, post.stereo_layout, post.media_files))
+    card["projection"] = post.projection or "flat"
     card.update(shared_preview_urls(post))
     return card
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 
@@ -188,8 +189,8 @@ def fake_ffprobe(monkeypatch, payload):
     monkeypatch.setattr(sd.subprocess, "run", lambda cmd, **kwargs: Done())
 
 
-def meta(layout=None, inverted=False, spherical=False):
-    return {"layout": layout, "inverted": inverted, "spherical": spherical}
+def meta(layout=None, inverted=False, spherical=False, projection=None):
+    return {"layout": layout, "inverted": inverted, "spherical": spherical, "projection": projection}
 
 
 def test_metadata_wins_for_matching_candidate(monkeypatch):
@@ -245,3 +246,90 @@ def test_photo_sphere_still_is_rejected(tmp_path):
     assert sd.image_is_spherical(str(path)) is True
     result = sd.detect_stereo(str(path), 480, 240, kind="image")
     assert result == {"candidate": "sbs", "detected": False, "method": "spherical", "score": None}
+
+
+SPHERICAL = {"side_data_type": "Spherical Mapping", "yaw": 0, "pitch": 0, "roll": 0}
+
+
+@pytest.mark.parametrize("side, width, expected", [
+    ({"projection": "equirectangular"}, 256, "equirect360"),
+    # VR180 as ffprobe prints it: half the span cropped, in pixels.
+    ({"projection": "tiled equirectangular", "bound_left": 129, "bound_right": 127}, 256, "equirect180"),
+    ({"projection": "tiled equirectangular", "bound_left": 0, "bound_right": 0}, 256, "equirect360"),
+    ({"projection": "half equirectangular"}, 256, "equirect180"),
+    # A partial panorama, cubemap and fisheye have no player path.
+    ({"projection": "tiled equirectangular", "bound_left": 64, "bound_right": 64}, 256, None),
+    ({"projection": "cubemap", "padding": 0}, 256, None),
+    ({"projection": "fisheye"}, 256, None),
+])
+def test_side_data_names_the_projection(monkeypatch, side, width, expected):
+    fake_ffprobe(monkeypatch, {"streams": [{"width": width, "side_data_list": [{**SPHERICAL, **side}]}]})
+    found = sd.probe_metadata("x.mp4")
+    assert found["spherical"] is True
+    assert found["projection"] == expected
+    assert sd.detect_projection("x.mp4") == (
+        {"projection": expected, "method": "metadata"} if expected
+        else {"projection": "flat", "method": "unsupported"}
+    )
+
+
+def test_plain_video_is_flat(monkeypatch):
+    fake_ffprobe(monkeypatch, {"streams": [{"width": 256}]})
+    assert sd.detect_projection("x.mp4") == {"projection": "flat", "method": None}
+    # A bare projection tag says spherical but not which kind.
+    fake_ffprobe(monkeypatch, {"streams": [{"tags": {"projection": "equirectangular"}}]})
+    assert sd.detect_projection("x.mp4") == {"projection": "flat", "method": "unsupported"}
+
+
+def _box(kind: bytes, payload: bytes) -> bytes:
+    return struct.pack(">I4s", 8 + len(payload), kind) + payload
+
+
+def _full_box(kind: bytes, payload: bytes) -> bytes:
+    return _box(kind, b"\0\0\0\0" + payload)
+
+
+def _tag_spherical(path: Path, left: int, right: int, st3d: int | None = None) -> None:
+    """Add Spherical Video V2 boxes (sv3d, optional st3d) to the first sample
+    entry of an ffmpeg-written MP4. Its moov follows mdat, so no chunk offset
+    moves; only the enclosing box sizes grow."""
+    equi = _full_box(b"equi", struct.pack(">IIII", 0, 0, left, right))
+    proj = _box(b"proj", _full_box(b"prhd", struct.pack(">iii", 0, 0, 0)) + equi)
+    extra = _box(b"sv3d", _full_box(b"svhd", b"\0") + proj)
+    if st3d is not None:
+        extra = _full_box(b"st3d", bytes([st3d])) + extra
+    data = bytearray(path.read_bytes())
+    parents, start, end = [], 0, len(data)
+    for kind in (b"moov", b"trak", b"mdia", b"minf", b"stbl", b"stsd"):
+        pos = start
+        while struct.unpack_from(">4s", data, pos + 4)[0] != kind:
+            pos += struct.unpack_from(">I", data, pos)[0]
+            assert pos < end, kind
+        parents.append(pos)
+        start, end = pos + 8 + (8 if kind == b"stsd" else 0), pos + struct.unpack_from(">I", data, pos)[0]
+    parents.append(start)
+    at = start + struct.unpack_from(">I", data, start)[0]
+    data[at:at] = extra
+    for offset in parents:
+        struct.pack_into(">I", data, offset, struct.unpack_from(">I", data, offset)[0] + len(extra))
+    path.write_bytes(bytes(data))
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("bounds, st3d, expected", [
+    ((0, 0), None, "equirect360"),
+    ((0x40000000, 0x40000000), None, "equirect180"),
+    ((0x40000000, 0x40000000), 2, "equirect180"),  # VR180 side-by-side
+])
+def test_real_spherical_metadata(tmp_path, bounds, st3d, expected):
+    path = tmp_path / "sphere.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=256x128:d=0.5",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)],
+        check=True,
+    )
+    assert sd.detect_projection(str(path)) == {"projection": "flat", "method": None}
+    _tag_spherical(path, *bounds, st3d=st3d)
+    assert sd.detect_projection(str(path)) == {"projection": expected, "method": "metadata"}
+    if st3d is not None:
+        assert sd.probe_metadata(str(path))["layout"] == "sbs"

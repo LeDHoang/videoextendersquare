@@ -84,6 +84,10 @@ class PublishRequest(BaseModel):
     # Each is stored beside its file as <stem>-depth for the VR player.
     spatial_job_ids: list[str] = []
     visibility: Literal["public", "private"] = "public"
+    # How the VR player maps a video: flat, or a VR180 / 360 equirectangular
+    # panorama on a sphere around the viewer. Picked by hand, since
+    # outpainted panoramas carry no spherical metadata.
+    projection: Literal["flat", "equirect180", "equirect360"] = "flat"
 
     def extras(self) -> list[SlideSource]:
         return self.extra_items or [SlideSource(stage_id=stage_id) for stage_id in self.extra_stage_ids if stage_id]
@@ -199,7 +203,11 @@ def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
     for source in sources:
         info = SM.probe_media_info(source) or {}
         width, height = info.get("width"), info.get("height")
-        if not layout_matches(layout, width, height):
+        # A 360 stereo frame holds one 2:1 panorama per eye: square top-bottom
+        # or 4:1 side-by-side.
+        sphere_pair = req.projection == "equirect360" and width and height and (
+            (layout == "tb" and width == height) or (layout == "sbs" and width == 4 * height))
+        if not layout_matches(layout, width, height) and not sphere_pair:
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -774,6 +782,8 @@ def _publish_upload(
     quotas.check_identity(db, request, context, "publish-hour", hourly_cap, 60 * 60)
     quotas.check_identity(db, request, context, "publish-day", daily_cap, 24 * 60 * 60)
     _check_stereo_pointer(req, context)
+    if req.projection != "flat" and req.kind != "video":
+        raise HTTPException(status_code=422, detail="Only videos can be published as 180° or 360°.")
     src_path, _orig = _resolve_source(req.kind, req.stage_id, req.job_id, request, context)
     extra_sources = _resolve_extra_images(req, request, context)
     _check_stereo_sources(req, [src_path, *extra_sources])
@@ -918,6 +928,7 @@ def _publish_upload(
             source="converted" if _converted_layout(req, context) else "extended" if req.job_id else "upload",
             slide_paths=[target.resolve().relative_to(root).as_posix() for target in extra_dests] if req.kind == "image" else None,
             stereo_layout=req.stereo_layout,
+            projection=req.projection,
             visibility=req.visibility,
         )
         db.commit()

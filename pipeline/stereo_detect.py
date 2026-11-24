@@ -141,12 +141,14 @@ def eye_size(layout: str, width: int, height: int) -> tuple[int, int]:
 def probe_metadata(src: str) -> dict:
     """Stereo/projection facts the container declares for its first video stream.
 
-    Returns ``{"layout", "inverted", "spherical"}``: layout is "sbs" / "tb"
-    (or None), inverted is True when a right-eye-first layout is declared,
-    spherical is True for 360 / VR180 projection metadata. Unreadable files
-    report nothing.
+    Returns ``{"layout", "inverted", "spherical", "projection"}``: layout is
+    "sbs" / "tb" (or None), inverted is True when a right-eye-first layout is
+    declared, spherical is True for 360 / VR180 projection metadata, and
+    projection is the playable kind the "Spherical Mapping" side data names
+    ("equirect360" / "equirect180", see ``_side_data_projection``) or None.
+    Unreadable files report nothing.
     """
-    found = {"layout": None, "inverted": False, "spherical": False}
+    found = {"layout": None, "inverted": False, "spherical": False, "projection": None}
     cmd = [
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_streams", "-show_format", "-of", "json", src,
@@ -168,6 +170,7 @@ def probe_metadata(src: str) -> dict:
         side_type = str(side.get("side_data_type", "")).strip().lower()
         if side_type == "spherical mapping":
             found["spherical"] = True
+            found["projection"] = _side_data_projection(side, stream.get("width"))
             continue
         if side_type != "stereo 3d":
             continue
@@ -190,6 +193,53 @@ def probe_metadata(src: str) -> dict:
     if found["inverted"]:
         found["layout"] = None
     return found
+
+
+def _side_data_projection(side: dict, width) -> str | None:
+    """Playable projection for one ffprobe "Spherical Mapping" entry.
+
+    "equirectangular" is a full 360 x 180 panorama. VR180 files declare
+    "tiled equirectangular" with half the horizontal span cropped away
+    (ffprobe prints the crop as bound_left / bound_right pixels), or Apple's
+    "half equirectangular". Partial panoramas, cubemaps and fisheye frames
+    have no player path, so they report None.
+    """
+    name = str(side.get("projection", "")).strip().lower()
+    if name == "equirectangular":
+        return "equirect360"
+    if name == "half equirectangular":
+        return "equirect180"
+    if name != "tiled equirectangular":
+        return None
+    try:
+        width = int(width)
+        cropped = int(side.get("bound_left", 0)) + int(side.get("bound_right", 0))
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or cropped < 0:
+        return None
+    shown = width / (width + cropped)
+    if shown >= 0.95:
+        return "equirect360"
+    if abs(shown - 0.5) <= 0.05:
+        return "equirect180"
+    return None
+
+
+def detect_projection(src: str) -> dict:
+    """Projection a staged video declares: ``{"projection", "method"}``.
+
+    projection is "equirect360" / "equirect180" from container metadata,
+    else "flat". method is "metadata" when the container names a playable
+    projection, "unsupported" for spherical metadata the player cannot show
+    (cubemap, fisheye, partial panorama, a bare projection tag), else None.
+    Outpainted panoramas carry no metadata, so the upload form lets the
+    user pick the projection by hand.
+    """
+    meta = probe_metadata(src)
+    if meta["projection"]:
+        return {"projection": meta["projection"], "method": "metadata"}
+    return {"projection": "flat", "method": "unsupported" if meta["spherical"] else None}
 
 
 def _is_projection_tag(key: str, value: str) -> bool:

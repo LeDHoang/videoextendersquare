@@ -78,13 +78,17 @@ test('dock header shows a 3D chip only while the reel is drawn per eye', () => {
       get(target, property) { return target[property] ?? (() => {}); },
     });
     api.renderControlsCanvas(ctx, options);
-    const found = labels.find(({ text }) => /^3D /.test(String(text)));
+    const found = labels.find(({ text }) => /^(3D |180° ?|360° ?)/.test(String(text)));
     return found ? found.text : null;
   };
   assert.equal(chip({ item: { title: 'Tron' }, stereo: 'sbs' }), '3D SBS');
   assert.equal(chip({ item: { title: 'Tron' }, stereo: 'tb' }), '3D TB');
   assert.equal(chip({ item: { title: 'Tron' }, stereo: 'mono' }), null);
   assert.equal(chip({ item: { title: 'Tron' } }), null);
+  // A 180/360 reel on the sphere names its projection, with 3D when drawn per eye.
+  assert.equal(chip({ item: { title: 'Pano' }, projection: 'equirect360' }), '360°');
+  assert.equal(chip({ item: { title: 'Pano' }, projection: 'equirect180', stereo: 'sbs' }), '180° 3D');
+  assert.equal(chip({ item: { title: 'Pano' }, projection: 'flat', stereo: 'tb' }), '3D TB');
 });
 
 test('webxr passes the on-screen stereo layout (not the stored one) to the dock', () => {
@@ -92,4 +96,35 @@ test('webxr passes the on-screen stereo layout (not the stored one) to the dock'
   assert.ok(call, 'renderControlsCanvas call present');
   assert.match(webxrSource, /\bconst stereo = textureStereo !== 'mono' && eyeTextures \? textureStereo : 'mono';/);
   assert.match(call[1], /\bstereo,/);
+  // Only a reel actually on the sphere gets the 180°/360° chip.
+  assert.match(webxrSource, /\bconst projection = sphereActive\(\) \? sourceProjection : 'flat';/);
+  assert.match(call[1], /\bprojection,/);
+});
+
+test('dock greys out the screen shape pill while a 180/360 reel is on the sphere', () => {
+  const api = loadCanvas();
+  const curveIndex = api.CTRL_BUTTONS.findIndex((btn) => btn.action === 'curve');
+  // Ink of the DOME caption and the pill's resting fill.
+  const draw = (options) => {
+    let ink = null;
+    const fills = [];
+    const ctx = new Proxy({
+      fillText(text) { if (text === 'DOME') ink = this.fillStyle; },
+      fill() { fills.push(this.fillStyle); },
+      measureText(text) { return { width: String(text).length * 8 }; },
+    }, {
+      get(target, property) { return target[property] ?? (() => {}); },
+      set(target, property, value) { target[property] = value; return true; },
+    });
+    api.renderControlsCanvas(ctx, { item: { title: 'Pano' }, curvatureMode: 1, ...options });
+    return { ink, fills };
+  };
+  const flat = draw({});
+  const sphere = draw({ projection: 'equirect360' });
+  assert.notEqual(sphere.ink, flat.ink);
+  // Hover and press leave the muted pill as it rests.
+  const hovered = draw({ projection: 'equirect180', hoveredButton: curveIndex, pressedButton: curveIndex });
+  assert.equal(hovered.ink, sphere.ink);
+  assert.deepEqual(hovered.fills, sphere.fills);
+  assert.notEqual(draw({ hoveredButton: curveIndex }).ink, flat.ink);
 });

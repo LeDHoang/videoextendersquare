@@ -129,6 +129,8 @@
 
   // Dock header chip shown while a stereo reel is drawn per eye.
   const STEREO_CHIP = { x: 552, y: 8, w: 64, h: 32 };
+  // The chip text for a reel wrapped around the viewer (post projection).
+  const PROJECTION_CHIP_LABELS = { equirect180: '180°', equirect360: '360°' };
 
   function formatTime(s) {
     if (!s || isNaN(s)) return '0:00';
@@ -769,6 +771,7 @@
       notificationText = '',
       notificationUntil = 0,
       stereo = 'mono',
+      projection = 'flat',
       spatial = null,
       guideVisible = false,
       callbacks = {},
@@ -839,17 +842,23 @@
     ctx.font = `13.2px ${TOKENS.font.mono}`;
     ctx.fillText(dispName, 144, 24);
 
-    // 3D chip: the screen is drawn per eye (docs/stereo-3d-reels.md).
-    if (stereo === 'sbs' || stereo === 'tb') {
+    // 3D chip: the screen is drawn per eye (docs/stereo-3d-reels.md). A 180° /
+    // 360° reel names its projection instead, with 3D added when drawn per eye.
+    const perEye = stereo === 'sbs' || stereo === 'tb';
+    const sphere = PROJECTION_CHIP_LABELS[projection] || '';
+    const chipText = sphere ? (perEye ? sphere + ' 3D' : sphere) : (perEye ? (stereo === 'tb' ? '3D TB' : '3D SBS') : '');
+    if (chipText) {
+      ctx.font = `600 12.1px ${TOKENS.font.mono}`;
+      // Grows leftward for a longer label so it stays flush against the comment pill.
+      const chipW = Math.max(STEREO_CHIP.w, Math.ceil(ctx.measureText(chipText).width) + 16);
       // Sits flush against the comment pill; packs step left of the index pill.
-      const chipX = packMode ? STEREO_CHIP.x - 152 : STEREO_CHIP.x;
+      const chipX = (packMode ? STEREO_CHIP.x - 152 : STEREO_CHIP.x) + STEREO_CHIP.w - chipW;
       ctx.fillStyle = T.accent;
-      roundRectPath(ctx, chipX, STEREO_CHIP.y, STEREO_CHIP.w, STEREO_CHIP.h, TOKENS.radiusPx);
+      roundRectPath(ctx, chipX, STEREO_CHIP.y, chipW, STEREO_CHIP.h, TOKENS.radiusPx);
       ctx.fill();
       ctx.fillStyle = T.onAccent;
-      ctx.font = `600 12.1px ${TOKENS.font.mono}`;
       ctx.textAlign = 'center';
-      ctx.fillText(stereo === 'tb' ? '3D TB' : '3D SBS', chipX + STEREO_CHIP.w / 2, 24);
+      ctx.fillText(chipText, chipX + chipW / 2, 24);
       ctx.textAlign = 'left';
     }
 
@@ -940,7 +949,10 @@
       // Side pills: icon, then the live state label.
       if (btn.action === 'mode' || btn.action === 'curve' || btn.action === 'lock' || btn.action === 'mute') {
         const lit = btn.action === 'lock' && lockToViewer;
-        const ink = bodyButton(btn, isHover, isPressed, lit);
+        // A 180° / 360° sphere ignores the screen shape: the pill rests muted.
+        const shapeOff = btn.action === 'curve' && projection !== 'flat';
+        const bodyInk = bodyButton(btn, isHover && !shapeOff, isPressed && !shapeOff, lit);
+        const ink = shapeOff ? T.inkMuted : bodyInk;
         let label, icon = null, glyph = null;
         if (btn.action === 'mode') {
           label = packMode ? 'AUTHORED' : (autoNext ? 'AUTO' : 'LOOP');
@@ -955,7 +967,7 @@
           label = isMuted ? 'UNMUTE' : 'MUTE'; // fix28: the action, not the state
           icon = isMuted ? 'sound-mute' : 'sound-audio';
         }
-        if (icon) drawIcon(ctx, icon, btn.x + 24, cy, 20, ink);
+        if (icon) drawIcon(ctx, icon, btn.x + 24, cy, 20, ink, shapeOff ? T.inkMuted : undefined);
         else drawGlyph(ctx, glyph, btn.x + 24, cy, 15, ink);
         ctx.fillStyle = ink;
         ctx.font = `600 13px ${TOKENS.font.mono}`;
@@ -1269,6 +1281,8 @@
       if (Number(item.width) > 0 && Number(item.height) > 0 && (stereo === 'sbs' || stereo === 'tb')) {
         chips.push({ kind: 'spec', key: '3D', text: stereo === 'sbs' ? 'SIDE-BY-SIDE' : 'TOP-BOTTOM' });
       }
+      const sphere = PROJECTION_CHIP_LABELS[item.projection];
+      if (sphere) chips.push({ kind: 'spec', key: 'VR', text: sphere });
     }
     let chipsEnd = y;
     if (chips.length) {

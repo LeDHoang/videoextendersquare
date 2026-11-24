@@ -22,7 +22,7 @@ from server.billing.parameters import LTX_NEGATIVE_PROMPT, model_defaults, video
 from server.billing.runtime import failure_callback, lifecycle_callback, resolve_fal_key, success_callback
 from server.billing.service import BillingError, create_billing_job, finalize_job_failure, require_billing_secrets, stage_fingerprint
 from pipeline.video_worker import process_video
-from pipeline.stereo_detect import detect_stereo
+from pipeline.stereo_detect import detect_projection, detect_stereo
 from server import media as SM
 from server import upload_log
 from server import output
@@ -192,6 +192,9 @@ def upload_video(
         # Exact 2:1 / 1:2 frames may be full SBS / top-bottom stereo; the
         # Upload Studio pre-selects 3D when this says detected.
         "stereo": detect_stereo(dest_path, shown_w, shown_h, kind="video", duration=dur),
+        # VR180 / 360 metadata pre-selects the projection; outpainted
+        # panoramas carry none, so the Upload Studio also offers it by hand.
+        "projection": detect_projection(dest_path),
     }
 
 

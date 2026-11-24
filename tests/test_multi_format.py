@@ -370,7 +370,7 @@ def test_candidate_layout_never_guesses_9_8_or_8_9(size, layout):
 )
 def test_stereo_publish_accepts_the_six_frame_shapes(monkeypatch, layout, size, ok):
     monkeypatch.setattr(uploads.SM, "probe_media_info", lambda _path: {"width": size[0], "height": size[1]})
-    req = SimpleNamespace(stereo_layout=layout)
+    req = SimpleNamespace(stereo_layout=layout, projection="flat")
     if ok:
         uploads._check_stereo_sources(req, ["a.mp4"])
         return

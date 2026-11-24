@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  emptyDraft, formatLeft, groupProblem, mergeServerRenders, postSource, publishBody, restoredItem, shelfOf, sortItems,
+  emptyDraft, formatLeft, groupProblem, mergeServerRenders, postSource, projectionOf, publishBody, restoredItem, shelfOf, sortItems,
   spatialOf, stagedItem, stereoOf, storedItem, timeLeft,
 } from './mediaItems.js';
 
@@ -92,6 +92,19 @@ describe('publishBody', () => {
     expect(flat.job_id).toBe('j1');
     expect(flat.stereo_layout).toBeUndefined();
     expect(flat.spatial_job_ids).toBeUndefined();
+  });
+
+  it('sends a 180/360 projection for videos: the pick, else the detected one', () => {
+    const plain = item('clip.mp4', 1088, 1088);
+    expect(publishBody([plain], draft, null).projection).toBeUndefined();
+    const made = { ...plain, render: ready('j1'), projectionPick: 'equirect180' };
+    expect(publishBody([made], draft, null)).toMatchObject({ job_id: 'j1', projection: 'equirect180' });
+    const tagged = item('pano.mp4', 2048, 1024, { projection: { projection: 'equirect360', method: 'metadata' } });
+    expect(projectionOf(tagged)).toBe('equirect360');
+    expect(publishBody([{ ...tagged, projectionPick: 'flat' }], draft, null).projection).toBeUndefined();
+    expect(projectionOf({ ...item('a.png', 400, 400), projectionPick: 'equirect360' })).toBe('flat');
+    expect(projectionOf({ ...made, convert: ready('j3d') })).toBe('flat');
+    expect(restoredItem(storedItem(made)).projectionPick).toBe('equirect180');
   });
 
   it('sends the visibility, public unless the draft is private', () => {

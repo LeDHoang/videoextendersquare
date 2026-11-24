@@ -6,7 +6,7 @@ import { matchesTarget } from '../../utils/cloudBilling.js';
 // (the depth version published beside a 2D post). Everything here is pure.
 //
 // item: { id, kind, name, addedAt, lastActionAt, meta, live, stagedAt, file, url,
-//         thumb, stereoOn, stereoPick, checked, draft, render, convert, spatial, posted }
+//         thumb, stereoOn, stereoPick, projectionPick, checked, draft, render, convert, spatial, posted }
 // job:  { jobId, status: 'working' | 'ready' | 'failed' | 'cancelled', result,
 //         state, startedAt, kept, expiresAt }
 
@@ -53,6 +53,7 @@ export function stagedItem(file, meta, kind, now) {
     thumb: null,
     stereoOn: metaStereoDetected(meta),
     stereoPick: null,
+    projectionPick: null,
     checked: true,
     draft: emptyDraft(titleFromName(file.name)),
     render: null,
@@ -68,6 +69,20 @@ export function stereoOf(item) {
   if (!item.stereoOn || !item.live || item.render?.status === 'ready') return null;
   return item.stereoPick || metaStereoCandidate(item.meta) || null;
 }
+
+export const PROJECTIONS = ['flat', 'equirect180', 'equirect360'];
+// How a video is shown in VR: the person's pick, else the file's spherical
+// metadata, else flat. Images and a MAKE 3D result are always flat.
+export function projectionOf(item) {
+  if (item.kind !== 'video' || item.convert?.status === 'ready') return 'flat';
+  return item.projectionPick || item.meta?.projection?.projection || 'flat';
+}
+
+// A 180° or 360° video keeps its panorama only in its own shape: it posts as it
+// is, or upscaled under Original. Extend, a depth version or MAKE 3D would break it.
+export const isSpherical = (item) => projectionOf(item) !== 'flat';
+// The shape `item` must already have to post as it is (see postSource), with its kind's options.
+export const asIsTargetOf = (item, cfg) => (isSpherical(item) ? (cfg.noUpscale ? null : false) : cfg.asIsShapeFor(item.meta));
 
 // What a post of this item points at, or null while it still needs to be made.
 // `target` is the shape a live upload must already have to post as it is
@@ -110,6 +125,7 @@ export function publishBody(items, draft, spatialJobIds) {
   const source = postSource(cover, null);
   const extras = rest.map((item) => postSource(item, null));
   const stereo = stereoOf(cover);
+  const projection = projectionOf(cover);
   const location = draft.location;
   return {
     kind: cover.kind,
@@ -131,6 +147,7 @@ export function publishBody(items, draft, spatialJobIds) {
         ? { extra_stage_ids: extras.map((extra) => extra.stage_id) }
         : { extra_items: extras.map((extra) => (extra.stage_id ? { stage_id: extra.stage_id } : { job_id: extra.job_id })) }),
     ...(stereo && source.stage_id ? { stereo_layout: stereo } : {}),
+    ...(projection !== 'flat' ? { projection } : {}),
     // All slides or none: a failed spatial job publishes the post 2D only.
     ...(spatialJobIds ? { spatial_job_ids: spatialJobIds } : {}),
   };
@@ -271,6 +288,7 @@ export function storedItem(item) {
     thumb: item.thumb,
     stereoOn: item.stereoOn,
     stereoPick: item.stereoPick,
+    projectionPick: item.projectionPick,
     draft: item.draft,
   };
 }
