@@ -481,6 +481,23 @@ def test_personalization_safety_and_creator_suggestions(app):
         assert all(item["recommendation"]["impression_id"] for item in creators.json()["items"])
 
 
+def test_only_a_cookieless_anonymous_request_is_a_fresh_actor(app, monkeypatch):
+    seed_catalog(app)
+    seen = []
+    real = reels.get_reel_page
+    monkeypatch.setattr(reels, "get_reel_page", lambda *a, **k: seen.append(k["fresh_actor"]) or real(*a, **k))
+    params = {"folder": "ALL FOLDERS", "sort": "for_you", "limit": 4}
+    with TestClient(app) as client:
+        assert client.get("/api/reels/feed", params=params).status_code == 200  # no cookie yet
+        assert client.get("/api/reels/feed", params=params).status_code == 200  # the cookie it was given
+        client.cookies.clear()
+        client.cookies.set("echo_anon", "forged.signature")
+        assert client.get("/api/reels/feed", params=params).status_code == 200  # rejected, so minted anew
+        register(client, "freshness")
+        assert client.get("/api/reels/feed", params=params).status_code == 200  # signed in
+    assert seen == [True, False, True, False]
+
+
 def test_inline_player_bootstraps_only_first_page_and_preserves_anonymous_cookie(app):
     seed_catalog(app, creators=5, posts_per_creator=4)
     with TestClient(app) as client:

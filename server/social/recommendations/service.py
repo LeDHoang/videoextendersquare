@@ -392,6 +392,7 @@ def _long_tail_ids(
     actor: ActorIdentity,
     outside: Sequence[CatalogItem],
     seed_ids: list[str],
+    fresh_actor: bool = False,
 ) -> frozenset[str]:
     """Posts past the pool that this viewer likely wants, up to LONG_TAIL_MAX."""
     if not outside:
@@ -408,7 +409,8 @@ def _long_tail_ids(
                 taken += 1
 
     newest_first = sorted(outside, key=lambda item: (item.created_at, item.post_id), reverse=True)
-    top_creators = [
+    # A fresh actor has no affinity rows.
+    top_creators = [] if fresh_actor else [
         row[0]
         for row in db.query(ActorCreatorAffinity.creator_id)
         .filter(ActorCreatorAffinity.actor_key == actor.actor_key, ActorCreatorAffinity.score > 0)
@@ -422,7 +424,7 @@ def _long_tail_ids(
     for creator_id in top_creators:
         take(by_creator.get(creator_id, ())[:5], 5)
 
-    top_tags = {
+    top_tags = set() if fresh_actor else {
         row[0]
         for row in db.query(ActorTagAffinity.tag_id)
         .filter(ActorTagAffinity.actor_key == actor.actor_key, ActorTagAffinity.score > 0)
@@ -487,9 +489,11 @@ def _catalog(
     surface: str,
     extra_post_ids: frozenset[str] = frozenset(),
     capped: bool = True,
+    fresh_actor: bool = False,
 ) -> dict[str, CatalogItem]:
     hidden_users = blocked_user_ids(db, actor.user_id)
-    dismissed_posts, dismissed_creators = _active_dismissals(db, actor.actor_key)
+    # A fresh actor has dismissed nothing.
+    dismissed_posts, dismissed_creators = (set(), set()) if fresh_actor else _active_dismissals(db, actor.actor_key)
     if allowed_post_ids is not None and not allowed_post_ids:
         return {}
     followed = None
@@ -597,6 +601,7 @@ def _pipeline_context(
     capped: bool = True,
     extra_post_ids: frozenset[str] = frozenset(),
     fresh_session: bool = False,
+    fresh_actor: bool = False,
 ) -> PipelineContext:
     # A session created in this request has no impressions and no events yet.
     delivered = set()
@@ -611,7 +616,8 @@ def _pipeline_context(
             .all()
         }
     top_items = 24
-    item_rows = (
+    # A fresh actor (anonymous cookie minted in this request) has no rows anywhere.
+    item_rows = [] if fresh_actor else (
         db.query(ActorItemAffinity)
         .filter(ActorItemAffinity.actor_key == actor.actor_key)
         .order_by(ActorItemAffinity.score.desc(), ActorItemAffinity.last_event_at.desc())
@@ -635,7 +641,8 @@ def _pipeline_context(
 
     if surface != "following" and not pool_only and capped:
         extra_post_ids = extra_post_ids | _long_tail_ids(
-            db, actor=actor, outside=_catalog_pool_order(db)[MAX_CATALOG_SIZE:], seed_ids=seed_ids
+            db, actor=actor, outside=_catalog_pool_order(db)[MAX_CATALOG_SIZE:], seed_ids=seed_ids,
+            fresh_actor=fresh_actor,
         )
     items = _catalog(
         db,
@@ -645,6 +652,7 @@ def _pipeline_context(
         surface=surface,
         extra_post_ids=extra_post_ids,
         capped=capped,
+        fresh_actor=fresh_actor,
     )
     post_ids = set(items)
     # Disliked reels among the candidates; the top-24 rows above hold only the strongest.
@@ -663,7 +671,7 @@ def _pipeline_context(
     tag_ids = {tag_id for item in items.values() for tag_id in item.tag_ids}
 
     creator_affinity = {}
-    if owner_ids:
+    if owner_ids and not fresh_actor:
         creator_affinity = {
             row.creator_id: _score(row)
             for row in db.query(ActorCreatorAffinity)
@@ -674,7 +682,7 @@ def _pipeline_context(
             .all()
         }
     tag_affinity = {}
-    if tag_ids:
+    if tag_ids and not fresh_actor:
         tag_affinity = {
             row.tag_id: _score(row)
             for row in db.query(ActorTagAffinity)
@@ -745,7 +753,7 @@ def _pipeline_context(
     recent_by_post = _recent_stats(db) if post_ids else {}
     recent_stats = {post_id: recent_by_post[post_id] for post_id in post_ids if post_id in recent_by_post}
     following_ids = set()
-    if actor.user_id:
+    if actor.user_id and not fresh_actor:
         following_ids = {
             row[0]
             for row in db.query(Follow.followee_id).filter(Follow.follower_id == actor.user_id).all()
@@ -811,7 +819,10 @@ def _pipeline_context(
     )
     watched_post_ids: frozenset[str] = frozenset()
     # The anonymous grid actor has no ids; its actor_column would match every signed-in event.
-    if manual_order is None and scope_order is None and items and (actor.user_id or actor.anonymous_id):
+    if (
+        manual_order is None and scope_order is None and items and not fresh_actor
+        and (actor.user_id or actor.anonymous_id)
+    ):
         watched_post_ids = frozenset(
             post_id
             for (post_id,) in db.query(EngagementEvent.post_id)
@@ -990,6 +1001,7 @@ def get_reel_page(
     limit: int = DEFAULT_PAGE_SIZE,
     pool_only: bool = False,
     extra_post_ids: frozenset[str] = frozenset(),
+    fresh_actor: bool = False,
 ) -> RecommendationPage:
     started = time.perf_counter()
     limit = max(1, min(int(limit), MAX_PAGE_SIZE))
@@ -1041,6 +1053,7 @@ def get_reel_page(
             extra_post_ids=extra_post_ids,
             # No cursor, or a restart, means _resolve_session built this session just now.
             fresh_session=not cursor or restarted,
+            fresh_actor=fresh_actor,
         )
     except IntegrityError:
         db.rollback()
@@ -1116,6 +1129,7 @@ def _materialize_reel_page(
     pool_only: bool = False,
     extra_post_ids: frozenset[str] = frozenset(),
     fresh_session: bool = False,
+    fresh_actor: bool = False,
 ) -> RecommendationPage:
     context = _pipeline_context(
         db,
@@ -1130,6 +1144,7 @@ def _materialize_reel_page(
         capped=not pool_only,
         extra_post_ids=extra_post_ids,
         fresh_session=fresh_session,
+        fresh_actor=fresh_actor,
     )
     hits = gather_source_hits(context)
     ranked = rank_candidates(context, hits)

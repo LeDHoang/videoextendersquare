@@ -10,7 +10,15 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from server.social.database import Base
-from server.social.models import Post, PostRecommendationStats, PostTag, Tag, User
+from server.social.models import (
+    ActorCreatorAffinity,
+    Post,
+    PostRecommendationStats,
+    PostTag,
+    RecommendationDismissal,
+    Tag,
+    User,
+)
 from server.social.recommendations import actor_identity, service
 from server.social.recommendations.ranking import stats_quality
 
@@ -113,3 +121,46 @@ def test_restarted_session_is_fresh(db, monkeypatch):
     service.get_reel_page(db, actor=actor, filters={"a": 1}, limit=2, cursor=page.next_cursor)
     service.get_reel_page(db, actor=actor, filters={"a": 2}, limit=2, cursor=page.next_cursor)
     assert seen == [True, False, True]
+
+
+def context_for(db, actor, **flags):
+    return service._pipeline_context(
+        db, actor=actor, session=None, surface="for_you", seed_post_id=None,
+        allowed_post_ids=None, manual_order=None, **flags,
+    )
+
+
+AFFINITY = (
+    "FROM actor_item_affinit",
+    "FROM actor_creator_affinit",
+    "FROM actor_tag_affinit",
+    "FROM engagement_events",
+    "FROM recommendation_dismissals",
+    "FROM follows",
+)
+
+
+def test_fresh_actor_reads_no_actor_rows_and_matches_full(db):
+    actor = actor_identity(None, "brand-new")
+    full = context_for(db, actor)
+    db.queries.clear()
+    lean = context_for(db, actor, fresh_actor=True)
+    assert dataclasses.replace(lean, now=full.now) == full
+    assert [table for table in AFFINITY if table in tables(db)] == []
+
+
+def test_creator_affinity_from_a_follow_survives_without_the_flag(db):
+    # A follow writes a creator-affinity row and no item rows (events.py).
+    actor = actor_identity(None, "anon")
+    db.add(ActorCreatorAffinity(actor_key=actor.actor_key, anonymous_id="anon", creator_id="bob",
+                                score=5.0, last_event_at=START))
+    db.commit()
+    assert context_for(db, actor).creator_affinity["bob"] > 0
+
+
+def test_dismissals_still_apply_to_a_returning_actor(db):
+    actor = actor_identity(None, "anon")
+    db.add(RecommendationDismissal(actor_key=actor.actor_key, anonymous_id="anon",
+                                   target_type="post", post_id="p3", reason="not_interested"))
+    db.commit()
+    assert "p3" not in context_for(db, actor).items

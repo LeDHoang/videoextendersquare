@@ -335,6 +335,11 @@ def _verify_anon_cookie(value: str | None, purpose: str = "anon") -> str | None:
     return raw
 
 
+def has_anonymous_cookie(request: Request) -> bool:
+    """True when the request carries a valid anonymous cookie, i.e. a returning visitor."""
+    return _verify_anon_cookie(request.cookies.get(ANON_COOKIE)) is not None
+
+
 def ensure_anonymous_cookie(request: Request, response: Response) -> str:
     value = request.cookies.get(ANON_COOKIE)
     raw = _verify_anon_cookie(value)
