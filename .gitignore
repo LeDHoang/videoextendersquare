@@ -67,3 +67,7 @@ ComfyUI
 /scripts/dev/experiment_fetch_hashtag_reels.py
 /scripts/dev/experiment_seed_insta_reels.py
 /docs/insta-gta6-dataset.md
+
+# VR outpaint 180/360 experiment runs (A/B/C pod runs, fal runs, metrics, logs): local only for now
+/runpod-abc-*/
+/docs/outpaint-fal-*/
