@@ -814,6 +814,97 @@ def test_expired_sessions_and_dismissals_are_purged(app):
         assert remaining == 0
 
 
+def _expire_session(db, session_id: str, *, ago: timedelta) -> None:
+    row = db.get(RecommendationSession, session_id)
+    row.created_at = utcnow() - ago - timedelta(hours=6)
+    row.last_accessed_at = row.created_at
+    row.expires_at = utcnow() - ago
+
+
+def _session_rows(db, session_id: str) -> tuple[bool, int, int]:
+    return (
+        db.get(RecommendationSession, session_id) is not None,
+        db.query(RecommendationRequest).filter(RecommendationRequest.session_id == session_id).count(),
+        db.query(RecommendationImpression).filter(RecommendationImpression.session_id == session_id).count(),
+    )
+
+
+@BOTH_DIALECTS
+def test_sweep_purges_sessions_of_actors_who_never_return(app):
+    from server.social.recommendations import actor_identity, get_reel_page
+
+    seed_catalog(app, creators=2, posts_per_creator=2)
+    filters = {"folder": "ALL FOLDERS", "limit": 2}
+    session_ids = {}
+    with app.state.testing_session() as db:
+        for name in ("gone", "recent", "live"):
+            page = get_reel_page(
+                db, actor=actor_identity(None, f"sweep-{name}"), surface="for_you",
+                filters=filters, cursor=None, limit=2,
+            )
+            assert page.items
+            session_ids[name] = page.session_id
+        gone = db.query(RecommendationImpression).filter(
+            RecommendationImpression.session_id == session_ids["gone"]
+        ).first()
+        event = EngagementEvent(
+            anonymous_id="sweep-gone",
+            post_id=gone.post_id,
+            recommendation_impression_id=gone.id,
+            recommendation_request_id=gone.request_id,
+            recommendation_session_id=gone.session_id,
+            event_type="impression",
+            source="recommendation",
+        )
+        db.add(event)
+        # Past the grace window: nothing reads it any more.
+        _expire_session(db, session_ids["gone"], ago=timedelta(hours=25))
+        # Expired, but a late event from an open tab may still attribute to it.
+        _expire_session(db, session_ids["recent"], ago=timedelta(hours=1))
+        db.commit()
+        event_id = event.id
+        for name in ("gone", "recent", "live"):
+            exists, requests, impressions = _session_rows(db, session_ids[name])
+            assert exists and requests and impressions
+
+    assert service.sweep_expired_sessions() == 1
+
+    with app.state.testing_session() as db:
+        assert _session_rows(db, session_ids["gone"]) == (False, 0, 0)
+        for name in ("recent", "live"):
+            exists, requests, impressions = _session_rows(db, session_ids[name])
+            assert exists and requests and impressions
+        # Engagement history is kept; the database nulls its links (SET NULL FKs).
+        survivor = db.get(EngagementEvent, event_id)
+        assert survivor is not None
+        if db.bind.dialect.name == "postgresql":
+            assert survivor.recommendation_impression_id is None
+            assert survivor.recommendation_session_id is None
+
+
+def test_sweep_deletes_in_bounded_batches(app):
+    with app.state.testing_session() as db:
+        for index in range(5):
+            db.add(RecommendationSession(
+                actor_key=f"anon:sweep-batch-{index}",
+                surface="for_you",
+                filter_hash="x",
+                filters={},
+                algorithm_version="reels-heuristic-v1",
+                status="active",
+                created_at=utcnow() - timedelta(days=3),
+                last_accessed_at=utcnow() - timedelta(days=3),
+                expires_at=utcnow() - timedelta(days=2, minutes=index),
+            ))
+        db.commit()
+
+    assert service.sweep_expired_sessions(batch_size=2, max_batches=2) == 4
+    with app.state.testing_session() as db:
+        assert db.query(RecommendationSession).count() == 1
+    assert service.sweep_expired_sessions(batch_size=2, max_batches=2) == 1
+    assert service.sweep_expired_sessions(batch_size=2, max_batches=2) == 0
+
+
 # --- player-inline wire format: CSS scoping and keyboard wiring ---------------------------------
 
 
