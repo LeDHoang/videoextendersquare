@@ -203,9 +203,11 @@ def _check_stereo_sources(req: "PublishRequest", sources: list[str]) -> None:
     for source in sources:
         info = SM.probe_media_info(source) or {}
         width, height = info.get("width"), info.get("height")
-        # A 360 top-bottom frame is square: one 2:1 panorama per eye.
-        sphere_tb = req.projection == "equirect360" and layout == "tb" and width and width == height
-        if not layout_matches(layout, width, height) and not sphere_tb:
+        # A 360 stereo frame holds one 2:1 panorama per eye: square top-bottom
+        # or 4:1 side-by-side.
+        sphere_pair = req.projection == "equirect360" and width and height and (
+            (layout == "tb" and width == height) or (layout == "sbs" and width == 4 * height))
+        if not layout_matches(layout, width, height) and not sphere_pair:
             raise HTTPException(
                 status_code=422,
                 detail=(

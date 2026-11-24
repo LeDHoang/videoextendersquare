@@ -616,15 +616,16 @@ def test_projection_is_for_videos_only(client, tmp_path):
 
 
 @needs_ffmpeg
-def test_360_top_bottom_stereo_takes_a_square_frame(client, tmp_path):
-    user = _register(client, "sphere_tb")
-    source = tmp_path / "tb360.mp4"
-    _plain_video(source, "256x256")
-    video_router.STAGED_UPLOADS["tb"] = (str(source), time.time(), f"user:{user['id']}")
+@pytest.mark.parametrize("layout, size", [("tb", "256x256"), ("sbs", "512x128")])
+def test_360_stereo_takes_one_2_1_panorama_per_eye(client, tmp_path, layout, size):
+    user = _register(client, f"sphere_{layout}")
+    source = tmp_path / f"{layout}360.mp4"
+    _plain_video(source, size)
+    video_router.STAGED_UPLOADS[layout] = (str(source), time.time(), f"user:{user['id']}")
 
-    body = {"kind": "video", "title": "TB 360", "stage_id": "tb", "stereo_layout": "tb"}
+    body = {"kind": "video", "title": f"{layout} 360", "stage_id": layout, "stereo_layout": layout}
     assert _publish(client, body).status_code == 422
     response = _publish(client, {**body, "projection": "equirect360"})
     assert response.status_code == 200, response.text
     meta = response.json()["meta"]
-    assert (meta["stereo_layout"], meta["projection"]) == ("tb", "equirect360")
+    assert (meta["stereo_layout"], meta["projection"]) == (layout, "equirect360")
