@@ -30,9 +30,12 @@ WORKDIR /app
 # fixed in 3.0.4); drop it once the pinned base image ships the fixed apt.
 # zlib1g is listed for the same reason (CVE-2026-76844, CVE-2026-85091, fixed
 # in 1:1.3.dfsg+really1.3.1-1+deb13u1).
+# libzstd1 is listed for the same reason (CVE-2026-124851, fixed in
+# 1.5.7+dfsg-1+deb13u1).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     apt \
     ffmpeg \
+    libzstd1 \
     procps \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
